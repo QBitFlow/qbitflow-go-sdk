@@ -406,7 +406,7 @@ if status.TxHash != nil {
 
 See the [examples](examples/) directory for complete working examples:
 
--   [basic_payment.go](examples/basic_payment/basic_payment.go) - Basic one-time payment
+-   [basic_payment.go](examples/basic_example/basic_payment.go) - Basic one-time payment
 -   [subscription.go](examples/subscription/subscription.go) - Creating subscriptions
 -   [payg.go](examples/payg/payg.go) - Pay-as-you-go subscriptions
 -   [webhook_handler.go](examples/webhook_handler/webhook_handler.go) - Handling webhooks
