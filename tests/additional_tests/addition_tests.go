@@ -9,7 +9,7 @@ import (
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
 
-const CUSTOMER_UUID = "01997c89-d0e9-7c9a-9886-fe7709919695"
+const CUSTOMER_UUID = "your-customer-uuid-here"
 
 func main() {
 	key := os.Getenv("QBITFLOW_API_KEY")
