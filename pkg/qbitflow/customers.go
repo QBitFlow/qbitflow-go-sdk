@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
 
 type CustomerService struct {
@@ -35,8 +36,8 @@ type UpdateCustomer struct {
 }
 
 // Create creates a new customer with the provided information
-func (s *CustomerService) Create(customer *CreateCustomer) (*models.Customer, error) {
-	var result models.Customer
+func (s *CustomerService) Create(customer *CreateCustomer) (*qbmodels.Customer, error) {
+	var result qbmodels.Customer
 	err := s.client.makeRequest("POST", "/customer/", customer, &result)
 	if err != nil {
 		return nil, err
@@ -45,8 +46,8 @@ func (s *CustomerService) Create(customer *CreateCustomer) (*models.Customer, er
 }
 
 // Get retrieves a customer by their UUID
-func (s *CustomerService) Get(customerUUID string) (*models.Customer, error) {
-	var result models.Customer
+func (s *CustomerService) Get(customerUUID string) (*qbmodels.Customer, error) {
+	var result qbmodels.Customer
 	endpoint := "/customer/uuid/" + customerUUID
 	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {
@@ -55,12 +56,12 @@ func (s *CustomerService) Get(customerUUID string) (*models.Customer, error) {
 	return &result, nil
 }
 
-func (s *CustomerService) GetByEmail(email string) (*models.Customer, error) {
+func (s *CustomerService) GetByEmail(email string) (*qbmodels.Customer, error) {
 	if !strings.Contains(email, "@") {
 		return nil, fmt.Errorf("invalid email address: %s", email)
 	}
 
-	var result models.Customer
+	var result qbmodels.Customer
 	endpoint := "/customer/email/" + email
 	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {
@@ -69,21 +70,24 @@ func (s *CustomerService) GetByEmail(email string) (*models.Customer, error) {
 	return &result, nil
 }
 
-func (s *CustomerService) GetAll() (*models.CursorData[models.Customer], error) {
-	var result models.CursorData[models.Customer]
-	err := s.client.makeRequest("GET", "/customer/all", nil, &result)
+func (s *CustomerService) GetAll(limit *uint16, cursor *string) (*qbmodels.CursorData[qbmodels.Customer], error) {
+	var result qbmodels.CursorData[qbmodels.Customer]
+
+	endpoint := utils.CursorQueryBuilder("/customer/all", limit, cursor)
+
+	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-func (s *CustomerService) Update(customer *UpdateCustomer) (*models.Customer, error) {
+func (s *CustomerService) Update(customer *UpdateCustomer) (*qbmodels.Customer, error) {
 	if customer.UUID == "" {
 		return nil, fmt.Errorf("customer UUID is required for update")
 	}
 
-	var result models.Customer
+	var result qbmodels.Customer
 	err := s.client.makeRequest("PUT", "/customer/", customer, &result)
 	if err != nil {
 		return nil, err

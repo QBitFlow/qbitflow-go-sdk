@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
@@ -14,7 +14,11 @@ var (
 	apiKey     string
 )
 
-var customerUUID string
+var (
+	customerUUID     string
+	createdProductID uint64
+	createdUserID    uint64
+)
 
 // TestMain runs before all tests
 func TestMain(m *testing.M) {
@@ -105,10 +109,30 @@ func TestCustomer(t *testing.T) {
 	})
 
 	t.Run("Get all customers", func(t *testing.T) {
-		_, err := testClient.Customers.GetAll()
+		limit := uint16(2)
+		customers, err := testClient.Customers.GetAll(&limit, nil)
 		if err != nil {
 			t.Fatalf("Failed to get all customers: %v", err)
 		}
+
+		if len(customers.Items) == 0 {
+			t.Error("Expected at least one customer")
+		}
+
+		if !customers.HasMore() {
+			t.Error("Expected more customers for pagination")
+		}
+
+		// Retrieve next page if available
+		nextCustomers, err := testClient.Customers.GetAll(&limit, customers.NextCursor)
+		if err != nil {
+			t.Fatalf("Failed to get next page of customers: %v", err)
+		}
+
+		if len(nextCustomers.Items) == 0 {
+			t.Error("Expected more customers for pagination")
+		}
+
 		t.Logf("Successfully retrieved all customers")
 	})
 
@@ -169,6 +193,8 @@ func TestUsers(t *testing.T) {
 			t.Fatalf("Failed to create user: %v", err)
 		}
 		t.Logf("User created: %d", user.ID)
+
+		createdUserID = user.ID
 	})
 
 	t.Run("Get current user", func(t *testing.T) {
@@ -180,12 +206,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("Get user by ID", func(t *testing.T) {
-		userData := getTestUserData()
-		createdUser, err := testClient.Users.Create(userData)
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
-		retrievedUser, err := testClient.Users.GetByID(createdUser.ID)
+		retrievedUser, err := testClient.Users.GetByID(createdUserID)
 		if err != nil {
 			t.Fatalf("Failed to get user by ID: %v", err)
 		}
@@ -252,16 +273,12 @@ func TestProducts(t *testing.T) {
 			t.Fatalf("Failed to create product: %v", err)
 		}
 		t.Logf("Product created: %d", product.ID)
+
+		createdProductID = product.ID
 	})
 
 	t.Run("Get product by ID", func(t *testing.T) {
-		productData := getTestProductData()
-		createdProduct, err := testClient.Products.Create(productData)
-		if err != nil {
-			t.Fatalf("Failed to create product: %v", err)
-		}
-
-		retrievedProduct, err := testClient.Products.Get(createdProduct.ID)
+		retrievedProduct, err := testClient.Products.Get(createdProductID)
 		if err != nil {
 			t.Fatalf("Failed to get product by ID: %v", err)
 		}
@@ -339,14 +356,9 @@ func TestProducts(t *testing.T) {
 
 func TestAPIKeys(t *testing.T) {
 	t.Run("Create API Key", func(t *testing.T) {
-		user, err := testClient.Users.Create(getTestUserData())
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
-
 		apiKey, err := testClient.ApiKeys.Create(&qbitflow.CreateApiKeyDto{
 			Name:   "Test API Key",
-			UserID: user.ID,
+			UserID: createdUserID,
 			Test:   false,
 		})
 		if err != nil {
@@ -378,14 +390,9 @@ func TestAPIKeys(t *testing.T) {
 	})
 
 	t.Run("Delete API Key", func(t *testing.T) {
-		user, err := testClient.Users.Create(getTestUserData())
-		if err != nil {
-			t.Fatalf("Failed to create user: %v", err)
-		}
-
 		apiKey, err := testClient.ApiKeys.Create(&qbitflow.CreateApiKeyDto{
 			Name:   "Test API Key",
-			UserID: user.ID,
+			UserID: createdUserID,
 			Test:   false,
 		})
 		if err != nil {
@@ -499,7 +506,7 @@ func TestPaymentSession(t *testing.T) {
 	})
 
 	t.Run("Get all payments", func(t *testing.T) {
-		limit := 5
+		limit := uint16(5)
 		payments, err := testClient.Payments.GetAllPayments(&limit, nil)
 		if err != nil {
 			t.Logf("Note: This test requires a valid API key and existing payments")
@@ -514,7 +521,7 @@ func TestPaymentSession(t *testing.T) {
 	})
 
 	t.Run("Get all combined payments", func(t *testing.T) {
-		limit := 5
+		limit := uint16(5)
 		payments, err := testClient.Payments.GetAllCombinedPayments(&limit, nil)
 		if err != nil {
 			t.Logf("Note: This test requires a valid API key and existing payments")
@@ -533,14 +540,14 @@ func TestPaymentSession(t *testing.T) {
 func TestSubscriptionSession(t *testing.T) {
 	t.Run("Create subscription with trial period", func(t *testing.T) {
 		session, err := testClient.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
-			ProductID: 1,
-			Frequency: models.Duration{
+			ProductID: createdProductID,
+			Frequency: qbmodels.Duration{
 				Value: 1,
-				Unit:  models.DurationUnitMonths,
+				Unit:  qbmodels.DurationUnitMonths,
 			},
-			TrialPeriod: &models.Duration{
+			TrialPeriod: &qbmodels.Duration{
 				Value: 7,
-				Unit:  models.DurationUnitDays,
+				Unit:  qbmodels.DurationUnitDays,
 			},
 			SuccessURL:   utils.StringPtr("https://example.com/success"),
 			CancelURL:    utils.StringPtr("https://example.com/cancel"),
@@ -561,10 +568,10 @@ func TestSubscriptionSession(t *testing.T) {
 
 	t.Run("Create subscription without trial", func(t *testing.T) {
 		session, err := testClient.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
-			ProductID: 1,
-			Frequency: models.Duration{
+			ProductID: createdProductID,
+			Frequency: qbmodels.Duration{
 				Value: 1,
-				Unit:  models.DurationUnitMonths,
+				Unit:  qbmodels.DurationUnitMonths,
 			},
 			CustomerUUID: &customerUUID,
 		})
@@ -581,10 +588,10 @@ func TestSubscriptionSession(t *testing.T) {
 
 	t.Run("Get subscription session", func(t *testing.T) {
 		session, err := testClient.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
-			ProductID: 1,
-			Frequency: models.Duration{
+			ProductID: createdProductID,
+			Frequency: qbmodels.Duration{
 				Value: 1,
-				Unit:  models.DurationUnitMonths,
+				Unit:  qbmodels.DurationUnitMonths,
 			},
 			CustomerUUID: &customerUUID,
 		})
@@ -610,10 +617,10 @@ func TestSubscriptionSession(t *testing.T) {
 func TestPAYGSubscription(t *testing.T) {
 	t.Run("Create PAYG subscription with free credits", func(t *testing.T) {
 		session, err := testClient.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
-			ProductID: 1,
-			Frequency: models.Duration{
+			ProductID: createdProductID,
+			Frequency: qbmodels.Duration{
 				Value: 1,
-				Unit:  models.DurationUnitMonths,
+				Unit:  qbmodels.DurationUnitMonths,
 			},
 			FreeCredits:  utils.Float64Ptr(100.0),
 			SuccessURL:   utils.StringPtr("https://example.com/success"),
@@ -635,10 +642,10 @@ func TestPAYGSubscription(t *testing.T) {
 
 	t.Run("Create basic PAYG subscription", func(t *testing.T) {
 		session, err := testClient.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
-			ProductID: 1,
-			Frequency: models.Duration{
+			ProductID: createdProductID,
+			Frequency: qbmodels.Duration{
 				Value: 1,
-				Unit:  models.DurationUnitMonths,
+				Unit:  qbmodels.DurationUnitMonths,
 			},
 			CustomerUUID: &customerUUID,
 		})
@@ -655,10 +662,10 @@ func TestPAYGSubscription(t *testing.T) {
 
 	t.Run("Get PAYG subscription session", func(t *testing.T) {
 		session, err := testClient.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
-			ProductID: 1,
-			Frequency: models.Duration{
+			ProductID: createdProductID,
+			Frequency: qbmodels.Duration{
 				Value: 1,
-				Unit:  models.DurationUnitMonths,
+				Unit:  qbmodels.DurationUnitMonths,
 			},
 			CustomerUUID: &customerUUID,
 		})
@@ -685,7 +692,7 @@ func TestTransactionStatus(t *testing.T) {
 	t.Run("Get non-existent transaction status", func(t *testing.T) {
 		_, err := testClient.TransactionStatus.GetTransactionStatus(
 			"non-existent-uuid",
-			models.TransactionTypeOneTimePayment,
+			qbmodels.TransactionTypeOneTimePayment,
 		)
 
 		if err == nil {
@@ -699,7 +706,7 @@ func TestTransactionStatus(t *testing.T) {
 // TestGetPayments tests payment retrieval
 func TestGetPayments(t *testing.T) {
 	t.Run("Get all payments with pagination", func(t *testing.T) {
-		limit := 10
+		limit := uint16(10)
 		payments, err := testClient.Payments.GetAllPayments(&limit, nil)
 		if err != nil {
 			t.Logf("Note: This test requires a valid API key and existing payments")
@@ -716,7 +723,7 @@ func TestGetPayments(t *testing.T) {
 	})
 
 	t.Run("Get all combined payments", func(t *testing.T) {
-		limit := 10
+		limit := uint16(10)
 		payments, err := testClient.Payments.GetAllCombinedPayments(&limit, nil)
 		if err != nil {
 			t.Logf("Note: This test requires a valid API key")
@@ -733,13 +740,13 @@ func TestGetPayments(t *testing.T) {
 
 // TestDurationUnits tests different duration units
 func TestDurationUnits(t *testing.T) {
-	durations := []models.Duration{
-		{Value: 1, Unit: models.DurationUnitSeconds},
-		{Value: 1, Unit: models.DurationUnitMinutes},
-		{Value: 1, Unit: models.DurationUnitHours},
-		{Value: 1, Unit: models.DurationUnitDays},
-		{Value: 1, Unit: models.DurationUnitWeeks},
-		{Value: 1, Unit: models.DurationUnitMonths},
+	durations := []qbmodels.Duration{
+		{Value: 1, Unit: qbmodels.DurationUnitSeconds},
+		{Value: 1, Unit: qbmodels.DurationUnitMinutes},
+		{Value: 1, Unit: qbmodels.DurationUnitHours},
+		{Value: 1, Unit: qbmodels.DurationUnitDays},
+		{Value: 1, Unit: qbmodels.DurationUnitWeeks},
+		{Value: 1, Unit: qbmodels.DurationUnitMonths},
 	}
 
 	for _, duration := range durations {
@@ -753,15 +760,15 @@ func TestDurationUnits(t *testing.T) {
 
 // TestTransactionTypes tests transaction type constants
 func TestTransactionTypes(t *testing.T) {
-	types := []models.TransactionType{
-		models.TransactionTypeOneTimePayment,
-		models.TransactionTypeCreateSubscription,
-		models.TransactionTypeCancelSubscription,
-		models.TransactionTypeExecuteSubscriptionPayment,
-		models.TransactionTypeCreatePAYGSubscription,
-		models.TransactionTypeCancelPAYGSubscription,
-		models.TransactionTypeIncreaseAllowance,
-		models.TransactionTypeUpdateMaxAmount,
+	types := []qbmodels.TransactionType{
+		qbmodels.TransactionTypeOneTimePayment,
+		qbmodels.TransactionTypeCreateSubscription,
+		qbmodels.TransactionTypeCancelSubscription,
+		qbmodels.TransactionTypeExecuteSubscriptionPayment,
+		qbmodels.TransactionTypeCreatePAYGSubscription,
+		qbmodels.TransactionTypeCancelPAYGSubscription,
+		qbmodels.TransactionTypeIncreaseAllowance,
+		qbmodels.TransactionTypeUpdateMaxAmount,
 	}
 
 	for _, txType := range types {
@@ -775,14 +782,14 @@ func TestTransactionTypes(t *testing.T) {
 
 // TestTransactionStatusValues tests transaction status value constants
 func TestTransactionStatusValues(t *testing.T) {
-	statuses := []models.TransactionStatusValue{
-		models.TransactionStatusCreated,
-		models.TransactionStatusWaitingConfirmation,
-		models.TransactionStatusPending,
-		models.TransactionStatusCompleted,
-		models.TransactionStatusFailed,
-		models.TransactionStatusCancelled,
-		models.TransactionStatusExpired,
+	statuses := []qbmodels.TransactionStatusValue{
+		qbmodels.TransactionStatusCreated,
+		qbmodels.TransactionStatusWaitingConfirmation,
+		qbmodels.TransactionStatusPending,
+		qbmodels.TransactionStatusCompleted,
+		qbmodels.TransactionStatusFailed,
+		qbmodels.TransactionStatusCancelled,
+		qbmodels.TransactionStatusExpired,
 	}
 
 	for _, status := range statuses {

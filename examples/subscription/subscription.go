@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
@@ -19,13 +19,13 @@ func main() {
 	fmt.Println("1. Creating subscription with trial period...")
 	session, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
 		ProductID: 1,
-		Frequency: models.Duration{
+		Frequency: qbmodels.Duration{
 			Value: 1,
-			Unit:  models.DurationUnitMonths,
+			Unit:  qbmodels.DurationUnitMonths,
 		},
-		TrialPeriod: &models.Duration{
+		TrialPeriod: &qbmodels.Duration{
 			Value: 7,
-			Unit:  models.DurationUnitDays,
+			Unit:  qbmodels.DurationUnitDays,
 		},
 		SuccessURL:   utils.StringPtr("https://yoursite.com/subscription/success"),
 		CancelURL:    utils.StringPtr("https://yoursite.com/subscription/cancel"),
@@ -45,9 +45,9 @@ func main() {
 	fmt.Println("2. Creating subscription without trial...")
 	session2, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
 		ProductID: 2,
-		Frequency: models.Duration{
+		Frequency: qbmodels.Duration{
 			Value: 1,
-			Unit:  models.DurationUnitMonths,
+			Unit:  qbmodels.DurationUnitMonths,
 		},
 		SuccessURL:   utils.StringPtr("https://yoursite.com/subscription/success"),
 		CancelURL:    utils.StringPtr("https://yoursite.com/subscription/cancel"),
@@ -160,14 +160,14 @@ func main() {
 	// Example 8: Different subscription frequencies
 	fmt.Println("\n8. Examples of different subscription frequencies...")
 
-	frequencies := []models.Duration{
-		{Value: 1, Unit: models.DurationUnitDays},    // Daily
-		{Value: 1, Unit: models.DurationUnitWeeks},   // Weekly
-		{Value: 2, Unit: models.DurationUnitWeeks},   // Bi-weekly
-		{Value: 1, Unit: models.DurationUnitMonths},  // Monthly
-		{Value: 3, Unit: models.DurationUnitMonths},  // Quarterly
-		{Value: 6, Unit: models.DurationUnitMonths},  // Semi-annually
-		{Value: 12, Unit: models.DurationUnitMonths}, // Annually
+	frequencies := []qbmodels.Duration{
+		{Value: 1, Unit: qbmodels.DurationUnitDays},    // Daily
+		{Value: 1, Unit: qbmodels.DurationUnitWeeks},   // Weekly
+		{Value: 2, Unit: qbmodels.DurationUnitWeeks},   // Bi-weekly
+		{Value: 1, Unit: qbmodels.DurationUnitMonths},  // Monthly
+		{Value: 3, Unit: qbmodels.DurationUnitMonths},  // Quarterly
+		{Value: 6, Unit: qbmodels.DurationUnitMonths},  // Semi-annually
+		{Value: 12, Unit: qbmodels.DurationUnitMonths}, // Annually
 	}
 
 	for _, freq := range frequencies {

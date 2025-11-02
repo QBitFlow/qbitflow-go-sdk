@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
@@ -70,7 +70,7 @@ func main() {
 
 		status, err := client.TransactionStatus.GetTransactionStatus(
 			session.UUID,
-			models.TransactionTypeOneTimePayment,
+			qbmodels.TransactionTypeOneTimePayment,
 		)
 
 		if err != nil {
@@ -81,7 +81,7 @@ func main() {
 			fmt.Printf("  Current Status: %s\n", status.Status)
 
 			// Check if payment is completed
-			if status.Status == models.TransactionStatusCompleted {
+			if status.Status == qbmodels.TransactionStatusCompleted {
 				fmt.Println("  ✅ Payment completed successfully!")
 
 				if status.TxHash != nil {
@@ -89,13 +89,13 @@ func main() {
 				}
 
 				break
-			} else if status.Status == models.TransactionStatusFailed {
+			} else if status.Status == qbmodels.TransactionStatusFailed {
 				fmt.Println("  ❌ Payment failed!")
 				if status.Message != nil {
 					fmt.Printf("  Reason: %s\n", *status.Message)
 				}
 				break
-			} else if status.Status == models.TransactionStatusCancelled {
+			} else if status.Status == qbmodels.TransactionStatusCancelled {
 				fmt.Println("  🚫 Payment cancelled by user")
 				break
 			}
@@ -117,7 +117,7 @@ func main() {
 	fmt.Println("  Verifying transaction on success page...")
 	status, err := client.TransactionStatus.GetTransactionStatus(
 		session.UUID,
-		models.TransactionTypeOneTimePayment,
+		qbmodels.TransactionTypeOneTimePayment,
 	)
 
 	if err != nil {
@@ -125,7 +125,7 @@ func main() {
 	} else {
 		fmt.Printf("  Transaction Status: %s\n", status.Status)
 
-		if status.Status == models.TransactionStatusCompleted {
+		if status.Status == qbmodels.TransactionStatusCompleted {
 			// Step 6: Retrieve payment details
 			fmt.Println("\nStep 6: Retrieving payment details...")
 

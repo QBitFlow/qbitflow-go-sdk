@@ -38,7 +38,7 @@ If you find a bug or have a feature request:
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR_USERNAME/qbitflow-go-sdk.git
+git clone https://github.com/qbitflow/qbitflow-go-sdk.git
 cd qbitflow-go-sdk
 
 # Add upstream remote

@@ -3,7 +3,7 @@ package qbitflow
 import (
 	"fmt"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 )
 
 type UserService struct {
@@ -27,8 +27,8 @@ type UpdateUser struct {
 	OrganizationFeeBps uint16  `json:"organizationFeeBps" binding:"min=0,max=1000"` // Organization fee in bps (0 to 1000). For example, 100 bps = 1%
 }
 
-func (s *UserService) Create(user *CreateUser) (*models.User, error) {
-	var result models.User
+func (s *UserService) Create(user *CreateUser) (*qbmodels.User, error) {
+	var result qbmodels.User
 	err := s.client.makeRequest("POST", "/user/", user, &result)
 	if err != nil {
 		return nil, err
@@ -37,8 +37,8 @@ func (s *UserService) Create(user *CreateUser) (*models.User, error) {
 }
 
 // Get the current user (based on API key)
-func (s *UserService) Get() (*models.User, error) {
-	var result models.User
+func (s *UserService) Get() (*qbmodels.User, error) {
+	var result qbmodels.User
 	err := s.client.makeRequest("GET", "/user/", nil, &result)
 	if err != nil {
 		return nil, err
@@ -47,8 +47,8 @@ func (s *UserService) Get() (*models.User, error) {
 }
 
 // GetByID retrieves a user by their ID (must be an admin to access other users within the organization)
-func (s *UserService) GetByID(userID uint64) (*models.User, error) {
-	var result models.User
+func (s *UserService) GetByID(userID uint64) (*qbmodels.User, error) {
+	var result qbmodels.User
 	endpoint := "/user/id/" + fmt.Sprint(userID)
 	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {
@@ -58,8 +58,8 @@ func (s *UserService) GetByID(userID uint64) (*models.User, error) {
 }
 
 // GetAll retrieves all users in the organization (must be an admin)
-func (s *UserService) GetAll() ([]models.User, error) {
-	var result []models.User
+func (s *UserService) GetAll() ([]qbmodels.User, error) {
+	var result []qbmodels.User
 	err := s.client.makeRequest("GET", "/user/all", nil, &result)
 	if err != nil {
 		return nil, err
@@ -67,8 +67,8 @@ func (s *UserService) GetAll() ([]models.User, error) {
 	return result, nil
 }
 
-func (s *UserService) Update(userID uint64, user *UpdateUser) (*models.User, error) {
-	var result models.User
+func (s *UserService) Update(userID uint64, user *UpdateUser) (*qbmodels.User, error) {
+	var result qbmodels.User
 	endpoint := "/user/" + fmt.Sprint(userID)
 	err := s.client.makeRequest("PUT", endpoint, user, &result)
 	if err != nil {

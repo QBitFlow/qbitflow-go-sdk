@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 )
 
 type ApiKeyService struct {
@@ -19,8 +19,8 @@ type CreateApiKeyDto struct {
 }
 
 type CreatedKeyResponse struct {
-	Data models.ApiKey `json:"data"` // The created API key details
-	Key  string        `json:"key"`  // The actual API key string (only returned upon creation)
+	Data qbmodels.ApiKey `json:"data"` // The created API key details
+	Key  string          `json:"key"`  // The actual API key string (only returned upon creation)
 }
 
 // Create a new API key for the specified user
@@ -34,8 +34,8 @@ func (s *ApiKeyService) Create(apiKey *CreateApiKeyDto) (*CreatedKeyResponse, er
 }
 
 // Get all the API keys for this user (associated with the API key used to make the request)
-func (s *ApiKeyService) GetAll() ([]models.ApiKey, error) {
-	var result []models.ApiKey
+func (s *ApiKeyService) GetAll() ([]qbmodels.ApiKey, error) {
+	var result []qbmodels.ApiKey
 	err := s.client.makeRequest("GET", "/api-key/", nil, &result)
 	if err != nil {
 		return nil, err
@@ -44,8 +44,8 @@ func (s *ApiKeyService) GetAll() ([]models.ApiKey, error) {
 }
 
 // Get the API keys for a specific user (must be an admin to access other users' API keys)
-func (s *ApiKeyService) GetForUser(userID uint64) ([]models.ApiKey, error) {
-	var result []models.ApiKey
+func (s *ApiKeyService) GetForUser(userID uint64) ([]qbmodels.ApiKey, error) {
+	var result []qbmodels.ApiKey
 	endpoint := "/api-key/user/" + fmt.Sprint(userID)
 	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {

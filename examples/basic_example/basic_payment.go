@@ -71,7 +71,7 @@ func main() {
 
 	// Example 4: Get all payments (with pagination)
 	fmt.Println("4. Getting all payments...")
-	limit := 10
+	limit := uint16(10)
 	payments, err := client.Payments.GetAllPayments(&limit, nil)
 	if err != nil {
 		log.Fatalf("Failed to get payments: %v", err)

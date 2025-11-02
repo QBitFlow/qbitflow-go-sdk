@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qberrors "github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 )
 
 const (
@@ -71,14 +71,14 @@ func (c *Client) makeRequest(method, endpoint string, body any, result any) erro
 	if body != nil {
 		jsonData, err := json.Marshal(body)
 		if err != nil {
-			return errors.NewQBitFlowError("failed to marshal request body", 0, err)
+			return qberrors.NewQBitFlowError("failed to marshal request body", 0, err)
 		}
 		reqBody = bytes.NewBuffer(jsonData)
 	}
 
 	req, err := http.NewRequest(method, url, reqBody)
 	if err != nil {
-		return errors.NewQBitFlowError("failed to create request", 0, err)
+		return qberrors.NewQBitFlowError("failed to create request", 0, err)
 	}
 
 	// Set headers
@@ -88,14 +88,14 @@ func (c *Client) makeRequest(method, endpoint string, body any, result any) erro
 	// Make the request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return errors.NewQBitFlowError("request failed", 0, err)
+		return qberrors.NewQBitFlowError("request failed", 0, err)
 	}
 	defer resp.Body.Close()
 
 	// Read response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return errors.NewQBitFlowError("failed to read response body", resp.StatusCode, err)
+		return qberrors.NewQBitFlowError("failed to read response body", resp.StatusCode, err)
 	}
 
 	// Handle error responses
@@ -106,7 +106,7 @@ func (c *Client) makeRequest(method, endpoint string, body any, result any) erro
 	// Parse success response
 	if result != nil {
 		if err := json.Unmarshal(respBody, result); err != nil {
-			return errors.NewQBitFlowError("failed to parse response", resp.StatusCode, err)
+			return qberrors.NewQBitFlowError("failed to parse response", resp.StatusCode, err)
 		}
 	}
 
@@ -117,24 +117,24 @@ func (c *Client) makeRequest(method, endpoint string, body any, result any) erro
 func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 	// Handle bad request, can contain validation errors
 	if statusCode == 400 {
-		var validationErrors errors.ValidationErrors
+		var validationErrors qberrors.ValidationErrors
 		if err := json.Unmarshal(body, &validationErrors); err == nil {
-			return errors.NewValidationErrorFromList(validationErrors)
+			return qberrors.NewValidationErrorFromList(validationErrors)
 		}
 
 		// Try and parse unique validation error
-		var singleError errors.ValidationError
+		var singleError qberrors.ValidationError
 		if err := json.Unmarshal(body, &singleError); err == nil {
 			return &singleError
 		}
 	}
 
-	var errResp models.ErrorResponse
+	var errResp qbmodels.ErrorResponse
 
 	// Try to parse error response
 	if err := json.Unmarshal(body, &errResp); err != nil {
 		// If parsing fails, return generic error
-		return errors.NewQBitFlowError(string(body), statusCode, nil)
+		return qberrors.NewQBitFlowError(string(body), statusCode, nil)
 	}
 
 	message := errResp.Error
@@ -144,10 +144,10 @@ func (c *Client) handleErrorResponse(statusCode int, body []byte) error {
 
 	// Handle 404 specifically
 	if statusCode == 404 {
-		return errors.NewNotFoundError(message)
+		return qberrors.NewNotFoundError(message)
 	}
 
-	return errors.NewQBitFlowError(message, statusCode, nil)
+	return qberrors.NewQBitFlowError(message, statusCode, nil)
 }
 
 // SetBaseURL sets a custom base URL for the client

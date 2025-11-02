@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
@@ -39,13 +39,13 @@ func main() {
 	fmt.Scanln()
 
 	// Retrieve the payment status
-	status, err := client.TransactionStatus.GetTransactionStatus(payment.UUID, models.TransactionTypeOneTimePayment)
+	status, err := client.TransactionStatus.GetTransactionStatus(payment.UUID, qbmodels.TransactionTypeOneTimePayment)
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Printf("Payment status: %v\n", status)
-	if status.Status != models.TransactionStatusCompleted {
+	if status.Status != qbmodels.TransactionStatusCompleted {
 		fmt.Println("Payment not completed. Exiting.")
 		return
 	}
@@ -62,8 +62,8 @@ func main() {
 
 	sub, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
 		ProductID: 1,
-		Frequency: models.Duration{
-			Unit:  models.DurationUnitMonths,
+		Frequency: qbmodels.Duration{
+			Unit:  qbmodels.DurationUnitMonths,
 			Value: 1,
 		},
 		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),
@@ -79,13 +79,13 @@ func main() {
 	fmt.Scanln()
 
 	// Retrieve the subscription status
-	subStatus, err := client.TransactionStatus.GetTransactionStatus(sub.UUID, models.TransactionTypeCreateSubscription)
+	subStatus, err := client.TransactionStatus.GetTransactionStatus(sub.UUID, qbmodels.TransactionTypeCreateSubscription)
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Printf("Subscription status: %v\n", subStatus)
-	if subStatus.Status != models.TransactionStatusCompleted {
+	if subStatus.Status != qbmodels.TransactionStatusCompleted {
 		fmt.Println("Subscription not completed. Exiting.")
 		return
 	}
@@ -129,7 +129,7 @@ func main() {
 
 	paygSub, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
 		ProductID:    1,
-		Frequency:    models.Duration{Unit: models.DurationUnitMonths, Value: 1},
+		Frequency:    qbmodels.Duration{Unit: qbmodels.DurationUnitMonths, Value: 1},
 		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),
 	})
 	if err != nil {
@@ -143,13 +143,13 @@ func main() {
 	fmt.Scanln()
 
 	// Retrieve the PAYG subscription status
-	paygSubStatus, err := client.TransactionStatus.GetTransactionStatus(paygSub.UUID, models.TransactionTypeCreatePAYGSubscription)
+	paygSubStatus, err := client.TransactionStatus.GetTransactionStatus(paygSub.UUID, qbmodels.TransactionTypeCreatePAYGSubscription)
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Printf("PAYG Subscription status: %v\n", paygSubStatus)
-	if paygSubStatus.Status != models.TransactionStatusCompleted {
+	if paygSubStatus.Status != qbmodels.TransactionStatusCompleted {
 		fmt.Println("PAYG Subscription not completed. Exiting.")
 		return
 	}

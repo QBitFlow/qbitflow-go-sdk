@@ -1,4 +1,4 @@
-package models
+package qbmodels
 
 import "time"
 
@@ -155,8 +155,8 @@ type LinkResponse struct {
 	ExpiresAt *int64 `json:"expiresAt,omitempty"`
 }
 
-// StatusResponse represents a status response. It contains the websocket link to monitor the transaction status
-type StatusResponse struct {
+// StatusLinkResponse represents a status response. It contains the websocket link to monitor the transaction status
+type StatusLinkResponse struct {
 	Message    string `json:"message"`
 	StatusLink string `json:"statusLink"`
 }
@@ -168,8 +168,8 @@ type SessionWebhookResponse struct {
 	Session Session           `json:"session"`
 }
 
-// StatusResponseData represents transaction status response data
-type StatusResponseData struct {
+// StatusResponse represents transaction status response data
+type StatusResponse struct {
 	TransactionUUID string            `json:"transactionUuid"`
 	Status          TransactionStatus `json:"status"`
 }

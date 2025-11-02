@@ -3,7 +3,7 @@ package qbitflow
 import (
 	"fmt"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 )
 
 type ProductService struct {
@@ -44,12 +44,12 @@ func (p *UpdateProduct) Validate() error {
 }
 
 // Create creates a new product with the provided information
-func (s *ProductService) Create(product *CreateProduct) (*models.Product, error) {
+func (s *ProductService) Create(product *CreateProduct) (*qbmodels.Product, error) {
 	if err := product.Validate(); err != nil {
 		return nil, err
 	}
 
-	var p models.Product
+	var p qbmodels.Product
 	err := s.client.makeRequest("POST", "/product/", product, &p)
 	if err != nil {
 		return nil, err
@@ -58,8 +58,8 @@ func (s *ProductService) Create(product *CreateProduct) (*models.Product, error)
 }
 
 // Get retrieves a product by its ID
-func (s *ProductService) Get(productID uint64) (*models.Product, error) {
-	var p models.Product
+func (s *ProductService) Get(productID uint64) (*qbmodels.Product, error) {
+	var p qbmodels.Product
 	endpoint := fmt.Sprintf("/product/id/%d", productID)
 	err := s.client.makeRequest("GET", endpoint, nil, &p)
 	if err != nil {
@@ -69,8 +69,8 @@ func (s *ProductService) Get(productID uint64) (*models.Product, error) {
 }
 
 // GetAll retrieves all products
-func (s *ProductService) GetAll() ([]models.Product, error) {
-	var products []models.Product
+func (s *ProductService) GetAll() ([]qbmodels.Product, error) {
+	var products []qbmodels.Product
 	err := s.client.makeRequest("GET", "/product/", nil, &products)
 	if err != nil {
 		return nil, err
@@ -79,12 +79,12 @@ func (s *ProductService) GetAll() ([]models.Product, error) {
 }
 
 // GetByReference retrieves a product by its reference
-func (s *ProductService) GetByReference(reference string) (*models.Product, error) {
+func (s *ProductService) GetByReference(reference string) (*qbmodels.Product, error) {
 	if reference == "" {
 		return nil, fmt.Errorf("product reference cannot be empty")
 	}
 
-	var p models.Product
+	var p qbmodels.Product
 	endpoint := fmt.Sprintf("/product/reference/%s", reference)
 	err := s.client.makeRequest("GET", endpoint, nil, &p)
 	if err != nil {
@@ -94,12 +94,12 @@ func (s *ProductService) GetByReference(reference string) (*models.Product, erro
 }
 
 // Update updates an existing product with the provided information
-func (s *ProductService) Update(productID uint64, product *UpdateProduct) (*models.Product, error) {
+func (s *ProductService) Update(productID uint64, product *UpdateProduct) (*qbmodels.Product, error) {
 	if err := product.Validate(); err != nil {
 		return nil, err
 	}
 
-	var p models.Product
+	var p qbmodels.Product
 	endpoint := fmt.Sprintf("/product/%d", productID)
 	err := s.client.makeRequest("PUT", endpoint, product, &p)
 	if err != nil {

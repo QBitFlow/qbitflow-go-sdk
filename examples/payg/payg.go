@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
 )
@@ -19,9 +19,9 @@ func main() {
 	fmt.Println("1. Creating PAYG subscription with free credits...")
 	session, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
 		ProductID: 1,
-		Frequency: models.Duration{
+		Frequency: qbmodels.Duration{
 			Value: 1,
-			Unit:  models.DurationUnitMonths,
+			Unit:  qbmodels.DurationUnitMonths,
 		},
 		FreeCredits:  utils.Float64Ptr(100.0), // Give 100 free credits to start
 		SuccessURL:   utils.StringPtr("https://yoursite.com/payg/success"),
@@ -42,9 +42,9 @@ func main() {
 	fmt.Println("2. Creating basic PAYG subscription...")
 	session2, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
 		ProductID: 1,
-		Frequency: models.Duration{
+		Frequency: qbmodels.Duration{
 			Value: 1,
-			Unit:  models.DurationUnitMonths,
+			Unit:  qbmodels.DurationUnitMonths,
 		},
 		SuccessURL:   utils.StringPtr("https://yoursite.com/payg/success"),
 		CancelURL:    utils.StringPtr("https://yoursite.com/payg/cancel"),

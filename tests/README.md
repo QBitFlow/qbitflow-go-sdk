@@ -1,4 +1,3 @@
-
 # Integration Tests
 
 This directory contains integration tests for the QBitFlow Go SDK.
@@ -48,45 +47,51 @@ go test -bench=. ./tests/...
 ## Test Categories
 
 ### Unit Tests
-- Client initialization
-- Validation logic
-- Model structures
-- Constants
+
+-   Client initialization
+-   Validation logic
+-   Model structures
+-   Constants
 
 ### Integration Tests
-- Payment session creation
-- Subscription management
-- Transaction status checking
-- Payment retrieval
+
+-   Payment session creation
+-   Subscription management
+-   Transaction status checking
+-   Payment retrieval
 
 **Note:** Integration tests require:
+
 1. A valid QBitFlow API key
 2. Access to the QBitFlow API
 3. May create actual sessions (in test mode if configured)
 
 ## Environment Variables
 
-- `QBITFLOW_API_KEY`: Your QBitFlow API key for integration tests
+-   `QBITFLOW_API_KEY`: Your QBitFlow API key for integration tests
+-   `QBITFLOW_BASE_URL`: (Optional) Custom API base URL for testing against different environments
 
 ## Test Coverage
 
 The test suite covers:
-- ✅ Client initialization and configuration
-- ✅ Payment session creation (product ID and custom)
-- ✅ Subscription session creation
-- ✅ Pay-as-you-go subscription creation
-- ✅ Transaction status checking
-- ✅ Payment retrieval and pagination
-- ✅ Validation error handling
-- ✅ All transaction types and statuses
-- ✅ Duration units
+
+-   ✅ Client initialization and configuration
+-   ✅ Payment session creation (product ID and custom)
+-   ✅ Subscription session creation
+-   ✅ Pay-as-you-go subscription creation
+-   ✅ Transaction status checking
+-   ✅ Payment retrieval and pagination
+-   ✅ Validation error handling
+-   ✅ All transaction types and statuses
+-   ✅ Duration units
 
 ## CI/CD Integration
 
 For CI/CD pipelines, tests that require API access will be skipped if:
-- No API key is provided
-- The API is not accessible
-- The test environment is not configured
+
+-   No API key is provided
+-   The API is not accessible
+-   The test environment is not configured
 
 These tests will log a skip message instead of failing.
 
@@ -116,7 +121,7 @@ func TestNewFeature(t *testing.T) {
     t.Run("success case", func(t *testing.T) {
         // Test implementation
     })
-    
+
     t.Run("error case", func(t *testing.T) {
         // Test implementation
     })
@@ -126,13 +131,17 @@ func TestNewFeature(t *testing.T) {
 ## Troubleshooting
 
 ### Tests Skipping
+
 If tests are being skipped, ensure:
-- `QBITFLOW_API_KEY` environment variable is set
-- API key is valid and has proper permissions
-- You have network access to the QBitFlow API
+
+-   `QBITFLOW_API_KEY` environment variable is set
+-   API key is valid and has proper permissions
+-   You have network access to the QBitFlow API
 
 ### Tests Failing
+
 If tests are failing:
+
 1. Check the error messages in test output
 2. Verify your API key is correct
 3. Ensure the API endpoint is accessible
@@ -142,6 +151,7 @@ If tests are failing:
 ## Contact
 
 For issues with tests or test infrastructure:
-- Open an issue on GitHub
-- Contact the development team
-- Check the main README for support information
+
+-   Open an issue on GitHub
+-   Contact the development team
+-   Check the main README for support information
