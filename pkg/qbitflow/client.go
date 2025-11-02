@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://api.qbitflow.app"
+	defaultBaseURL = "https://api.qbitflow.app/v1"
 	defaultTimeout = 30 * time.Second
 )
 

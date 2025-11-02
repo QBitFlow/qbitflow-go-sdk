@@ -89,7 +89,7 @@ func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("⚠️  Unhandled status: %s\n", webhook.Status.Status)
 	}
 
-	// Send success response
+	// Always respond with 200 OK
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "ok",
