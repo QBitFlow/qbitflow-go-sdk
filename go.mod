@@ -1,3 +1,3 @@
-module github.com/QBitFlow/qbitflow-go-sdk
+module github.com/qbitflow/qbitflow-go-sdk
 
 go 1.25.1
