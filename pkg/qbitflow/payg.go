@@ -3,7 +3,7 @@ package qbitflow
 import (
 	"fmt"
 
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 )
 
 // PayAsYouGoService handles pay-as-you-go subscription operations

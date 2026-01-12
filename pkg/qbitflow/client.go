@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	qberrors "github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/pkg/errors"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 )
 
 const (

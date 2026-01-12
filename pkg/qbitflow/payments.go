@@ -3,9 +3,9 @@ package qbitflow
 import (
 	"fmt"
 
-	qberrors "github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/pkg/errors"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
+	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 // PaymentService handles payment-related operations

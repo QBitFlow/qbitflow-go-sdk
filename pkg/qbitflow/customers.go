@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
+	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 type CustomerService struct {
