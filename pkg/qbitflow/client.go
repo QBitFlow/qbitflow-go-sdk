@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"bytes"

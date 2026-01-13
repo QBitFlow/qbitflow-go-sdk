@@ -4,25 +4,25 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 )
 
-func getTestCustomerData() *qbitflow.CreateCustomer {
+func getTestCustomerData() *qbf.CreateCustomer {
 	// Generate a random email to avoid conflicts
 	randomEmail := fmt.Sprintf("john.doe.%d@example.com", rand.Intn(1000))
 
-	return &qbitflow.CreateCustomer{
+	return &qbf.CreateCustomer{
 		Name:     "John",
 		LastName: "Doe",
 		Email:    randomEmail,
 	}
 }
 
-func getTestUserData() *qbitflow.CreateUser {
+func getTestUserData() *qbf.CreateUser {
 	// Generate a random email to avoid conflicts
 	randomEmail := fmt.Sprintf("test.user.%d@example.com", rand.Intn(1000))
 
-	return &qbitflow.CreateUser{
+	return &qbf.CreateUser{
 		Name:     "Test",
 		LastName: "User",
 		Email:    randomEmail,
@@ -31,9 +31,9 @@ func getTestUserData() *qbitflow.CreateUser {
 	}
 }
 
-func getTestProductData() *qbitflow.CreateProduct {
+func getTestProductData() *qbf.CreateProduct {
 	ref := fmt.Sprintf("REF-%d", rand.Intn(100000))
-	return &qbitflow.CreateProduct{
+	return &qbf.CreateProduct{
 		Name:        "Test Product",
 		Description: "A product used for testing purposes",
 		Price:       19.99,

@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"fmt"
@@ -9,6 +9,10 @@ import (
 
 type ApiKeyService struct {
 	client *Client
+}
+
+func NewApiKeyService(client *Client) *ApiKeyService {
+	return &ApiKeyService{client: client}
 }
 
 type CreateApiKeyDto struct {

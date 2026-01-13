@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"fmt"
@@ -10,6 +10,10 @@ import (
 
 type CustomerService struct {
 	client *Client
+}
+
+func NewCustomerService(client *Client) *CustomerService {
+	return &CustomerService{client: client}
 }
 
 type CreateCustomer struct {

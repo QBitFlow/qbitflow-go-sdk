@@ -79,7 +79,7 @@ Official Go SDK for [QBitFlow](https://qbitflow.app) - a comprehensive cryptocur
 ## Installation
 
 ```bash
-go get github.com/qbitflow/qbitflow-go-sdk
+go get github.com/QBitFlow/qbitflow-go-sdk
 ```
 
 ## Quick Start
@@ -94,7 +94,7 @@ Sign up at [QBitFlow](https://qbitflow.app) and obtain your API key from the das
 package main
 
 import (
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
+	"github.com/QBitFlow/qbitflow-go-sdk"
 )
 
 func main() {
@@ -109,12 +109,12 @@ func main() {
 import (
 	"fmt"
 	"log"
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
+	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 // Create a one-time payment
-payment, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 	ProductID:    utils.Uint64Ptr(1),
 	CustomerUUID: utils.StringPtr("customer-uuid"),
 	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
@@ -134,10 +134,11 @@ fmt.Printf("Payment link: %s\n", payment.Link)
 
 ```go
 import (
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
+	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 )
 
-subscription, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+subscription, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 	ProductID: 1,
 	Frequency: qbmodels.Duration{
 		Value: 1,
@@ -162,7 +163,7 @@ fmt.Printf("Subscription link: %s\n", subscription.Link)
 
 ```go
 import (
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 )
 
 status, err := client.TransactionStatus.GetTransactionStatus(
@@ -192,9 +193,13 @@ client := qbitflow.New("your-api-key")
 ### Advanced Configuration
 
 ```go
-import "time"
+import (
+	"time"
+	
+	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+)
 
-client := qbitflow.NewWithConfig(qbitflow.Config{
+client := qbitflow.NewWithConfig(qbf.Config{
 	APIKey:     "your-api-key",
 	Timeout:    30 * time.Second,           // Optional: request timeout (default: 30s)
 	MaxRetries: 3,                          // Optional: max retry attempts (default: 3)
@@ -218,7 +223,7 @@ Create a payment session for a one-time purchase:
 
 ```go
 // Using an existing product
-payment, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 	ProductID:    utils.Uint64Ptr(1),
 	CustomerUUID: utils.StringPtr("customer-uuid"), // optional
 	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
@@ -235,7 +240,7 @@ fmt.Printf("Payment link: %s\n", payment.Link)
 **Or create a custom payment:**
 
 ```go
-payment, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 	ProductName:  utils.StringPtr("Custom Product"),
 	Description:  utils.StringPtr("Product description"),
 	Price:        utils.Float64Ptr(99.99), // USD
@@ -249,7 +254,7 @@ payment, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
 You can provide redirect URLs for success and cancellation:
 
 ```go
-payment, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 	ProductID:    utils.Uint64Ptr(1),
 	SuccessURL:   utils.StringPtr("https://yourapp.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}"),
 	CancelURL:    utils.StringPtr("https://yourapp.com/cancel"),
@@ -342,7 +347,7 @@ Create a recurring subscription:
 ```go
 minPeriods := uint64(3) // Minimum billing periods (optional)
 
-subscription, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+subscription, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 	ProductID: 1,
 	Frequency: qbmodels.Duration{
 		Value: 1,
@@ -429,7 +434,7 @@ PAYG subscriptions allow customers to pay based on usage with a billing cycle.
 ```go
 freeCredits := 100.0
 
-payg, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+payg, err := client.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 	ProductID: 1,
 	Frequency: qbmodels.Duration{
 		Value: 1,
@@ -587,7 +592,7 @@ const (
 ### Create a Customer
 
 ```go
-customerData := &qbitflow.CreateCustomerOptions{
+customerData := &qbf.CreateCustomerOptions{
 	Name:        "John",
 	LastName:    "Doe",
 	Email:       "john@example.com",
@@ -617,7 +622,7 @@ fmt.Printf("%s %s - %s\n", customer.Name, customer.LastName, customer.Email)
 ### Update Customer
 
 ```go
-updateData := &qbitflow.UpdateCustomerOptions{
+updateData := &qbf.UpdateCustomerOptions{
 	UUID:        "customer-uuid",
 	Name:        "John",
 	LastName:    "Doe",
@@ -647,7 +652,7 @@ fmt.Println(response.Message)
 ### Create a Product
 
 ```go
-productData := &qbitflow.CreateProductOptions{
+productData := &qbf.CreateProductOptions{
 	Name:        "Premium Subscription",
 	Description: "Access to all premium features",
 	Price:       29.99,
@@ -665,7 +670,7 @@ fmt.Printf("Product created: ID %d\n", product.ID)
 ### Update Product
 
 ```go
-updateData := &qbitflow.UpdateProductOptions{
+updateData := &qbf.UpdateProductOptions{
 	Name:        "Premium Plus",
 	Description: "Enhanced premium features",
 	Price:       39.99,
@@ -700,7 +705,7 @@ import (
 	"fmt"
 	"net/http"
 
-	qbmodels "github.com/qbitflow/qbitflow-go-sdk/pkg/models"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 )
 
 func webhookHandler(w http.ResponseWriter, r *http.Request) {
@@ -773,7 +778,7 @@ The SDK provides specific error types for different scenarios:
 General API errors with status codes.
 
 ```go
-import qberrors "github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
+import qberrors "github.com/QBitFlow/qbitflow-go-sdk/pkg/errors"
 
 session, err := client.Payments.CreateSession(opts)
 if err != nil {
@@ -812,7 +817,7 @@ if _, ok := err.(*qberrors.UnauthorizedError); ok {
 Client-side validation errors.
 
 ```go
-session, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 	// Missing required fields
 })
 if err != nil {
@@ -835,7 +840,7 @@ if netErr, ok := err.(*qberrors.NetworkError); ok {
 ### Complete Error Handling Example
 
 ```go
-import qberrors "github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
+import qberrors "github.com/QBitFlow/qbitflow-go-sdk/pkg/errors"
 
 payment, err := client.Payments.GetPayment("payment-uuid")
 if err != nil {
@@ -862,7 +867,7 @@ if err != nil {
 The SDK uses pointer values for optional fields. The `utils` package provides helpful utility functions:
 
 ```go
-import "github.com/qbitflow/qbitflow-go-sdk/pkg/utils"
+import "github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 
 // Helper functions for pointer conversions
 utils.IntPtr(42)              // *int
@@ -932,7 +937,7 @@ Main client struct providing access to all API endpoints.
 client := qbitflow.New("your-api-key")
 
 // Create client with custom configuration
-client := qbitflow.NewWithConfig(qbitflow.Config{
+client := qbitflow.NewWithConfig(qbf.Config{
 	APIKey:     "your-api-key",
 	Timeout:    30 * time.Second,
 	MaxRetries: 3,
@@ -968,7 +973,7 @@ This SDK is released under the MPL-2.0 License. See [LICENSE](LICENSE) file for 
 
 -   📖 [Documentation](https://qbitflow.app/docs)
 -   📧 [Email Support](mailto:support@qbitflow.app)
--   🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-go-sdk/issues)
+-   🐛 [Issue Tracker](https://github.com/QBitFlow/qbitflow-go-sdk/issues)
 
 ## Changelog
 

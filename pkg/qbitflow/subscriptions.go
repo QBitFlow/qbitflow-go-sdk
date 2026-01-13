@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"fmt"
@@ -9,6 +9,10 @@ import (
 // SubscriptionService handles subscription-related operations
 type SubscriptionService struct {
 	client *Client
+}
+
+func NewSubscriptionService(client *Client) *SubscriptionService {
+	return &SubscriptionService{client: client}
 }
 
 // CreateSubscriptionSessionOptions represents options for creating a subscription session

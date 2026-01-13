@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"fmt"
@@ -9,6 +9,10 @@ import (
 // TransactionStatusService handles transaction status operations
 type TransactionStatusService struct {
 	client *Client
+}
+
+func NewTransactionStatusService(client *Client) *TransactionStatusService {
+	return &TransactionStatusService{client: client}
 }
 
 // GetTransactionStatus retrieves the status of a transaction by its UUID

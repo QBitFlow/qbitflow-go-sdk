@@ -84,4 +84,4 @@
 //	})
 //
 // For more information, see the full documentation at https://qbitflow.app/docs
-package qbitflow
+package qbf

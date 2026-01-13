@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
@@ -17,7 +18,7 @@ func main() {
 
 	// Example 1: Create a PAYG subscription with free credits
 	fmt.Println("1. Creating PAYG subscription with free credits...")
-	session, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+	session, err := client.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 		ProductID: 1,
 		Frequency: qbmodels.Duration{
 			Value: 1,
@@ -40,7 +41,7 @@ func main() {
 
 	// Example 2: Create a PAYG subscription without free credits
 	fmt.Println("2. Creating basic PAYG subscription...")
-	session2, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+	session2, err := client.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 		ProductID: 1,
 		Frequency: qbmodels.Duration{
 			Value: 1,

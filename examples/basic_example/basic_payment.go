@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	"github.com/QBitFlow/qbitflow-go-sdk"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
@@ -16,7 +17,7 @@ func main() {
 
 	// Example 1: Create a payment session using a product ID
 	fmt.Println("1. Creating payment session with product ID...")
-	session1, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+	session1, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 		ProductID:    utils.Uint64Ptr(1),
 		SuccessURL:   utils.StringPtr("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}"),
 		CancelURL:    utils.StringPtr("https://yoursite.com/cancel"),
@@ -37,7 +38,7 @@ func main() {
 
 	// Example 2: Create a payment session with custom product details
 	fmt.Println("2. Creating payment session with custom product...")
-	session2, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+	session2, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 		ProductName:  utils.StringPtr("Premium Membership"),
 		Description:  utils.StringPtr("One-time payment for premium membership"),
 		Price:        utils.Float64Ptr(99.99),

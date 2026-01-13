@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"fmt"
@@ -11,6 +11,10 @@ import (
 // PaymentService handles payment-related operations
 type PaymentService struct {
 	client *Client
+}
+
+func NewPaymentService(client *Client) *PaymentService {
+	return &PaymentService{client: client}
 }
 
 // CreateSessionOptions represents options for creating a payment session

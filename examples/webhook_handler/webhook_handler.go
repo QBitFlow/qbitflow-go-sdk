@@ -6,8 +6,8 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 )
 
 // WebhookServer handles incoming webhooks from QBitFlow

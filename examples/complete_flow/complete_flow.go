@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
@@ -21,7 +22,7 @@ func main() {
 
 	// Step 1: Create a payment session
 	fmt.Println("Step 1: Creating payment session...")
-	session, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+	session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 		ProductID:    utils.Uint64Ptr(1),
 		SuccessURL:   utils.StringPtr("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}"),
 		CancelURL:    utils.StringPtr("https://yoursite.com/cancel"),

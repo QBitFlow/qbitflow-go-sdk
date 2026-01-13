@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
@@ -17,14 +18,14 @@ func main() {
 		panic("QBITFLOW_API_KEY environment variable is not set")
 	}
 
-	client := qbitflow.NewWithConfig(qbitflow.Config{
+	client := qbitflow.NewWithConfig(qbf.Config{
 		APIKey:  key,
 		BaseURL: "http://localhost:3001",
 	})
 
 	//////////////////// One-time Payment \\\\\\\\\\\\\\\\\\\\
 
-	payment, err := client.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+	payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
 		ProductID:    utils.Uint64Ptr(1),
 		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),
 	})
@@ -60,7 +61,7 @@ func main() {
 
 	//////////////////// Subscription \\\\\\\\\\\\\\\\\\\\
 
-	sub, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+	sub, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 		ProductID: 1,
 		Frequency: qbmodels.Duration{
 			Unit:  qbmodels.DurationUnitMonths,
@@ -127,7 +128,7 @@ func main() {
 
 	//////////////////// Pay-as-you-go \\\\\\\\\\\\\\\\\\\\
 
-	paygSub, err := client.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+	paygSub, err := client.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 		ProductID:    1,
 		Frequency:    qbmodels.Duration{Unit: qbmodels.DurationUnitMonths, Value: 1},
 		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),

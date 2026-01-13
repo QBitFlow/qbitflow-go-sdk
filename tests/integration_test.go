@@ -4,8 +4,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
@@ -29,7 +30,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Initialize test client
-	testClient = qbitflow.NewWithConfig(qbitflow.Config{
+	testClient = qbitflow.NewWithConfig(qbf.Config{
 		APIKey:  apiKey,
 		BaseURL: "http://localhost:3001",
 	})
@@ -49,7 +50,7 @@ func TestClientInitialization(t *testing.T) {
 	})
 
 	t.Run("NewClientWithConfig", func(t *testing.T) {
-		client := qbitflow.NewWithConfig(qbitflow.Config{
+		client := qbitflow.NewWithConfig(qbf.Config{
 			APIKey:  "test-key",
 			BaseURL: "https://api.qbitflow.app",
 		})
@@ -143,7 +144,7 @@ func TestCustomer(t *testing.T) {
 			t.Fatalf("Failed to create customer: %v", err)
 		}
 
-		updatedData := qbitflow.UpdateCustomer{
+		updatedData := qbf.UpdateCustomer{
 			UUID:     createdCustomer.UUID,
 			Name:     "Jane",
 			LastName: "Smith",
@@ -228,7 +229,7 @@ func TestUsers(t *testing.T) {
 			t.Fatalf("Failed to create user: %v", err)
 		}
 
-		updatedData := qbitflow.UpdateUser{
+		updatedData := qbf.UpdateUser{
 			Name:     "UpdatedName",
 			LastName: "UpdatedLastName",
 			Email:    createdUser.Email,
@@ -312,7 +313,7 @@ func TestProducts(t *testing.T) {
 			t.Fatalf("Failed to create product: %v", err)
 		}
 
-		updatedData := qbitflow.UpdateProduct{
+		updatedData := qbf.UpdateProduct{
 			Name:        "Updated Product",
 			Description: "Updated Description",
 			Price:       29.99,
@@ -356,7 +357,7 @@ func TestProducts(t *testing.T) {
 
 func TestAPIKeys(t *testing.T) {
 	t.Run("Create API Key", func(t *testing.T) {
-		apiKey, err := testClient.ApiKeys.Create(&qbitflow.CreateApiKeyDto{
+		apiKey, err := testClient.ApiKeys.Create(&qbf.CreateApiKeyDto{
 			Name:   "Test API Key",
 			UserID: createdUserID,
 			Test:   false,
@@ -390,7 +391,7 @@ func TestAPIKeys(t *testing.T) {
 	})
 
 	t.Run("Delete API Key", func(t *testing.T) {
-		apiKey, err := testClient.ApiKeys.Create(&qbitflow.CreateApiKeyDto{
+		apiKey, err := testClient.ApiKeys.Create(&qbf.CreateApiKeyDto{
 			Name:   "Test API Key",
 			UserID: createdUserID,
 			Test:   false,
@@ -411,7 +412,7 @@ func TestAPIKeys(t *testing.T) {
 // TestPaymentSession tests payment session creation
 func TestPaymentSession(t *testing.T) {
 	t.Run("Create payment session with product ID", func(t *testing.T) {
-		session, err := testClient.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+		session, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
 			ProductID:    utils.Uint64Ptr(1),
 			SuccessURL:   utils.StringPtr("https://example.com/success"),
 			CancelURL:    utils.StringPtr("https://example.com/cancel"),
@@ -440,7 +441,7 @@ func TestPaymentSession(t *testing.T) {
 	})
 
 	t.Run("Create payment session with custom product", func(t *testing.T) {
-		session, err := testClient.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+		session, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
 			ProductName:  utils.StringPtr("Test Product"),
 			Description:  utils.StringPtr("Test Description"),
 			Price:        utils.Float64Ptr(99.99),
@@ -460,7 +461,7 @@ func TestPaymentSession(t *testing.T) {
 	})
 
 	t.Run("Validation error - missing required fields", func(t *testing.T) {
-		_, err := testClient.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+		_, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
 			// Missing all required fields
 		})
 
@@ -470,7 +471,7 @@ func TestPaymentSession(t *testing.T) {
 	})
 
 	t.Run("Validation error - negative price", func(t *testing.T) {
-		_, err := testClient.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+		_, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
 			ProductName: utils.StringPtr("Test"),
 			Description: utils.StringPtr("Test"),
 			Price:       utils.Float64Ptr(-10.0), // Negative price
@@ -482,7 +483,7 @@ func TestPaymentSession(t *testing.T) {
 	})
 
 	t.Run("Get payment session", func(t *testing.T) {
-		session, err := testClient.Payments.CreateSession(&qbitflow.CreateSessionOptions{
+		session, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
 			ProductID:    utils.Uint64Ptr(1),
 			SuccessURL:   utils.StringPtr("https://example.com/success"),
 			CancelURL:    utils.StringPtr("https://example.com/cancel"),
@@ -539,7 +540,7 @@ func TestPaymentSession(t *testing.T) {
 // TestSubscriptionSession tests subscription session creation
 func TestSubscriptionSession(t *testing.T) {
 	t.Run("Create subscription with trial period", func(t *testing.T) {
-		session, err := testClient.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+		session, err := testClient.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 			ProductID: createdProductID,
 			Frequency: qbmodels.Duration{
 				Value: 1,
@@ -567,7 +568,7 @@ func TestSubscriptionSession(t *testing.T) {
 	})
 
 	t.Run("Create subscription without trial", func(t *testing.T) {
-		session, err := testClient.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+		session, err := testClient.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 			ProductID: createdProductID,
 			Frequency: qbmodels.Duration{
 				Value: 1,
@@ -587,7 +588,7 @@ func TestSubscriptionSession(t *testing.T) {
 	})
 
 	t.Run("Get subscription session", func(t *testing.T) {
-		session, err := testClient.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+		session, err := testClient.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 			ProductID: createdProductID,
 			Frequency: qbmodels.Duration{
 				Value: 1,
@@ -616,7 +617,7 @@ func TestSubscriptionSession(t *testing.T) {
 // TestPAYGSubscription tests pay-as-you-go subscription creation
 func TestPAYGSubscription(t *testing.T) {
 	t.Run("Create PAYG subscription with free credits", func(t *testing.T) {
-		session, err := testClient.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+		session, err := testClient.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 			ProductID: createdProductID,
 			Frequency: qbmodels.Duration{
 				Value: 1,
@@ -641,7 +642,7 @@ func TestPAYGSubscription(t *testing.T) {
 	})
 
 	t.Run("Create basic PAYG subscription", func(t *testing.T) {
-		session, err := testClient.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+		session, err := testClient.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 			ProductID: createdProductID,
 			Frequency: qbmodels.Duration{
 				Value: 1,
@@ -661,7 +662,7 @@ func TestPAYGSubscription(t *testing.T) {
 	})
 
 	t.Run("Get PAYG subscription session", func(t *testing.T) {
-		session, err := testClient.PayAsYouGo.CreateSession(&qbitflow.CreatePAYGSessionOptions{
+		session, err := testClient.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 			ProductID: createdProductID,
 			Frequency: qbmodels.Duration{
 				Value: 1,
@@ -811,7 +812,7 @@ func BenchmarkClientCreation(b *testing.B) {
 // BenchmarkCreateSessionOptions benchmarks creating session options
 func BenchmarkCreateSessionOptions(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = qbitflow.CreateSessionOptions{
+		_ = qbf.CreateSessionOptions{
 			ProductID:    utils.Uint64Ptr(1),
 			SuccessURL:   utils.StringPtr("https://example.com/success"),
 			CancelURL:    utils.StringPtr("https://example.com/cancel"),

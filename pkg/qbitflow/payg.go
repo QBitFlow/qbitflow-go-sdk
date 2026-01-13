@@ -1,4 +1,4 @@
-package qbitflow
+package qbf
 
 import (
 	"fmt"
@@ -9,6 +9,10 @@ import (
 // PayAsYouGoService handles pay-as-you-go subscription operations
 type PayAsYouGoService struct {
 	client *Client
+}
+
+func NewPayAsYouGoService(client *Client) *PayAsYouGoService {
+	return &PayAsYouGoService{client: client}
 }
 
 // CreatePAYGSessionOptions represents options for creating a PAYG subscription session

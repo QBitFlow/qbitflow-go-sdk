@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
@@ -17,7 +18,7 @@ func main() {
 
 	// Example 1: Create a subscription with a trial period
 	fmt.Println("1. Creating subscription with trial period...")
-	session, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+	session, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 		ProductID: 1,
 		Frequency: qbmodels.Duration{
 			Value: 1,
@@ -43,7 +44,7 @@ func main() {
 
 	// Example 2: Create a subscription without trial period
 	fmt.Println("2. Creating subscription without trial...")
-	session2, err := client.Subscriptions.CreateSession(&qbitflow.CreateSubscriptionSessionOptions{
+	session2, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
 		ProductID: 2,
 		Frequency: qbmodels.Duration{
 			Value: 1,
