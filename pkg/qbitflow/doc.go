@@ -6,7 +6,7 @@
 //
 // # Installation
 //
-//	go get github.com/qbitflow/qbitflow-go-sdk
+//	go get "github.com/QBitFlow/qbitflow-go-sdk
 //
 // # Quick Start
 //
@@ -15,7 +15,8 @@
 //	import (
 //	    "fmt"
 //	    "log"
-//	    "github.com/qbitflow/qbitflow-go-sdk/pkg/qbitflow"
+//	    "github.com/QBitFlow/qbitflow-go-sdk"
+//		"github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 //	)
 //
 //	func main() {
@@ -23,7 +24,7 @@
 //	    client := qbitflow.New("your-api-key-here")
 //
 //	    // Create a payment session
-//	    session, err := client.Payments.CreateSession(qbitflow.CreateSessionOptions{
+//	    session, err := client.Payments.CreateSession(qbf.CreateSessionOptions{
 //	        ProductID:    intPtr(1),
 //	        CustomerUUID: stringPtr("customer-123"),
 //	    })
@@ -64,7 +65,7 @@
 //
 // Example:
 //
-//	import qberrors "github.com/qbitflow/qbitflow-go-sdk/pkg/errors"
+//	import qberrors "github.com/QBitFlow/qbitflow-go-sdk/pkg/errors"
 //
 //	payment, err := client.Payments.GetPayment("invalid-uuid")
 //	if err != nil {
@@ -77,7 +78,7 @@
 //
 // You can customize the client configuration:
 //
-//	client := qbitflow.NewWithConfig(qbitflow.Config{
+//	client := qbitflow.NewWithConfig(qbf.Config{
 //	    APIKey:  "your-api-key",
 //	    BaseURL: "https://api.qbitflow.app",
 //	    Timeout: 30 * time.Second,
