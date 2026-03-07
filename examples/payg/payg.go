@@ -7,7 +7,6 @@ import (
 	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 func main() {
@@ -24,11 +23,11 @@ func main() {
 			Value: 1,
 			Unit:  qbmodels.DurationUnitMonths,
 		},
-		FreeCredits:  utils.Float64Ptr(100.0), // Give 100 free credits to start
-		SuccessURL:   utils.StringPtr("https://yoursite.com/payg/success"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/payg/cancel"),
-		WebhookURL:   utils.StringPtr("https://yoursite.com/webhook"),
-		CustomerUUID: utils.StringPtr("customer-uuid-123"),
+		FreeCredits:  new(float64(100.0)), // Give 100 free credits to start
+		SuccessURL:   new(string("https://yoursite.com/payg/success")),
+		CancelURL:    new(string("https://yoursite.com/payg/cancel")),
+		WebhookURL:   new(string("https://yoursite.com/webhook")),
+		CustomerUUID: new(string("customer-uuid-123")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create PAYG subscription: %v", err)
@@ -47,10 +46,10 @@ func main() {
 			Value: 1,
 			Unit:  qbmodels.DurationUnitMonths,
 		},
-		SuccessURL:   utils.StringPtr("https://yoursite.com/payg/success"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/payg/cancel"),
-		WebhookURL:   utils.StringPtr("https://yoursite.com/webhook"),
-		CustomerUUID: utils.StringPtr("customer-uuid-456"),
+		SuccessURL:   new(string("https://yoursite.com/payg/success")),
+		CancelURL:    new(string("https://yoursite.com/payg/cancel")),
+		WebhookURL:   new(string("https://yoursite.com/webhook")),
+		CustomerUUID: new(string("customer-uuid-456")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create PAYG subscription: %v", err)

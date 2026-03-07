@@ -115,11 +115,11 @@ import (
 
 // Create a one-time payment
 payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-	ProductID:    utils.Uint64Ptr(1),
-	CustomerUUID: utils.StringPtr("customer-uuid"),
-	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
-	SuccessURL:   utils.StringPtr("https://yourapp.com/success"),
-	CancelURL:    utils.StringPtr("https://yourapp.com/cancel"),
+	ProductID:    new(uint64(1)),
+	CustomerUUID: new(string("customer-uuid")),
+	WebhookURL:   new(string("https://yourapp.com/webhook")),
+	SuccessURL:   new(string("https://yourapp.com/success")),
+	CancelURL:    new(string("https://yourapp.com/cancel")),
 })
 
 if err != nil {
@@ -148,8 +148,8 @@ subscription, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionS
 		Value: 7,
 		Unit:  qbmodels.DurationUnitDays,
 	},
-	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
-	CustomerUUID: utils.StringPtr("customer-uuid"),
+	WebhookURL:   new(string("https://yourapp.com/webhook")),
+	CustomerUUID: new(string("customer-uuid")),
 })
 
 if err != nil {
@@ -224,9 +224,9 @@ Create a payment session for a one-time purchase:
 ```go
 // Using an existing product
 payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-	ProductID:    utils.Uint64Ptr(1),
-	CustomerUUID: utils.StringPtr("customer-uuid"), // optional
-	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
+	ProductID:    new(uint64(1)),
+	CustomerUUID: new(string("customer-uuid")), // optional
+	WebhookURL:   new(string("https://yourapp.com/webhook")),
 })
 
 if err != nil {
@@ -241,11 +241,11 @@ fmt.Printf("Payment link: %s\n", payment.Link)
 
 ```go
 payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-	ProductName:  utils.StringPtr("Custom Product"),
-	Description:  utils.StringPtr("Product description"),
-	Price:        utils.Float64Ptr(99.99), // USD
-	CustomerUUID: utils.StringPtr("customer-uuid"),
-	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
+	ProductName:  new(string("Custom Product")),
+	Description:  new(string("Product description")),
+	Price:        new(float64(99.99)), // USD
+	CustomerUUID: new(string("customer-uuid")),
+	WebhookURL:   new(string("https://yourapp.com/webhook")),
 })
 ```
 
@@ -255,10 +255,10 @@ You can provide redirect URLs for success and cancellation:
 
 ```go
 payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-	ProductID:    utils.Uint64Ptr(1),
-	SuccessURL:   utils.StringPtr("https://yourapp.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}"),
-	CancelURL:    utils.StringPtr("https://yourapp.com/cancel"),
-	CustomerUUID: utils.StringPtr("customer-uuid"),
+	ProductID:    new(uint64(1)),
+	SuccessURL:   new(string("https://yourapp.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}")),
+	CancelURL:    new(string("https://yourapp.com/cancel")),
+	CustomerUUID: new(string("customer-uuid")),
 })
 ```
 
@@ -358,8 +358,8 @@ subscription, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionS
 		Unit:  qbmodels.DurationUnitDays,
 	},
 	MinPeriods:   &minPeriods,
-	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
-	CustomerUUID: utils.StringPtr("customer-uuid"),
+	WebhookURL:   new(string("https://yourapp.com/webhook")),
+	CustomerUUID: new(string("customer-uuid")),
 })
 
 if err != nil {
@@ -441,8 +441,8 @@ payg, err := client.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 		Unit:  qbmodels.DurationUnitMonths, // Bill monthly
 	},
 	FreeCredits:  &freeCredits, // Initial free credits (optional)
-	WebhookURL:   utils.StringPtr("https://yourapp.com/webhook"),
-	CustomerUUID: utils.StringPtr("customer-uuid"),
+	WebhookURL:   new(string("https://yourapp.com/webhook")),
+	CustomerUUID: new(string("customer-uuid")),
 })
 
 if err != nil {
@@ -596,8 +596,8 @@ customerData := &qbf.CreateCustomerOptions{
 	Name:        "John",
 	LastName:    "Doe",
 	Email:       "john@example.com",
-	PhoneNumber: utils.StringPtr("+1234567890"),
-	Reference:   utils.StringPtr("CRM-12345"),
+	PhoneNumber: new(string("+1234567890")),
+	Reference:   new(string("CRM-12345")),
 }
 
 customer, err := client.Customers.Create(customerData)
@@ -627,7 +627,7 @@ updateData := &qbf.UpdateCustomerOptions{
 	Name:        "John",
 	LastName:    "Doe",
 	Email:       "john.doe@example.com",
-	PhoneNumber: utils.StringPtr("+9876543210"),
+	PhoneNumber: new(string("+9876543210")),
 }
 
 updatedCustomer, err := client.Customers.Update("customer-uuid", updateData)
@@ -656,7 +656,7 @@ productData := &qbf.CreateProductOptions{
 	Name:        "Premium Subscription",
 	Description: "Access to all premium features",
 	Price:       29.99,
-	Reference:   utils.StringPtr("PROD-PREMIUM"),
+	Reference:   new(string("PROD-PREMIUM")),
 }
 
 product, err := client.Products.Create(productData)
@@ -860,21 +860,6 @@ if err != nil {
 	}
 	return
 }
-```
-
-## Helper Functions
-
-The SDK uses pointer values for optional fields. The `utils` package provides helpful utility functions:
-
-```go
-import "github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
-
-// Helper functions for pointer conversions
-utils.IntPtr(42)              // *int
-utils.Uint16Ptr(10)           // *uint16
-utils.Uint64Ptr(100)          // *uint64
-utils.StringPtr("hello")      // *string
-utils.Float64Ptr(99.99)       // *float64
 ```
 
 ## Examples

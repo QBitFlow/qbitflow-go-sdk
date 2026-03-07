@@ -6,7 +6,6 @@ import (
 
 	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 func main() {
@@ -18,11 +17,11 @@ func main() {
 	// Example 1: Create a payment session using a product ID
 	fmt.Println("1. Creating payment session with product ID...")
 	session1, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-		ProductID:    utils.Uint64Ptr(1),
-		SuccessURL:   utils.StringPtr("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/cancel"),
-		WebhookURL:   utils.StringPtr("https://yoursite.com/webhook"),
-		CustomerUUID: utils.StringPtr("customer-uuid-123"),
+		ProductID:    new(uint64(1)),
+		SuccessURL:   new(string("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}")),
+		CancelURL:    new(string("https://yoursite.com/cancel")),
+		WebhookURL:   new(string("https://yoursite.com/webhook")),
+		CustomerUUID: new(string("customer-uuid-123")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create payment session: %v", err)
@@ -39,12 +38,12 @@ func main() {
 	// Example 2: Create a payment session with custom product details
 	fmt.Println("2. Creating payment session with custom product...")
 	session2, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-		ProductName:  utils.StringPtr("Premium Membership"),
-		Description:  utils.StringPtr("One-time payment for premium membership"),
-		Price:        utils.Float64Ptr(99.99),
-		SuccessURL:   utils.StringPtr("https://yoursite.com/success"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/cancel"),
-		CustomerUUID: utils.StringPtr("customer-uuid-456"),
+		ProductName:  new(string("Premium Membership")),
+		Description:  new(string("One-time payment for premium membership")),
+		Price:        new(float64(99.99)),
+		SuccessURL:   new(string("https://yoursite.com/success")),
+		CancelURL:    new(string("https://yoursite.com/cancel")),
+		CustomerUUID: new(string("customer-uuid-456")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create custom payment session: %v", err)

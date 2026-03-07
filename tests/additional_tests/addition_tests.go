@@ -7,7 +7,6 @@ import (
 	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 const CUSTOMER_UUID = "your-customer-uuid-here"
@@ -26,8 +25,8 @@ func main() {
 	//////////////////// One-time Payment \\\\\\\\\\\\\\\\\\\\
 
 	payment, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-		ProductID:    utils.Uint64Ptr(1),
-		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),
+		ProductID:    new(uint64(1)),
+		CustomerUUID: new(string(CUSTOMER_UUID)),
 	})
 	if err != nil {
 		panic(err)
@@ -67,7 +66,7 @@ func main() {
 			Unit:  qbmodels.DurationUnitMonths,
 			Value: 1,
 		},
-		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),
+		CustomerUUID: new(string(CUSTOMER_UUID)),
 	})
 	if err != nil {
 		panic(err)
@@ -131,7 +130,7 @@ func main() {
 	paygSub, err := client.PayAsYouGo.CreateSession(&qbf.CreatePAYGSessionOptions{
 		ProductID:    1,
 		Frequency:    qbmodels.Duration{Unit: qbmodels.DurationUnitMonths, Value: 1},
-		CustomerUUID: utils.StringPtr(CUSTOMER_UUID),
+		CustomerUUID: new(string(CUSTOMER_UUID)),
 	})
 	if err != nil {
 		panic(err)

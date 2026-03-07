@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 
@@ -47,11 +48,26 @@ func main() {
 func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("📨 Received webhook event")
 
-	// Parse webhook payload
+	// 1. Read raw body FIRST
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// 2. Verify with raw bytes
+	valid, err := s.client.VerifyWebhook(rawBody, r)
+	if err != nil || !valid {
+		fmt.Printf("❌ Webhook verification failed: %v\n", err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 3. Parse AFTER verification
 	var webhook qbmodels.SessionWebhookResponse
-	if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
-		fmt.Printf("❌ Error parsing webhook: %v\n", err)
-		http.Error(w, "Invalid webhook payload", http.StatusBadRequest)
+	if err := json.Unmarshal(rawBody, &webhook); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
 		return
 	}
 

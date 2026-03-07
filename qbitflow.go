@@ -1,6 +1,10 @@
 package qbitflow
 
-import qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+import (
+	"net/http"
+
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
+)
 
 // QBitFlow is the main SDK client that provides access to all API services
 type QBitFlow struct {
@@ -50,4 +54,8 @@ func newQBitFlowWithClient(client *qbf.Client) *QBitFlow {
 // SetBaseURL sets a custom base URL for the API
 func (q *QBitFlow) SetBaseURL(baseURL string) {
 	q.client.SetBaseURL(baseURL)
+}
+
+func (q *QBitFlow) VerifyWebhook(payload []byte, r *http.Request) (bool, error) {
+	return q.client.VerifyWebhook(payload, r)
 }

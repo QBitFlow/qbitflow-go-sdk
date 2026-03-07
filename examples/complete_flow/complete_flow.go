@@ -9,7 +9,6 @@ import (
 	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 func main() {
@@ -23,11 +22,11 @@ func main() {
 	// Step 1: Create a payment session
 	fmt.Println("Step 1: Creating payment session...")
 	session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-		ProductID:    utils.Uint64Ptr(1),
-		SuccessURL:   utils.StringPtr("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/cancel"),
-		WebhookURL:   utils.StringPtr("https://yoursite.com/webhook"),
-		CustomerUUID: utils.StringPtr("customer-uuid-123"),
+		ProductID:    new(uint64(1)),
+		SuccessURL:   new(string("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}")),
+		CancelURL:    new(string("https://yoursite.com/cancel")),
+		WebhookURL:   new(string("https://yoursite.com/webhook")),
+		CustomerUUID: new(string("customer-uuid-123")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create payment session: %v", err)

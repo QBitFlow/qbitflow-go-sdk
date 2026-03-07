@@ -25,8 +25,8 @@
 //
 //	    // Create a payment session
 //	    session, err := client.Payments.CreateSession(qbf.CreateSessionOptions{
-//	        ProductID:    intPtr(1),
-//	        CustomerUUID: stringPtr("customer-123"),
+//	        ProductID:    new(uint64(1)),
+//	        CustomerUUID: new(string("customer-123")),
 //	    })
 //
 //	    if err != nil {

@@ -48,7 +48,7 @@ func NewNotFoundError(message string) *NotFoundError {
 
 // ValidationError represents a validation error
 type ValidationError struct {
-	Message string
+	Message string `json:"error"`
 }
 
 // Error implements the error interface

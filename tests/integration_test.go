@@ -7,7 +7,6 @@ import (
 	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 var (
@@ -413,10 +412,10 @@ func TestAPIKeys(t *testing.T) {
 func TestPaymentSession(t *testing.T) {
 	t.Run("Create payment session with product ID", func(t *testing.T) {
 		session, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
-			ProductID:    utils.Uint64Ptr(1),
-			SuccessURL:   utils.StringPtr("https://example.com/success"),
-			CancelURL:    utils.StringPtr("https://example.com/cancel"),
-			WebhookURL:   utils.StringPtr("https://example.com/webhook"),
+			ProductID:    new(uint64(1)),
+			SuccessURL:   new(string("https://example.com/success")),
+			CancelURL:    new(string("https://example.com/cancel")),
+			WebhookURL:   new(string("https://example.com/webhook")),
 			CustomerUUID: &customerUUID,
 		})
 		if err != nil {
@@ -442,11 +441,11 @@ func TestPaymentSession(t *testing.T) {
 
 	t.Run("Create payment session with custom product", func(t *testing.T) {
 		session, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
-			ProductName:  utils.StringPtr("Test Product"),
-			Description:  utils.StringPtr("Test Description"),
-			Price:        utils.Float64Ptr(99.99),
-			SuccessURL:   utils.StringPtr("https://example.com/success"),
-			CancelURL:    utils.StringPtr("https://example.com/cancel"),
+			ProductName:  new(string("Test Product")),
+			Description:  new(string("Test Description")),
+			Price:        new(float64(99.99)),
+			SuccessURL:   new(string("https://example.com/success")),
+			CancelURL:    new(string("https://example.com/cancel")),
 			CustomerUUID: &customerUUID,
 		})
 		if err != nil {
@@ -472,9 +471,9 @@ func TestPaymentSession(t *testing.T) {
 
 	t.Run("Validation error - negative price", func(t *testing.T) {
 		_, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
-			ProductName: utils.StringPtr("Test"),
-			Description: utils.StringPtr("Test"),
-			Price:       utils.Float64Ptr(-10.0), // Negative price
+			ProductName: new(string("Test")),
+			Description: new(string("Test")),
+			Price:       new(float64(-10.0)), // Negative price
 		})
 
 		if err == nil {
@@ -484,9 +483,9 @@ func TestPaymentSession(t *testing.T) {
 
 	t.Run("Get payment session", func(t *testing.T) {
 		session, err := testClient.Payments.CreateSession(&qbf.CreateSessionOptions{
-			ProductID:    utils.Uint64Ptr(1),
-			SuccessURL:   utils.StringPtr("https://example.com/success"),
-			CancelURL:    utils.StringPtr("https://example.com/cancel"),
+			ProductID:    new(uint64(1)),
+			SuccessURL:   new(string("https://example.com/success")),
+			CancelURL:    new(string("https://example.com/cancel")),
 			CustomerUUID: &customerUUID,
 		})
 		if err != nil {
@@ -550,9 +549,9 @@ func TestSubscriptionSession(t *testing.T) {
 				Value: 7,
 				Unit:  qbmodels.DurationUnitDays,
 			},
-			SuccessURL:   utils.StringPtr("https://example.com/success"),
-			CancelURL:    utils.StringPtr("https://example.com/cancel"),
-			WebhookURL:   utils.StringPtr("https://example.com/webhook"),
+			SuccessURL:   new(string("https://example.com/success")),
+			CancelURL:    new(string("https://example.com/cancel")),
+			WebhookURL:   new(string("https://example.com/webhook")),
 			CustomerUUID: &customerUUID,
 		})
 		if err != nil {
@@ -623,10 +622,10 @@ func TestPAYGSubscription(t *testing.T) {
 				Value: 1,
 				Unit:  qbmodels.DurationUnitMonths,
 			},
-			FreeCredits:  utils.Float64Ptr(100.0),
-			SuccessURL:   utils.StringPtr("https://example.com/success"),
-			CancelURL:    utils.StringPtr("https://example.com/cancel"),
-			WebhookURL:   utils.StringPtr("https://example.com/webhook"),
+			FreeCredits:  new(float64(100.0)),
+			SuccessURL:   new(string("https://example.com/success")),
+			CancelURL:    new(string("https://example.com/cancel")),
+			WebhookURL:   new(string("https://example.com/webhook")),
 			CustomerUUID: &customerUUID,
 		})
 		if err != nil {
@@ -813,11 +812,11 @@ func BenchmarkClientCreation(b *testing.B) {
 func BenchmarkCreateSessionOptions(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = qbf.CreateSessionOptions{
-			ProductID:    utils.Uint64Ptr(1),
-			SuccessURL:   utils.StringPtr("https://example.com/success"),
-			CancelURL:    utils.StringPtr("https://example.com/cancel"),
-			WebhookURL:   utils.StringPtr("https://example.com/webhook"),
-			CustomerUUID: utils.StringPtr("test-customer"),
+			ProductID:    new(uint64(1)),
+			SuccessURL:   new(string("https://example.com/success")),
+			CancelURL:    new(string("https://example.com/cancel")),
+			WebhookURL:   new(string("https://example.com/webhook")),
+			CustomerUUID: new(string("test-customer")),
 		}
 	}
 }

@@ -115,7 +115,7 @@ type Session struct {
 	CancelURL           *string              `json:"cancelUrl,omitempty"`
 	CustomerUUID        string               `json:"customerUUID"`
 	Options             *SubscriptionOptions `json:"options,omitempty"`
-	AvailableCurrencies []Currency           `json:"availableCurrencies"`
+	AvailableCurrencies []Currency           `json:"availableCurrencies,omitempty"`
 }
 
 // SubscriptionType represents the type of subscription

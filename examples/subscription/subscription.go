@@ -7,7 +7,6 @@ import (
 	"github.com/QBitFlow/qbitflow-go-sdk"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/pkg/models"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
-	"github.com/QBitFlow/qbitflow-go-sdk/pkg/utils"
 )
 
 func main() {
@@ -28,10 +27,10 @@ func main() {
 			Value: 7,
 			Unit:  qbmodels.DurationUnitDays,
 		},
-		SuccessURL:   utils.StringPtr("https://yoursite.com/subscription/success"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/subscription/cancel"),
-		WebhookURL:   utils.StringPtr("https://yoursite.com/webhook"),
-		CustomerUUID: utils.StringPtr("customer-uuid-123"),
+		SuccessURL:   new(string("https://yoursite.com/subscription/success")),
+		CancelURL:    new(string("https://yoursite.com/subscription/cancel")),
+		WebhookURL:   new(string("https://yoursite.com/webhook")),
+		CustomerUUID: new(string("customer-uuid-123")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create subscription: %v", err)
@@ -50,9 +49,9 @@ func main() {
 			Value: 1,
 			Unit:  qbmodels.DurationUnitMonths,
 		},
-		SuccessURL:   utils.StringPtr("https://yoursite.com/subscription/success"),
-		CancelURL:    utils.StringPtr("https://yoursite.com/subscription/cancel"),
-		CustomerUUID: utils.StringPtr("customer-uuid-456"),
+		SuccessURL:   new(string("https://yoursite.com/subscription/success")),
+		CancelURL:    new(string("https://yoursite.com/subscription/cancel")),
+		CustomerUUID: new(string("customer-uuid-456")),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create subscription: %v", err)
