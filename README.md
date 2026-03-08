@@ -709,10 +709,30 @@ import (
 )
 
 func webhookHandler(w http.ResponseWriter, r *http.Request) {
-	var webhook qbmodels.SessionWebhookResponse
+	fmt.Println("📨 Received webhook event")
 
+	// 1. Parse the webhook payload
+	var webhook qbmodels.SessionWebhookResponse
 	if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
 		http.Error(w, "Invalid webhook payload", http.StatusBadRequest)
+		return
+	}
+
+	// 2. Extract the signature and timestamp from headers
+	signature := r.Header.Get(s.client.Webhooks.GetSignatureHeader())
+	timestamp := r.Header.Get(s.client.Webhooks.GetTimestampHeader())
+	if signature == "" || timestamp == "" {
+		fmt.Println("❌ Missing required webhook headers for verification")
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// 3. Verify the webhook authenticity
+	valid, err := s.client.Webhooks.Verify(webhook, signature, timestamp)
+	if err != nil || !valid {
+		fmt.Printf("❌ Webhook verification failed: %v\n", err)
+		// Sending a >= 400 response will cause QBitFlow to retry the webhook
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

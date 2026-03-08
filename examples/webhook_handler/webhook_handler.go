@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 
@@ -48,26 +47,28 @@ func main() {
 func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("📨 Received webhook event")
 
-	// 1. Read raw body FIRST
-	rawBody, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
+	// 1. Parse the webhook payload
+	var webhook qbmodels.SessionWebhookResponse
+	if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
+		http.Error(w, "Invalid webhook payload", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
-	// 2. Verify with raw bytes
-	valid, err := s.client.VerifyWebhook(rawBody, r)
-	if err != nil || !valid {
-		fmt.Printf("❌ Webhook verification failed: %v\n", err)
+	// 2. Extract the signature and timestamp from headers
+	signature := r.Header.Get(s.client.Webhooks.GetSignatureHeader())
+	timestamp := r.Header.Get(s.client.Webhooks.GetTimestampHeader())
+	if signature == "" || timestamp == "" {
+		fmt.Println("❌ Missing required webhook headers for verification")
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// 3. Parse AFTER verification
-	var webhook qbmodels.SessionWebhookResponse
-	if err := json.Unmarshal(rawBody, &webhook); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
+	// 3. Verify the webhook authenticity
+	valid, err := s.client.Webhooks.Verify(webhook, signature, timestamp)
+	if err != nil || !valid {
+		fmt.Printf("❌ Webhook verification failed: %v\n", err)
+		// Sending a >= 400 response will cause QBitFlow to retry the webhook
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

@@ -1,8 +1,6 @@
 package qbitflow
 
 import (
-	"net/http"
-
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/pkg/qbitflow"
 )
 
@@ -15,6 +13,7 @@ type QBitFlow struct {
 	Products  *qbf.ProductService
 	Users     *qbf.UserService
 	ApiKeys   *qbf.ApiKeyService
+	Webhooks  *qbf.WebhookService
 
 	Payments          *qbf.PaymentService
 	Subscriptions     *qbf.SubscriptionService
@@ -43,6 +42,7 @@ func newQBitFlowWithClient(client *qbf.Client) *QBitFlow {
 		Products:  qbf.NewProductService(client),
 		Users:     qbf.NewUserService(client),
 		ApiKeys:   qbf.NewApiKeyService(client),
+		Webhooks:  qbf.NewWebhookService(client),
 
 		Payments:          qbf.NewPaymentService(client),
 		Subscriptions:     qbf.NewSubscriptionService(client),
@@ -54,8 +54,4 @@ func newQBitFlowWithClient(client *qbf.Client) *QBitFlow {
 // SetBaseURL sets a custom base URL for the API
 func (q *QBitFlow) SetBaseURL(baseURL string) {
 	q.client.SetBaseURL(baseURL)
-}
-
-func (q *QBitFlow) VerifyWebhook(payload []byte, r *http.Request) (bool, error) {
-	return q.client.VerifyWebhook(payload, r)
 }

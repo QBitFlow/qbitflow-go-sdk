@@ -72,3 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -   Production-ready error handling
 
 [1.0.0]: https://github.com/qbitflow/qbitflow-go-sdk/releases/tag/v1.0.0
+
+
+## [1.1.0] - 2026-03-08
+
+### Added
+
+-   HMAC signature verification for webhook requests
+-   New `Verify` function in `WebhookService` to verify webhook authenticity
+-   Updated documentation with webhook verification examples
+
+### Security
+
+-   Improved HMAC signature verification process
+-   Enhanced input validation for webhook requests

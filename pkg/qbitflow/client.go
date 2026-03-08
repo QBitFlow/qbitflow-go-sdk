@@ -18,13 +18,6 @@ const (
 	defaultTimeout = 30 * time.Second
 )
 
-const (
-	// HMAC headers
-	HeaderSignature = "X-Webhook-Signature-256"
-	HeaderTimestamp = "X-Webhook-Timestamp"
-	HeaderWebhookID = "X-Webhook-ID"
-)
-
 // Client represents the QBitFlow API client
 type Client struct {
 	apiKey     string
@@ -172,26 +165,4 @@ func (c *Client) SetBaseURL(baseURL string) {
 // SetTimeout sets a custom timeout for HTTP requests
 func (c *Client) SetTimeout(timeout time.Duration) {
 	c.httpClient.Timeout = timeout
-}
-
-// VerifyWebhook verifies the authenticity of a webhook request using the provided payload, signature, and timestamp
-func (c *Client) VerifyWebhook(payload []byte, r *http.Request) (bool, error) {
-	// Extract timestamp and signature from headers
-	signature := r.Header.Get(HeaderSignature)
-	timestamp := r.Header.Get(HeaderTimestamp)
-
-	if signature == "" || timestamp == "" {
-		return false, qberrors.NewQBitFlowError("missing required webhook headers for verification", 0, nil)
-	}
-
-	var result any
-
-	if err := c.makeRequest("POST", "/user/verify-webhook", map[string]any{
-		"payload":           string(payload),
-		"receivedSignature": signature,
-		"receivedTimestamp": timestamp,
-	}, &result); err != nil {
-		return false, err
-	}
-	return true, nil
 }

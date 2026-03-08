@@ -168,6 +168,11 @@ type SessionWebhookResponse struct {
 	Session Session           `json:"session"`
 }
 
+// Only to satisfy the WebhookData interface to be passed to the webhook verification method
+func (s SessionWebhookResponse) GetWebhookData() any {
+	return s
+}
+
 // StatusResponse represents transaction status response data
 type StatusResponse struct {
 	TransactionUUID string            `json:"transactionUuid"`
