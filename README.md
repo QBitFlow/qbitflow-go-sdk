@@ -731,7 +731,6 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	valid, err := s.client.Webhooks.Verify(webhook, signature, timestamp)
 	if err != nil || !valid {
 		fmt.Printf("❌ Webhook verification failed: %v\n", err)
-		// Sending a >= 400 response will cause QBitFlow to retry the webhook
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
