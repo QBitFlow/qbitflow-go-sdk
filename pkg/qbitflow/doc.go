@@ -80,7 +80,7 @@
 //
 //	client := qbitflow.NewWithConfig(qbf.Config{
 //	    APIKey:  "your-api-key",
-//	    BaseURL: "https://api.qbitflow.app",
+//	    BaseURL: "https://api.qbitflow.app/v1",
 //	    Timeout: 30 * time.Second,
 //	})
 //
