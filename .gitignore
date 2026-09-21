@@ -1,0 +1,22 @@
+CONTRIBUTING.md
+PROJECT_SUMMARY.*
+.DS_Store
+.coverage
+*.log
+.env
+
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+
+test-internal
+
+PUBLISH.md
+
+CLAUDE.md
+
+**/.qbitflow-sync
