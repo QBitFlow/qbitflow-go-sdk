@@ -26,13 +26,9 @@ func pagedServer(t *testing.T, failOn string) *testServer {
 	})
 }
 
-// iterateCustomers is what P2b's Customers.Iterate looks like.
+// iterateCustomers walks /customer/all with Customers.Iterate.
 func iterateCustomers(c *Client, ctx context.Context, params *CustomerListParams) func(func(Customer, error) bool) {
-	p := derefOrZero(params)
-	return iteratePages(p.Cursor, func(cursor string) (*Page[Customer], error) {
-		p.Cursor = cursor
-		return c.callRef[Page[Customer]](ctx, endpoint{method: http.MethodGet, path: "/customer/all", query: p.values()}, nil)
-	})
+	return c.Customers.Iterate(ctx, params)
 }
 
 func TestIterateAllPages(t *testing.T) {
