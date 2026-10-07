@@ -63,7 +63,7 @@ func main() {
 			log.Fatalf("bills: %v", err)
 		}
 		fmt.Printf("  bill %s: %.2f USD for %s → %s\n", bill.UUID, bill.Amount,
-			bill.PeriodStart.Format(time.DateOnly), bill.PeriodEnd.Format(time.DateOnly))
+			orNone(bill.PeriodStart, time.DateOnly), orNone(bill.PeriodEnd, time.DateOnly))
 	}
 
 	// 4. Stop it at the end of the paid period (Immediate false): never billed again, cancelled
@@ -102,4 +102,12 @@ func newClient() *qbitflow.Client {
 		log.Fatal(err)
 	}
 	return client
+}
+
+// orNone formats an optional time: the API omits it when it has no value.
+func orNone(t *time.Time, layout string) string {
+	if t == nil {
+		return "—"
+	}
+	return t.Format(layout)
 }

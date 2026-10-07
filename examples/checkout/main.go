@@ -34,7 +34,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("create the checkout: %v", err)
 	}
-	fmt.Printf("Send the customer to %s\n(session %s, expires at %s)\n", session.Link, session.UUID, session.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("Send the customer to %s\n(session %s, expires at %s)\n", session.Link, session.UUID, orNone(session.ExpiresAt, time.RFC3339))
 
 	// Poll a few times. "created" with LastAttempt set is a failed attempt: the customer may
 	// still pay from the same checkout, so never cancel the order on it.
@@ -80,4 +80,12 @@ func newClient() *qbitflow.Client {
 		log.Fatal(err)
 	}
 	return client
+}
+
+// orNone formats an optional time: the API omits it when it has no value.
+func orNone(t *time.Time, layout string) string {
+	if t == nil {
+		return "—"
+	}
+	return t.Format(layout)
 }

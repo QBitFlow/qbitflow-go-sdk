@@ -1,1080 +1,1129 @@
 # QBitFlow Go SDK
 
-[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Reference](https://pkg.go.dev/badge/github.com/QBitFlow/qbitflow-go-sdk/v3.svg)](https://pkg.go.dev/github.com/QBitFlow/qbitflow-go-sdk/v3)
+[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 
-Official Go SDK for [QBitFlow](https://qbitflow.app) — a cryptocurrency payment processing platform supporting one-time payments, recurring subscriptions, refunds, and accounting exports.
+The official Go SDK for [QBitFlow](https://qbitflow.app), non-custodial crypto payments: hosted
+checkouts, one-time payments, subscriptions, refunds, marketplaces with commissions and held
+funds, accounting exports and signed webhooks. Customers pay from their own wallets, on Ethereum,
+Base and Solana, straight to yours.
 
-## Table of Contents
+- **API v2**, every integrator route: 13 services, 60 routes, one `qbitflow` package.
+- **No dependencies** beyond the standard library.
+- **Typed errors** matched with `errors.As`, each carrying the API's code, request id and field errors.
+- **Safe retries**: reads and creates are retried on network errors, 5xx and 429, and every create
+  sends an `Idempotency-Key`, so a retry never charges or creates twice.
+- **Iterators**: `for p, err := range client.Payments.Iterate(ctx, nil)` walks every page lazily.
+- **Webhooks** verified locally (`QBitFlow-Signature`, secret rotation included) and parsed into
+  typed events.
+
+> Coming from 2.x? Read [MIGRATION-v3.md](MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
+> module path, the client and most names.
+
+## Contents
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Response Types](#response-types)
-- [Acting on Behalf of a User](#acting-on-behalf-of-a-user)
-- [One-Time Payments](#one-time-payments)
+- [Quick start](#quick-start)
+- [Authentication and acting for a member](#authentication-and-acting-for-a-member)
+- [Checkout sessions](#checkout-sessions)
+- [Products and customers](#products-and-customers)
+- [Payments and failures](#payments-and-failures)
 - [Subscriptions](#subscriptions)
-- [Transaction Status](#transaction-status)
 - [Refunds](#refunds)
-- [Accounting Export](#accounting-export)
-- [Account Claims](#account-claims)
-- [Customer Management](#customer-management)
-- [Product Management](#product-management)
-- [User Management](#user-management)
-- [API Key Management](#api-key-management)
+- [Marketplaces](#marketplaces)
+- [Wallets](#wallets)
+- [Accounting export](#accounting-export)
+- [Webhooks](#webhooks)
 - [Currencies](#currencies)
-- [Webhook Handling](#webhook-handling)
-- [Error Handling](#error-handling)
-- [Retries & Timeouts](#retries--timeouts)
-- [Client-Side Validation](#client-side-validation)
-- [Testing](#testing)
+- [Pagination and iterators](#pagination-and-iterators)
+- [Errors](#errors)
+- [Retries and idempotency](#retries-and-idempotency)
+- [Configuration](#configuration)
+- [Migrating from 2.x](#migrating-from-2x)
+- [Examples](#examples) · [Testing](#testing) · [License](#license) · [Support](#support) · [Security](#security)
 
 ## Installation
 
 ```bash
-go get github.com/QBitFlow/qbitflow-go-sdk/v2
+go get github.com/QBitFlow/qbitflow-go-sdk/v3
 ```
 
-**Requires Go 1.27 or later.** The optional request fields are pointers, and the examples
-below set them with `new(value)` — Go 1.26 extended `new` to accept a value expression, not
-just a type.
+```go
+import "github.com/QBitFlow/qbitflow-go-sdk/v3" // package qbitflow
+```
 
-## Quick Start
+**Requires Go 1.27 or later.** The SDK has no dependencies outside the standard library.
+
+## Quick start
 
 ```go
 package main
 
 import (
-    "errors"
-    "fmt"
-    "log"
+	"context"
+	"fmt"
+	"log"
+	"os"
 
-    "github.com/QBitFlow/qbitflow-go-sdk/v2"
-    qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
-    qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-    qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	"github.com/QBitFlow/qbitflow-go-sdk/v3"
 )
 
 func main() {
-    client := qbitflow.New("your-api-key")
+	// One client per API key, shared by the whole program: it is safe for concurrent use.
+	client, err := qbitflow.NewClient(os.Getenv("QBITFLOW_API_KEY"))
+	if err != nil {
+		log.Fatal(err) // a *qbitflow.ValidationError: no key, or not an sk_… key
+	}
+	ctx := context.Background()
 
-    // Create a one-time payment session with an inline product
-    session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-        ProductName: new("Premium Access"),
-        Description: new("One-time purchase"),
-        Price:       new(49.99),
-        SuccessURL:  new("https://yourapp.com/success"),
-        CancelURL:   new("https://yourapp.com/cancel"),
-        Reference:   new("order-1234"), // your own order ID
-    })
-    if err != nil {
-        log.Fatal(err)
-    }
+	// The recommended start-up check: what is this key, and which mode is it in?
+	me, err := client.Me(ctx)
+	if err != nil {
+		log.Fatal(err) // a *qbitflow.AuthenticationError for an unknown or revoked key
+	}
+	if me.Space != nil {
+		fmt.Printf("%s, role %s, test mode %v\n", me.Space.OrganizationName, me.Role, me.Space.Test)
+	}
 
-    fmt.Printf("Payment link: %s\n", session.Link)
-
-    // Check the transaction status. Until the customer pays, the API reports the session
-    // as not found.
-    status, err := client.TransactionStatus.GetTransactionStatus(
-        session.UUID,
-        qbmodels.TransactionTypeOneTimePayment,
-    )
-    var notFound *qberrors.NotFoundError
-    switch {
-    case errors.As(err, &notFound):
-        fmt.Println("Not paid yet")
-    case err != nil:
-        log.Fatal(err)
-    default:
-        fmt.Printf("Status: %s\n", status.Status)
-    }
+	// A hosted checkout for a one-time payment of 4.99 USD.
+	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+		ProductName: "Premium access",
+		Price:       4.99,
+		Reference:   "order-1042",
+		SuccessURL:  "https://shop.example.com/thanks?session={{UUID}}",
+		CancelURL:   "https://shop.example.com/cart",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Send the customer to", session.Link)
 }
 ```
 
-## Configuration
+Then fulfil the order when the [`payment.completed` webhook](#webhooks) arrives for
+`session.UUID`, never on the customer's redirect to your success page.
+
+### Conventions
+
+- **Every method** takes a `context.Context` first and optional [request options](#configuration)
+  last. Optional params are pointers: `nil` means "no filter" or "the defaults".
+- **Ids are strings.** Resources are named by UUIDs; transactions by prefixed ids (`pay@…` a
+  payment, `sub@…` a subscription, `sub-hist@…` a bill, `refund@…` a refund) that you pass back
+  verbatim. Only currencies keep numeric ids (`uint64`).
+- **Optional response fields:** an optional string is `""` when absent; every other optional field
+  (a number, a bool, a time, a nested object) is a pointer, `nil` when absent. A value the API
+  leaves out decodes to its zero value, never to an error.
+- **Optional request fields** that are pointers are set inline with `new(value)` (Go 1.26+):
+  `Immediate: new(false)`, `RefundPercent: new(50.0)`, `MinPeriods: new(uint32(3))`.
+- **Amounts:** USD amounts are `float64` (`Amount`, `AmountUSD`); exact amounts in a token's
+  smallest unit, and a few USD prices, are decimal strings (`AmountMinUnits`, `PriceUSD`,
+  `Allowance`), never rounded. Fee rates are percents: `FeePercent: 1.5` is 1.5 %.
+- **Enums** are named string types with constants (`qbitflow.SubscriptionStatusActive`). A value
+  this SDK does not know yet is kept as is: give every `switch` a `default` branch.
+- **Times** are `time.Time`, with the offset the API sent.
+
+## Authentication and acting for a member
+
+Every request sends your API key in `X-API-Key`. Keys are created in the QBitFlow dashboard; each
+belongs to one **space** (your organization's, or one of its members') and one **mode** (test or
+live). `NewClient` only checks the key's shape (non-blank, starting with `sk_`) and sends nothing:
+call `Me` to check it online.
 
 ```go
-// Minimal — API key only
-client := qbitflow.New("your-api-key")
-
-// Custom configuration
-import "time"
-
-client := qbitflow.NewWithConfig(qbf.Config{
-    APIKey:         "your-api-key",
-    BaseURL:        "https://api.qbitflow.app/v1", // optional, this is the default
-    Timeout:        30 * time.Second,              // optional, default 30s per attempt
-    MaxRetries:     3,                             // optional: 0 = default (3), negative = off
-    DisableRetries: false,                         // set true to attempt every request exactly once
-})
-
-// Override base URL after creation (useful for testing)
-client.SetBaseURL("http://localhost:3001")
-```
-
-Every request carries `X-API-Key` and `User-Agent: qbitflow-go/<qbf.Version>`. A blank API
-key makes every call fail with a `*qberrors.ValidationError` before anything is sent.
-
-Configure the client **before** using it: `SetBaseURL` and `SetTimeout` are not synchronised
-with in-flight requests, and clients or services obtained from `OnBehalfOf` earlier keep the
-base URL they were created with (the timeout is shared). See
-[Retries & Timeouts](#retries--timeouts) for the retry policy.
-
-## Response Types
-
-Every response type in `pkg/models` mirrors the Go type the API serializes, field for field,
-so the compiler tells you what can be missing:
-
-- **Value fields** (`string`, numbers, `bool`, nested structs, `time.Time`) are always usable.
-  When the API omits one — it omits `omitempty` fields at their zero value — or sends `null`,
-  it decodes to the zero value (`""`, `0`, `false`, a zero-valued struct, the zero time). For
-  example `Customer.PhoneNumber` is `""` when unset, `Payment.ProductID` is `0` for a payment
-  without a product, `Subscription.LastBillingDate.IsZero()` until the first billing, and a
-  pending `RefundEntry` has `TxHash == ""` and `MerchantMessage == ""`.
-- **Pointer fields** are genuinely nullable on the server. `nil` means none:
-  `Payment.Reference`, `Payment.CustomerUUID`, `Subscription.CustomerUUID`,
-  `Subscription.MinimumCancellationDate`, `SessionCheckout.CustomerUUID`,
-  `TransactionStatus.SettlementDetails`, `PaymentMetadata.OrganizationFee` / `ReferralFee`,
-  `RefundEntry.RespondedAt` / `Metadata`, `User.ClaimedAt`, `ApiKey.ExpiresAt`,
-  `Currency.MainCurrency`, `CombinedPayment.ProductID` / `SubscriptionUUID` / `Metadata`,
-  `SessionWebhookResponse.Status`.
-- **Lists** are never `nil` when returned by a service: an absent or `null` list is an empty
-  slice.
-- `Currency` is a value on `Payment`, `CombinedPayment`, `Subscription` and
-  `SubscriptionHistory`: `payment.Currency.Symbol` needs no nil check.
-- **Enum-like fields** are string types: a value this SDK does not know yet is kept verbatim —
-  never an error, never coerced. Compare against the constants and treat anything else as
-  "unknown".
-
-A field present with the wrong JSON type is a response-shape failure, reported as a
-`*qberrors.ServerError` carrying the HTTP status.
-
-## Acting on Behalf of a User
-
-If you hold an **organization (admin) API key**, you can perform any request as one of the users in your organization, without needing that user's own API key. This is useful for admin-level tooling, dashboards, and back-office automation where your server acts for a specific user (e.g. listing *their* products, creating a payment session *for them*, or reading *their* subscriptions).
-
-`client.OnBehalfOf(userID)` returns a client whose **every** service sends the
-`On-Behalf-Of` header. It shares the transport, connection pool and configuration of the
-original client, which is left untouched — so you can freely mix org-level and per-user
-calls:
-
-```go
-const userID uint64 = 123
-
-userClient := client.OnBehalfOf(userID)
-
-// List the products belonging to user 123
-products, err := userClient.Products.GetAll()
-
-// Read that user's payments
-payments, err := userClient.Payments.GetAllPayments(nil, nil)
-
-// The base client is unaffected — this call still runs at the organization level
-allOrgProducts, err := client.Products.GetAll()
-```
-
-For a one-off call, each service (except `Currencies`, whose routes are public) also has its
-own `OnBehalfOf`:
-
-```go
-products, err := client.Products.OnBehalfOf(userID).GetAll()
-```
-
-> **Note:** `OnBehalfOf` requires an organization-level admin API key; the acted-for user's
-> role applies to the request. `OnBehalfOf(0)` acts at the organization level — the header is
-> simply omitted. A user outside your organization is answered with `404`
-> (`*qberrors.NotFoundError`); existence is never revealed across organizations.
-
-## One-Time Payments
-
-### Create a Payment Session
-
-Provide an existing `ProductID`, a `ProductReference`, **or** the (`ProductName` + `Description` + `Price`) triplet.
-Every string option treats `""` like `nil`: the field is left out of the request.
-
-```go
-// Using an existing product, for a known customer
-session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-    ProductID:    new(uint64(42)),
-    SuccessURL:   new("https://yourapp.com/success"),
-    CancelURL:    new("https://yourapp.com/cancel"),
-    CustomerUUID: new(customer.UUID), // a bare UUID, from Customers.Create / Get
-})
-
-// Using an inline product definition (price must be greater than 0)
-session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-    ProductName: new("Custom Item"),
-    Description: new("Limited edition widget"),
-    Price:       new(19.99),
-    SuccessURL:  new("https://yourapp.com/success"),
-    CancelURL:   new("https://yourapp.com/cancel"),
-})
-```
-
-Without a `CustomerUUID` (or `CustomerReference`), the customer enters their details during
-checkout.
-
-#### Using your own references
-
-Instead of storing QBitFlow's internal UUIDs, pass your own identifiers. Set `Reference` to your
-order/invoice ID, and use `ProductReference` / `CustomerReference` to select an existing product or
-customer by your own reference:
-
-```go
-session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-    Reference:         new("order-1234"),      // your own transaction reference
-    ProductReference:  new("PROD-PREMIUM"),    // use a product by your reference (instead of ProductID)
-    CustomerReference: new("user-42"),         // use a customer by your reference (instead of CustomerUUID)
-})
-```
-
-The `Reference` is echoed back on the resulting `Payment` and in webhook payloads, and you can look
-the payment up later with [`GetPaymentByReference`](#get-a-completed-payment). If no customer matches
-`CustomerReference`, one is created during checkout.
-
-### Retrieve a Session
-
-```go
-session, err := client.Payments.GetSession("pay@...", nil)
+me, err := client.Me(ctx)
 if err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
+}
+if me.Space == nil || !me.Space.Test {
+	log.Fatal("this job must run with a test-mode key")
+}
+fmt.Println("acting as", me.Role, "in", me.Space.OrganizationName) // admin: an organization key
+```
+
+Keep the key in a secret store or an environment variable, never in code. Keys issued before API v2
+(`sk_<digits>_…`) still work; rotate them in the dashboard to the `sk_<uuid>_…` format.
+
+### `On-Behalf-Of`: acting in a member's space
+
+A marketplace's **organization key** can act in any of its members' spaces: create their products
+and checkouts, read their payments. Name the member by their **user UUID** (`Member.UserUUID`,
+also in the `member.joined` webhook). A non-member, an owner or admin of the team, or a member of
+the other mode answers 404.
+
+```go
+memberUUID := "0192f1c2-7b3a-7c4d-9e5f-6a7b8c9d0e1f" // Member.UserUUID
+
+// A client acting in the member's space. It shares the connections and settings of client.
+seller := client.OnBehalfOf(memberUUID)
+products, err := seller.Products.List(ctx, nil)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(len(products), "products in the seller's space")
+
+// One request only: the request option wins over the client's.
+page, err := client.Payments.List(ctx, nil, qbitflow.WithOnBehalfOf(memberUUID))
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(len(page.Items), "payments of the seller")
+
+// "" forces the organization's own space for one request of the seller's client.
+own, err := seller.Products.List(ctx, nil, qbitflow.WithOnBehalfOf(""))
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(len(own), "products of the organization")
+```
+
+`qbitflow.WithOnBehalfOf(uuid)` is also a client option: `qbitflow.NewClient(key,
+qbitflow.WithOnBehalfOf(uuid))`. A value that is not a UUID (or the nil UUID) is a
+`*ValidationError`, and nothing is sent.
+
+## Checkout sessions
+
+A checkout session is a hosted payment page. Create it, send your customer to its `Link`, and act
+on the webhook. The session's id (`pay@…` or `sub@…`) is also the id of the payment or the
+subscription it creates once the customer's transaction is confirmed.
+
+Name the product with **exactly one** of `ProductUUID`, `ProductReference`, or an inline product
+(`ProductName` + `Price`, `Description` optional):
+
+```go
+session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+	ProductUUID:       "0192f1c2-1111-7c4d-9e5f-6a7b8c9d0e1f", // or ProductReference: "tshirt-blue-m"
+	Reference:         "order-1043",                           // your order id: unique per space
+	CustomerReference: "crm-42",                               // kept on the payment
+	SuccessURL:        "https://shop.example.com/orders/1043?session={{UUID}}&type={{TRANSACTION_TYPE}}",
+	CancelURL:         "https://shop.example.com/cart",
+	ExpiresInMinutes:  30, // 10 to 1440; 0 = the default
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("pay at", session.Link, "- session", session.UUID)
+```
+
+A subscription checkout takes the same fields plus its terms, each optional over a subscription
+product's:
+
+```go
+session, err := client.CheckoutSessions.CreateSubscription(ctx, &qbitflow.CreateSubscriptionSessionParams{
+	ProductName: "Pro plan",
+	Price:       4.99, // USD per period
+	Frequency:   &qbitflow.Duration{Value: 1, Unit: qbitflow.DurationUnitMonths},
+	TrialPeriod: &qbitflow.Duration{Value: 14, Unit: qbitflow.DurationUnitDays},
+	MinPeriods:  new(uint32(3)), // the customer commits to 3 periods
+	SuccessURL:  "https://app.example.com/billing?subscription={{UUID}}",
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("subscribe at", session.Link)
+```
+
+- **Redirect placeholders.** In `SuccessURL` and `CancelURL`, QBitFlow replaces `{{UUID}}` with the
+  session's id and `{{TRANSACTION_TYPE}}` with `payment` or `createSubscription`. In live mode both
+  URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
+  webhook, or on `GetStatus`.
+- **Errors to expect:** `409 merchant_not_ready` (`Details["reason"]`) when the space's wallets
+  accept no currency; `409 unique_violation` when another payment or open session holds the
+  `Reference`; `400 validation_failed` above 5 USD in test mode (`Details["max"]`); `404` for an
+  unknown product or customer.
+
+### Status
+
+```go
+status, err := client.CheckoutSessions.GetStatus(ctx, session.UUID)
+if err != nil {
+	log.Fatal(err)
+}
+switch status.Status {
+case qbitflow.CheckoutSessionStatusCompleted:
+	fmt.Println("paid, tx", status.TxHash)
+case qbitflow.CheckoutSessionStatusExpired:
+	fmt.Println("expired unpaid:", status.Message)
+case qbitflow.CheckoutSessionStatusWaitingConfirmation:
+	fmt.Println("sent, waiting for the network")
+default: // created, or a status this SDK does not know
+	if status.LastAttempt != nil {
+		fmt.Println("last attempt failed:", status.LastAttempt.Code) // the customer may try again
+	}
+}
+```
+
+| `Status` | Meaning | Final |
+|---|---|---|
+| `created` | Waiting for the customer. With `LastAttempt` set, their last attempt failed (`LastAttempt.Code` says why) | no |
+| `waitingConfirmation` | A transaction was sent; waiting for the network. It may last: the transaction can still land | no |
+| `completed` | Confirmed and recorded: the `Payment` or `Subscription` exists, with the session's id | yes |
+| `expired` | Expired unpaid (`checkout.expired` was sent). Read some days later, an expired session is a 404 | yes |
+
+**Never cancel an order on `LastAttempt`:** a failed attempt is not final, and the customer can pay
+from the same checkout until it expires. Release what the order holds on `checkout.expired`.
+
+### Expire
+
+End a session early (an order cancelled on your side). It answers its status, and
+`checkout.expired` follows. Once the customer paid or is paying it is a `409 tx_already_sent`.
+
+```go
+expired, err := client.CheckoutSessions.Expire(ctx, session.UUID)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(expired.Status) // expired
+```
+
+## Products and customers
+
+Products are optional (a checkout can name an inline product) and give you a reusable catalog
+with payment links. A subscription product carries its terms.
+
+```go
+product, err := client.Products.Create(ctx, &qbitflow.CreateProductParams{
+	Name:        "Pro plan",
+	Description: "Everything, billed monthly",
+	Price:       4.99,
+	Reference:   "pro-monthly", // unique per space; generated when ""
+	Subscription: &qbitflow.SubscriptionTermsParams{
+		Frequency: &qbitflow.Duration{Value: 1, Unit: qbitflow.DurationUnitMonths},
+	},
+})
+if err != nil {
+	log.Fatal(err)
 }
 
-fmt.Printf("Product: %s  Price: $%.2f\n", session.ProductName, session.Price)
-fmt.Printf("Is payment: %v  Currencies: %v\n", session.IsPayment(), session.AvailableCurrencies)
-```
-
-The second argument (`closeToExpireError *bool`) is `nil` for the API default (reject a session
-that is about to expire).
-
-### Get a Completed Payment
-
-```go
-payment, err := client.Payments.GetPayment("pay@...")
-fmt.Printf("Amount: $%.2f in %s  Hash: %s\n", payment.Amount, payment.Currency.Symbol, payment.TransactionHash)
-if payment.CustomerUUID != nil {
-    fmt.Println("Customer:", *payment.CustomerUUID)
+// Only the fields set change. A new price applies to new checkouts and subscribers only.
+product, err = client.Products.Update(ctx, product.UUID, &qbitflow.UpdateProductParams{
+	Price:    new(5.99),
+	IsActive: new(false), // hidden from Products.List
+})
+if err != nil {
+	log.Fatal(err)
 }
-```
 
-You can also look a payment up by the `Reference` you assigned when creating the session — no need
-to store QBitFlow's UUID:
-
-```go
-payment, err := client.Payments.GetPaymentByReference("order-1234")
-fmt.Printf("UUID: %s  Amount: $%.2f\n", payment.UUID, payment.Amount)
-```
-
-> References, emails and identifiers are path-escaped correctly, but the API currently cannot
-> route a reference containing `/` (it answers 404) — avoid `/` in references you look up.
-
-### List Payments
-
-```go
-limit := uint16(20) // optional; must be positive when given
-
-// One-time payments only
-result, err := client.Payments.GetAllPayments(&limit, nil)
-
-// Combined (one-time + subscription billing cycles)
-combined, err := client.Payments.GetAllCombinedPayments(&limit, nil)
-
-// Paginate
-if result.HasMore() {
-    nextPage, err := client.Payments.GetAllPayments(&limit, result.NextCursor)
-    _ = nextPage
+all, err := client.Products.List(ctx, &qbitflow.ProductListParams{IncludeHidden: true, Subscription: new(true)})
+if err != nil {
+	log.Fatal(err)
 }
+fmt.Println(product.PaymentLink, len(all))
 ```
 
-### Get Customer for a Transaction
+`Products.Get`, `GetByReference` and `Delete` complete the set. Deleting a product does not stop
+its subscriptions: cancel them with `Subscriptions.Cancel` if the product is gone for good.
 
 ```go
-customer, err := client.Payments.GetCustomerForTransaction("pay@...") // or a sub@ subscription UUID
-fmt.Printf("%s %s — %s\n", customer.Name, customer.LastName, customer.Email)
+customer, err := client.Customers.Create(ctx, &qbitflow.CreateCustomerParams{
+	Name:      "Ada",
+	LastName:  "Lovelace",
+	Email:     "ada@example.com",
+	Reference: "crm-42",
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+// A pointer to "" clears PhoneNumber or Address; nil leaves them unchanged.
+customer, err = client.Customers.Update(ctx, customer.UUID, &qbitflow.UpdateCustomerParams{PhoneNumber: new("")})
+if err != nil {
+	log.Fatal(err)
+}
+
+byEmail, err := client.Customers.GetByEmail(ctx, "ada@example.com")
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(customer.UUID == byEmail.UUID)
+```
+
+`Customers.Get`, `GetByReference`, `List` / `Iterate` (by `Email` or `Verified`) and `Delete`
+complete the set. A checkout given `CustomerUUID` or `CustomerReference` asks the customer
+nothing (`CustomerReference` is kept on the payment, and links your customer with that reference
+if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
+says (the full details by default).
+
+## Payments and failures
+
+A `Payment` exists once its transaction is confirmed, with its checkout session's `pay@…` id.
+
+```go
+since := time.Now().AddDate(0, -1, 0)
+page, err := client.Payments.List(ctx, &qbitflow.PaymentListParams{
+	CreatedAfter:   &since,
+	IncludeMembers: true, // organization key: the members' payments too
+	Limit:          50,
+})
+if err != nil {
+	log.Fatal(err)
+}
+for _, p := range page.Items {
+	fmt.Printf("%s %q: %.2f USD (%s), merchant got %.2f USD\n",
+		p.UUID, p.Reference, p.Amount, p.ExplorerURL, p.Metadata.TxAmounts.USD.Merchant)
+}
+
+payment, err := client.Payments.Get(ctx, "pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f", nil)
+if err != nil {
+	log.Fatal(err)
+}
+byRef, err := client.Payments.GetByReference(ctx, "order-1042")
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(payment.TxHash, byRef.UUID, payment.Refundable != nil && *payment.Refundable)
+```
+
+- **Filters** (`PaymentListParams`): `CustomerUUID`, `ProductUUID`, `CreatedAfter` / `CreatedBefore`
+  (both excluded), `Refunded`, and, with an organization key acting for itself, `IncludeMembers`
+  (every member's rows, each naming its `UserUUID`) or `UserUUID` (one member's). The last two
+  exclude each other.
+- **Reading a member's row** from the organization's space: `Payments.Get(ctx, id,
+  &qbitflow.ReadParams{IncludeMembers: true})`, or `OnBehalfOf` the member.
+- **The combined feed** of one-time payments and subscription bills, newest first:
+  `Payments.ListCombined` / `IterateCombined`, with the same filters plus `Source`
+  (`CombinedPaymentSourcePayment`, `CombinedPaymentSourceSubscriptionHistory`) and
+  `SubscriptionUUID`.
+- **Failures** are the failed attempts to pay a checkout or a bill. They never moved money and
+  are not final: the customer can try again.
+
+```go
+for f, err := range client.Failures.Iterate(ctx, &qbitflow.FailureListParams{
+	Category: qbitflow.FailureCategoryInsufficientBalance,
+}) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%s attempt %d: %s (%.2f USD)\n", f.TxUUID, f.Attempt, f.Code, f.AttemptedUSD)
+}
 ```
 
 ## Subscriptions
 
-### Create a Subscription Session
+A subscription exists once its customer signed its checkout: paid the first period, or started
+the free trial. It keeps the checkout's `sub@…` id for life.
 
-```go
-session, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
-    ProductID:   new(uint64(1)),
-    Frequency:   qbmodels.Duration{Value: 1, Unit: qbmodels.DurationUnitMonths},
-    TrialPeriod: &qbmodels.Duration{Value: 7, Unit: qbmodels.DurationUnitDays}, // optional
-    MinPeriods:  new(uint32(3)),        // optional: minimum periods before cancellation (0 = none)
-    SuccessURL:  new("https://yourapp.com/success"),
-    CancelURL:   new("https://yourapp.com/cancel"),
-})
-fmt.Printf("Subscription link: %s\n", session.Link)
-```
-
-Like one-time payments, subscription sessions accept your own `Reference`, `ProductReference`, and
-`CustomerReference` instead of QBitFlow's internal IDs:
-
-```go
-session, err := client.Subscriptions.CreateSession(&qbf.CreateSubscriptionSessionOptions{
-    Reference:         new("sub-1234"),   // your own subscription reference
-    ProductReference:  new("PLAN-PRO"),   // select a product by your reference
-    CustomerReference: new("user-42"),    // select a customer by your reference
-    Frequency:         qbmodels.Duration{Value: 1, Unit: qbmodels.DurationUnitMonths},
-})
-```
-
-**Available frequency units:** `DurationUnitSeconds`, `DurationUnitMinutes`, `DurationUnitHours`, `DurationUnitDays`, `DurationUnitWeeks`, `DurationUnitMonths`, `DurationUnitYears`. `Frequency.Value` must be within 1–4294967295, `TrialPeriod.Value` (if set) within 0–4294967295, and `MinPeriods` (if set) is sent only when greater than 0 — all checked client-side before the request.
-
-> **Webhook URLs are configured in the dashboard, not per session.** Set the
-> **Transaction webhook** URL under settings in the [QBitFlow dashboard](https://qbitflow.app) —
-> it applies consistently to every transaction.
-
-### Get Subscription Details
-
-A subscription has its own `sub@` UUID, **different from the checkout session's UUID**. You
-receive it in the [subscription webhooks](#subscription-status-webhook-handler)
-(`SubscriptionWebhook.SubscriptionUUID`), or you can look the subscription up by your reference.
-
-```go
-sub, err := client.Subscriptions.GetSubscription("sub@...")
-fmt.Printf("Status: %s  Currency: %s  Next billing: %s\n",
-    sub.SubscriptionStatus, sub.Currency.Symbol, sub.NextBillingDate.Format("2006-01-02"))
-if sub.LastBillingDate.IsZero() {
-    fmt.Println("Not billed yet")
-}
-```
-
-Or look a subscription up by the `Reference` you assigned when creating the session:
-
-```go
-sub, err := client.Subscriptions.GetSubscriptionByReference("sub-1234")
-fmt.Printf("UUID: %s  Status: %s\n", sub.UUID, sub.SubscriptionStatus)
-```
-
-### Subscription Status Changes
-
-A subscription's status changes over its lifetime (`trial`, `active`, `past_due`, `low_on_funds`,
-`pending`, `cancelled`, `trial_expired`).
-
-Configure the **Subscription status webhook** URL under settings in the
-[QBitFlow dashboard](https://qbitflow.app) and QBitFlow will POST a `SubscriptionWebhook` to your
-endpoint whenever a subscription changes status — no need to poll. The same endpoint also
-receives a delivery on each successful renewal, so the envelope carries a `Type`
-discriminator and the event-specific payload in `Data`:
-
-```go
-type SubscriptionWebhook struct {
-    SubscriptionUUID      string                  // the subscription this is about
-    SubscriptionReference string                  // your own reference ("" if none was set)
-    Type                  SubscriptionWebhookType // "status_transition" or "billing"
-    Data                  json.RawMessage         // unwrap with StatusTransition() or Billing()
-}
-
-// Type == SubscriptionWebhookTypeStatusTransition
-type SubscriptionStatusTransition struct {
-    PreviousStatus SubscriptionStatus // status before the transition
-    CurrentStatus  SubscriptionStatus // status after the transition
-    UpdatedAt      time.Time          // when the transition occurred
-}
-
-// Type == SubscriptionWebhookTypeBilling -> Data is a SubscriptionHistory
-```
-
-See [Webhook Handling](#webhook-handling) for a full handler example.
-
-**Subscription statuses:** `SubscriptionStatusTrial`, `SubscriptionStatusActive`, `SubscriptionStatusPastDue`, `SubscriptionStatusLowOnFunds`, `SubscriptionStatusPending`, `SubscriptionStatusCancelled`, `SubscriptionStatusTrialExpired`.
-
-### Payment History
-
-```go
-history, err := client.Subscriptions.GetPaymentHistory("sub@...")
-for _, record := range history {
-    fmt.Printf("%s — $%.2f on %s\n", record.UUID, record.Amount,
-        record.CreatedAt.Format("2006-01-02"))
-}
-```
-
-An unknown subscription yields an empty list, not an error.
-
-### Execute Test Billing Cycle (test mode only)
-
-```go
-resp, err := client.Subscriptions.ExecuteTestBillingCycle("sub@...")
-fmt.Println(resp.Message) // {"message": "..."}
-```
-
-A subscription that is not yet due is refused with a `*qberrors.ConflictError` (HTTP 409).
-`ExecuteTestBillingCycle` and `ForceCancel` are never retried by the SDK, even though they
-are GETs: a timeout may already have queued the action.
-
-### Force Cancel a Subscription
-
-```go
-resp, err := client.Subscriptions.ForceCancel("sub@...")
-fmt.Println(resp.Message)
-```
-
-## Transaction Status
-
-### Poll Status
-
-```go
-status, err := client.TransactionStatus.GetTransactionStatus(
-    "pay@...",
-    qbmodels.TransactionTypeOneTimePayment,
-)
-var notFound *qberrors.NotFoundError
-if errors.As(err, &notFound) {
-    return // the session exists but has not been processed yet (or the UUID is unknown)
-}
-if err != nil {
-    log.Fatal(err)
-}
-
-switch status.Status {
-case qbmodels.TransactionStatusCompleted:
-    fmt.Printf("Done! tx hash: %s\n", status.TxHash)
-case qbmodels.TransactionStatusFailed:
-    fmt.Printf("Failed: %s\n", status.Message) // "" when the API gives no reason
-}
-```
-
-### Real-Time Updates
-
-To react to transactions as they complete, use [webhooks](#webhook-handling) (recommended):
-QBitFlow notifies your endpoint, so nothing has to poll. Use `GetTransactionStatus` for an
-on-demand check, for example on your success-redirect page.
-
-### Transaction Types
-
-| Constant | Value |
+| `Status` | Meaning |
 |---|---|
-| `TransactionTypeOneTimePayment` | `"payment"` |
-| `TransactionTypeCreateSubscription` | `"createSubscription"` |
-| `TransactionTypeCancelSubscription` | `"cancelSubscription"` |
-| `TransactionTypeExecuteSubscriptionPayment` | `"executeSubscription"` |
-| `TransactionTypeIncreaseAllowance` | `"increaseAllowance"` |
-| `TransactionTypeUpdateMaxAmount` | `"updateMaxAmount"` |
-| `TransactionTypeRefund` | `"refund"` |
-| `TransactionTypeClaimFunds` | `"claimFunds"` |
+| `trial` | In its free trial |
+| `trialExpired` | The trial ended without the customer confirming it (`ActionRequired` `confirmTrial`); cancelled 7 days later unless confirmed |
+| `active` | Billed on its due dates |
+| `pastDue` | A bill failed; retried for up to 7 days (`Dunning` on reads), then cancelled |
+| `paused` | Paused by its customer: not billed until resumed |
+| `stopped` | Cancelled during its period: never billed again, `cancelled` at `NextBillingDate` |
+| `cancelled` | Over (`CancellationReason` says why). Final |
+
+**Access rule: grant access while `now < CurrentPeriodEnd`, whatever the status.** A `stopped` or
+`paused` subscription has paid for its period; a `pastDue` one's period has ended.
+
+```go
+func hasAccess(sub *qbitflow.Subscription, now time.Time) bool {
+	return sub.CurrentPeriodEnd != nil && now.Before(*sub.CurrentPeriodEnd)
+}
+```
+
+`ActionRequired` says what the customer must do (`topUpAllowance`, `raiseMaximum`,
+`confirmTrial`; `""`: nothing): point them to the `ManagementPageLink` the subscription webhooks
+carry.
+
+```go
+page, err := client.Subscriptions.List(ctx, &qbitflow.SubscriptionListParams{
+	Status: qbitflow.SubscriptionStatusPastDue,
+})
+if err != nil {
+	log.Fatal(err)
+}
+for _, sub := range page.Items {
+	if sub.Dunning != nil {
+		fmt.Println(sub.UUID, sub.Dunning.RemainingAttempts, "attempts left")
+	}
+}
+
+sub, err := client.Subscriptions.Get(ctx, "sub@0192f1c2-3333-7c4d-9e5f-6a7b8c9d0e1f", nil) // cancelled ones too
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(sub.Status, sub.PriceUSD, "USD per period")
+
+// Every bill, newest first: the iterator fetches the pages lazily.
+for bill, err := range client.Subscriptions.IterateBills(ctx, sub.UUID, nil) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	if bill.PeriodEnd != nil {
+		fmt.Printf("%s: %.2f USD, paid until %s\n", bill.UUID, bill.Amount, bill.PeriodEnd.Format(time.DateOnly))
+	}
+}
+```
+
+- `Subscriptions.GetByReference` reads one by your checkout's `Reference`; `GetBill` one bill
+  (`sub-hist@…`).
+- `Subscriptions.GetPublicHistory` returns the 10 latest bills as the customer's page shows them.
+  It is a public route: the fields only the merchant sees (`Metadata`, `CustomerUUID`,
+  `CustomerReference`, `UserUUID`, `PaidMinUnits`, `Refund`, …) are empty there. Use `ListBills`
+  for full bills.
+- Before its checkout completes, `Subscriptions.Get` is a 404: read the checkout session instead.
+
+### Cancel
+
+`Cancel` cancels without the customer signing. By default it is immediate (`cancelled`, reason
+`merchant`); `Immediate: new(false)` stops it now and cancels it at the end of the period paid for.
+
+```go
+res, err := client.Subscriptions.Cancel(ctx, sub.UUID, &qbitflow.CancelSubscriptionParams{
+	Immediate: new(false),
+})
+if err != nil {
+	log.Fatal(err) // 409 subscription_already_stopped_or_inactive, 404 once cancelled
+}
+if res.Pending {
+	// HTTP 202: the on-chain cancellation is still confirming and the status is not updated yet.
+	// It goes on regardless; subscription.statusChanged tells the end.
+	fmt.Println("cancellation confirming")
+} else {
+	fmt.Println("now", res.Subscription.Status) // stopped
+}
+```
+
+`Cancel` answers 200 when done and 202 (`Pending`) while confirming on-chain. It is never retried
+automatically.
+
+### Test billing
+
+In test mode a subscription is billed only when you ask, with live's statuses and webhooks:
+
+```go
+state, err := client.Subscriptions.ExecuteTestBilling(ctx, sub.UUID)
+if err != nil {
+	log.Fatal(err) // 409 payment_not_due before NextBillingDate; 400 for a live subscription
+}
+fmt.Println(state.Stage, state.Outcome, state.FailureCode)
+```
+
+Walk the timeline once in test mode: a 5-minute frequency, pay from a test wallet, trigger the
+bill, then empty the wallet and trigger it again to see `subscription.billingFailed` and
+`pastDue`.
 
 ## Refunds
 
 ```go
-// Get the refund for a specific transaction
-refund, err := client.Refunds.GetByTransactionUUID("pay@...")
-fmt.Printf("Status: %s  Reason: %s\n", refund.Status, refund.Reason)
+// Refunds waiting for an answer. From the organization's space the members' are included by
+// default: IncludeMembers new(false) leaves them out.
+pending, err := client.Refunds.List(ctx, &qbitflow.RefundListParams{IncludeMembers: new(false)})
+if err != nil {
+	log.Fatal(err)
+}
+for _, r := range pending {
+	fmt.Println(r.UUID, r.TxUUID, r.InitiatedBy, r.Reason, r.AmountUSD)
+}
 
-// List the refunds awaiting your response
-refunds, err := client.Refunds.GetAll()
-fmt.Printf("%d active refunds\n", len(refunds))
-
-// List handled (approved / refused / failed) refunds with pagination
-limit := uint16(20)
-result, err := client.Refunds.GetAllInactive(&limit, nil)
-for _, r := range result.Items {
-    fmt.Printf("%s — %s\n", r.UUID, r.Status)
+// Answered refunds (approved or rejected), page by page.
+for r, err := range client.Refunds.IterateInactive(ctx, nil) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(r.UUID, r.Status, r.ExplorerURL)
 }
 ```
 
-**Refund statuses:** `RefundStatusPending`, `RefundStatusApproved`, `RefundStatusRefused`, `RefundStatusFailed`.
-
-Until the merchant has handled a refund, `RespondedAt` and `Metadata` are `nil` and `TxHash` /
-`MerchantMessage` are `""`.
-
-## Accounting Export
-
-Export accounting events for a date range as JSON (`Export`) or CSV (`ExportCSV`). Dates are
-inclusive, formatted `YYYY-MM-DD` and must be real calendar dates, and `From` must not be after
-`To` — the SDK checks this before the request (`*qberrors.ValidationError`). The maximum span
-is enforced by the API.
+`Refunds.Initiate` starts a refund of a payment (`pay@…`) or a bill (`sub-hist@…`) of the space.
+**It creates a pending refund: no money moves until you sign the transfer in the dashboard**,
+from the wallet that was paid. `refund.completed` tells you when it is sent.
 
 ```go
-// JSON export — returns []AccountingEvent
-events, err := client.Accounting.Export(qbf.AccountingExportParams{
-    From: "2026-09-01",
-    To:   "2026-09-30",
+refund, err := client.Refunds.Initiate(ctx, &qbitflow.InitiateRefundParams{
+	TxUUID:          "pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e1f",
+	RefundPercent:   new(50.0), // of everything the customer paid, network fee included; nil = 100
+	Reason:          "Damaged in transit",
+	MerchantMessage: "Sorry about that: half of your payment is on its way back.",
+})
+var conflict *qbitflow.ConflictError
+if errors.As(err, &conflict) && conflict.Code == "refund_already_exists" {
+	fmt.Println("already refunded:", conflict.Details["refundUuid"]) // one refund per transaction
+} else if err != nil {
+	log.Fatal(err)
+} else {
+	fmt.Println(refund.UUID, refund.Status) // pending
+}
+```
+
+A refund is `pending`, `approved` or `rejected`; `InitiatedBy` is `customer` (a request you answer
+in the dashboard) or `merchant`. A held seller's payment already released to them can no longer be
+refunded (`409 held_funds_released`).
+
+## Marketplaces
+
+A marketplace is an organization whose sellers are its **members**. You invite them, sell for
+them with your organization key and `On-Behalf-Of`, take a commission on their payments, and may
+hold their funds until you trust them. QBitFlow stays non-custodial: money goes from the customer's
+wallet to the seller's (and your commission to yours) in one transaction.
+
+**1. Invite the seller.** The SDK always invites members (`role: user`); the team is invited from
+the dashboard.
+
+```go
+created, err := client.Invitations.Create(ctx, &qbitflow.CreateInvitationParams{
+	Email:                  "seller@example.com",
+	TrustLayer:             true,     // hold their payments until Members.Trust
+	OrganizationFeePercent: new(5.0), // your commission: 0 to 50 %, at most 2 decimals
+	RedirectURL:            "https://market.example.com/welcome",
 })
 if err != nil {
-    log.Fatal(err)
+	log.Fatal(err) // 409 already_joined for a member; 429 beyond 50 invitations an hour
+}
+fmt.Println(created.Invitation.UUID, created.Link) // the link is also emailed
+```
+
+**2. Wait for `member.joined`.** The seller exists once they accepted: store the event's
+`UserUUID` and match `InvitationUUID` to your invitation. Never trust the redirect's
+`?invitationUuid=` (anyone can open it).
+
+```go
+joined, err := event.MemberJoined()
+if err != nil {
+	return err
+}
+fmt.Println("invitation", joined.InvitationUUID, "accepted by", joined.UserUUID)
+```
+
+**3. Sell for them.** The seller adds their receiving wallet in their QBitFlow dashboard (only
+they can, not needed while you hold their funds). Then act in their space:
+
+```go
+currencies, err := client.Wallets.ListSupportedCurrencies(ctx, &qbitflow.SupportedCurrenciesParams{UserUUID: memberUUID})
+if err != nil {
+	log.Fatal(err)
+}
+if len(currencies) == 0 {
+	log.Fatal("the seller cannot be paid yet: their checkouts would answer 409 merchant_not_ready")
 }
 
+seller := client.OnBehalfOf(memberUUID)
+session, err := seller.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+	ProductName: "Handmade mug",
+	Price:       4.5,
+	SuccessURL:  "https://market.example.com/orders/{{UUID}}",
+})
+if err != nil {
+	log.Fatal(err) // 403 policy_disabled when your policies don't let members do this
+}
+fmt.Println(session.Link)
+```
+
+**4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
+default; the event's `UserUUID` names the seller. Use it as `OnBehalfOf` for follow-up reads.
+
+**5. Commission and held funds.** Each payment records your fee in `Metadata.OrganizationFee` and
+`Metadata.TxAmounts`. While you hold a seller's funds (`TrustLayer` true, `Member.TrustedAt`
+nil), their payments go to your wallet and the net is owed to them:
+
+```go
+held, err := client.Members.GetHeldFunds(ctx, memberUUID)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Printf("owed to the seller: %.2f USD over %d lines\n", held.TotalAmount, len(held.Ledgers))
+
+// Their new payments go to their own wallets from now on. What is held stays held until you
+// release it from the dashboard (heldFunds.released tells you).
+member, err := client.Members.Trust(ctx, memberUUID)
+if err != nil {
+	log.Fatal(err)
+}
+if member.TrustedAt != nil {
+	fmt.Println("trusted since", member.TrustedAt.Format(time.RFC3339))
+}
+
+// Change the commission (a checkout already created keeps its fee).
+_, err = client.Members.Update(ctx, memberUUID, &qbitflow.UpdateMemberParams{OrganizationFeePercent: 7.5})
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+- `Members.List` / `Iterate` / `Get`, `Members.ListHeldFunds` (every member owed), and
+  `seller.Members.GetOwnHeldFunds` (the seller's side) complete the reads.
+- `Members.Remove` ends a seller's membership in the key's mode: their keys stop working and their
+  checkouts close. It is a `409 held_funds_pending` while you hold their live funds: release them
+  first.
+- `Invitations.List` / `Iterate` (by `Status`) and `Invitations.Revoke` manage the invitations.
+- Today a seller whose account already belongs to another organization cannot accept (no
+  `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
+
+## Wallets
+
+Wallets are added and removed in the dashboard, by their owner only. The SDK reads them.
+
+```go
+wallets, err := client.Wallets.List(ctx, &qbitflow.WalletListParams{WithBalances: true})
+if err != nil {
+	log.Fatal(err)
+}
+for _, w := range wallets {
+	fmt.Println(w.Currency.Symbol, w.PublicKey)
+	for _, tw := range w.TokenWallets {
+		if tw.Balance != nil {
+			fmt.Printf("  %s: %s (%.2f USD)\n", tw.Token.Symbol, tw.Balance.Balance, tw.Balance.BalanceUSD)
+		}
+	}
+}
+```
+
+`Wallets.ListForMember(ctx, userUUID)` reads a member's wallets (organization key), and
+`Wallets.ListSupportedCurrencies` the currencies a space's checkouts accept: none means its
+checkouts answer `409 merchant_not_ready`.
+
+## Accounting export
+
+Every payment, bill, refund and fee between two dates (`YYYY-MM-DD`, both included), as JSON rows
+or as CSV text:
+
+```go
+events, err := client.Accounting.ExportJSON(ctx, "2026-09-01", "2026-09-30")
+if err != nil {
+	log.Fatal(err)
+}
 for _, e := range events {
-    fmt.Printf("[%s] %s %s — gross $%.2f net $%.2f\n",
-        e.TxTimeUTC.Format("2006-01-02"), e.Type, e.PaymentID,
-        e.GrossAmountUSD, e.NetAmountUSD)
+	fmt.Println(e.Type, e.PaymentUUID, e.TxTimeUTC, e.TokenSymbol, e.GrossAmount, e.NetAmount)
 }
 
-// CSV export — returns the CSV text (header row + one row per event)
-csv, err := client.Accounting.ExportCSV(qbf.AccountingExportParams{
-    From: "2026-09-01",
-    To:   "2026-09-30",
+csv, err := client.Accounting.ExportCSV(ctx, "2026-09-01", "2026-09-30")
+if err != nil {
+	log.Fatal(err)
+}
+if err := os.WriteFile("qbitflow-2026-09.csv", []byte(csv), 0o600); err != nil {
+	log.Fatal(err)
+}
+```
+
+The SDK checks the dates and `from <= to` before sending. **The API allows at most 95 days per
+export** and answers 400 beyond: split longer ranges. Rows are typed `payment`,
+`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`; amounts in a token's smallest
+unit are decimal strings, and the empty fields of a row are left out.
+
+## Webhooks
+
+QBitFlow posts an **event** to your endpoints when something happens: a payment confirmed, a
+subscription billed, a member joined.
+
+### 1. Create an endpoint and store its secret
+
+```go
+created, err := client.Webhooks.Endpoints.Create(ctx, &qbitflow.CreateWebhookEndpointParams{
+	URL: "https://shop.example.com/webhooks/qbitflow",
+	Events: []qbitflow.EventType{ // nil: every type, including the ones added later
+		qbitflow.EventTypePaymentCompleted,
+		qbitflow.EventTypeCheckoutExpired,
+		qbitflow.EventTypeSubscriptionStatusChanged,
+	},
+	Description: "Order fulfilment",
 })
 if err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
 }
-os.WriteFile("accounting_2026_09.csv", []byte(csv), 0644)
+// The whsec_… secret is shown only this once: put it in your secret store now.
+fmt.Println(created.UUID, created.Secret)
 ```
 
-Each `AccountingEvent` contains full transaction details: product, customer, blockchain info, fees (platform, organization, network), and gross/net amounts. Decimal amounts (`GrossAmount`, `PlatformFee`, `NetAmount`, …) are decimal strings; the `*USD` fields are `float64`. `Type` is one of the `qbmodels.AccountingEventType*` values (`payment`, `refund`, `organizationFee`, `referralFee`, and the subscription-billing value, which the API documents both as `subscriptionHistory` and `subHistory`).
+Up to 10 endpoints per space and mode; live endpoints need `https` and a public host. An
+organization endpoint also receives its members' events unless created with
+`IncludeMembers: new(false)`. `Endpoints.List`, `Get`, `Update` (`Enabled: new(false)` pauses it,
+`new(true)` enables it again) and `Delete` manage them. An endpoint's secret is shown and rotated in
+the dashboard only.
 
-## Account Claims
+### 2. Verify and handle the deliveries
 
-Organizations can create users before those users have claimed their accounts. During the unclaimed period all payments go to the organization and a ledger is kept. When the organization creates a claim request, the user receives a link to set up their password and wallet, then the owed funds are transferred.
+Verify the `QBitFlow-Signature` header over the **raw body**, then parse the event and switch on
+its type:
 
 ```go
-// Create a claim request for a user (admin only) — returns the claim link
-resp, err := client.Claims.CreateClaimRequest(userID)
-fmt.Printf("Share this link with the user: %s\n", resp.Link)
+// processed stands for your database: deliveries are at least once.
+var processed sync.Map
 
-// Get the existing claim request for a user (admin only) — same response as CreateClaimRequest
-resp, err = client.Claims.GetClaimRequestByUserID(userID)
-fmt.Printf("Existing claim link: %s\n", resp.Link)
+func webhookHandler(secret string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Reads the body (at most 1 MiB) and checks its signature and timestamp.
+		body, err := qbitflow.VerifyWebhookRequest(r, secret)
+		if err != nil {
+			http.Error(w, "invalid signature", http.StatusBadRequest)
+			return
+		}
+		event, err := qbitflow.ParseEvent(body)
+		if err != nil {
+			http.Error(w, "not a v2 event", http.StatusBadRequest) // an endpoint still on v1
+			return
+		}
+		if _, seen := processed.LoadOrStore(event.ID, true); seen {
+			w.WriteHeader(http.StatusOK) // a retry of an event already handled
+			return
+		}
 
-// List funds the org owes to claimed users
-funds, err := client.Claims.GetClaimFunds()
-for _, f := range funds {
-    fmt.Printf("User %d is owed $%.2f\n", f.UserID, f.TotalAmountOwed)
+		switch event.Type {
+		case qbitflow.EventTypePaymentCompleted:
+			payment, err := event.PaymentCompleted()
+			if err != nil {
+				processed.Delete(event.ID)
+				http.Error(w, "bad event", http.StatusBadRequest)
+				return
+			}
+			log.Printf("fulfil order %q (%s): %.2f USD", payment.Reference, payment.UUID, payment.Amount)
+		case qbitflow.EventTypeCheckoutExpired:
+			expired, err := event.CheckoutExpired()
+			if err == nil && expired.Payment != nil {
+				log.Printf("release order %q", expired.Payment.Reference)
+			}
+		case qbitflow.EventTypeSubscriptionStatusChanged:
+			change, err := event.SubscriptionStatusChanged()
+			if err == nil {
+				access := change.CurrentPeriodEnd != nil && time.Now().Before(*change.CurrentPeriodEnd)
+				log.Printf("%s: %s -> %s, access: %v", change.UUID, change.PreviousStatus, change.Status, access)
+			}
+		default:
+			// A type you don't handle, or one added after this SDK: acknowledge it.
+		}
+		w.WriteHeader(http.StatusOK)
+	}
 }
-
-// Trigger test claim fund computation for a user (test mode only; never retried)
-resp2, err := client.Claims.TriggerTestClaimFunds(userID)
-fmt.Println(resp2.Message)
 ```
 
-## Customer Management
+Mount it with `http.Handle("POST /webhooks/qbitflow", webhookHandler(secret))`. When your
+framework hands you the raw body and the header, `ConstructEvent` verifies and parses in one call:
 
 ```go
-// Create
-customer, err := client.Customers.Create(&qbf.CreateCustomer{
-    Name:      "Jane",
-    LastName:  "Doe",
-    Email:     "jane@example.com",
-    Reference: new("CRM-42"),
-})
-
-// Get by UUID, email, or your own reference
-customer, err = client.Customers.Get("customer-uuid")
-customer, err = client.Customers.GetByEmail("jane@example.com")
-customer, err = client.Customers.GetByReference("CRM-42")
-
-// List (paginated)
-limit := uint16(50)
-page, err := client.Customers.GetAll(&limit, nil)
-if page.HasMore() {
-    next, err := client.Customers.GetAll(&limit, page.NextCursor)
-    _ = next
+event, err := qbitflow.ConstructEvent(rawBody, signatureHeader, secret)
+var sigErr *qbitflow.WebhookSignatureError
+if errors.As(err, &sigErr) {
+	log.Printf("rejected: %s", sigErr.Reason) // e.g. noMatchingSignature, timestampOutsideTolerance
+	return
 }
-
-// Update — partial: only the fields you set are changed, everything else is left
-// untouched. The UUID is the first argument, not a field on the struct.
-//
-// Optional fields are pointers: nil (or a pointer to "") means "leave unchanged".
-// Go 1.26's new() takes a value expression, so you can set one inline: new("Jane").
-updated, err := client.Customers.Update("customer-uuid", &qbf.UpdateCustomer{
-    Name: new("Jane"), // last name, email, phone, address all unchanged
-})
-
-// Set several fields at once
-updated, err = client.Customers.Update("customer-uuid", &qbf.UpdateCustomer{
-    Name:     new("Jane"),
-    LastName: new("Smith"),
-    Email:    new("jane.smith@example.com"),
-})
-
-// Note: reference is immutable and cannot be updated.
-
-// Delete (soft delete)
-err = client.Customers.Delete("customer-uuid")
+if err != nil {
+	log.Printf("not a v2 event: %v", err)
+	return
+}
+log.Println(event.ID, event.Type)
 ```
 
-`Create` and `Update` validate before sending: `Name`/`LastName` are 2–100 characters of
-letters, decimal digits, spaces and `- _ ' .`, and `Email` is required and must be well-formed.
-`Update` checks only the fields you set.
+- **At least once.** The same event can arrive more than once: **deduplicate on `Event.ID`** (also
+  in the `QBitFlow-Event-Id` header) and make the handler idempotent.
+- **Answer 2xx fast**, within 30 seconds, **including to the types you ignore**: anything else is
+  retried (for 3 days in live mode), and an endpoint failing for 3 days is disabled. Store the
+  event, answer, then process it in the background.
+- **Secret rotation** needs nothing on your side: for 24 hours after a rotation the header carries
+  two `v1=` signatures, the new secret's and the previous one's, and either secret verifies. Switch
+  your secret within the day.
+- **Timestamps** more than 5 minutes from your clock are refused (replays):
+  `qbitflow.WithTolerance(d)` changes it, `qbitflow.WithClock(f)` sets the clock in tests.
+- **Members' events** carry the member in `Event.UserUUID`: read their resources with
+  `client.OnBehalfOf(event.UserUUID)`.
+- **No fixed source IPs**: verify the signature, never allow-list addresses.
+- **v2 only.** An endpoint migrated from API v1 receives v1 bodies, which `ParseEvent` refuses:
+  move it to v2 in the dashboard, or with `Endpoints.Update(ctx, uuid,
+  &qbitflow.UpdateWebhookEndpointParams{PayloadVersion: qbitflow.WebhookPayloadVersionV2})`.
+- Not holding the secret? `client.Webhooks.VerifyRemote(ctx, endpointUUID, rawBody, header)` has the
+  API check it, then `ParseEvent` parses the body.
 
-`Delete` returns only an `error` — the idiomatic Go shape for all three `Delete` methods
-(customers, products, users); the API's confirmation message carries nothing beyond success.
+| `Event.Type` | Accessor | Data |
+|---|---|---|
+| `payment.completed` | `PaymentCompleted()` | the `Payment` + `ManagementPageLink` |
+| `subscription.created` | `SubscriptionCreated()` | the `Subscription` (`active` or `trial`) + `ManagementPageLink` |
+| `subscription.billed` | `SubscriptionBilled()` | the `Bill` (paid until `PeriodEnd`) + `SubscriptionReference`, `SubscriptionStatus` |
+| `subscription.statusChanged` | `SubscriptionStatusChanged()` | the `Subscription` + `PreviousStatus` |
+| `subscription.actionRequiredChanged` | `SubscriptionActionRequiredChanged()` | the `Subscription` + `PreviousActionRequired` |
+| `subscription.billingFailed` | `SubscriptionBillingFailed()` | the `Subscription` + `Reason`, `BillUUID`, `AmountUSD` (a string), `Attempt`, `RemainingAttempts`, `NextAttemptAt` |
+| `subscription.upcomingBill` | `SubscriptionUpcomingBill()` | the `Subscription` + `BillingDate`, `AmountUSD` (a number), `TrialEnding`, `BalanceSufficient`, `AllowanceSufficient` |
+| `refund.requested` / `.completed` / `.denied` | `RefundRequested()` / `RefundCompleted()` / `RefundDenied()` | the `Refund` |
+| `member.joined` | `MemberJoined()` | the `Member` + `InvitationUUID` |
+| `member.removed` | `MemberRemoved()` | the `Member` |
+| `heldFunds.released` | `HeldFundsReleased()` | the transfer paid to the member + the `Ledgers` it settled |
+| `checkout.expired` | `CheckoutExpired()` | the session: `.Payment` or `.Subscription` |
+| `webhook.test` | `WebhookTest()` | `EndpointUUID`, `Message` (the dashboard's test) |
+| any other | `DecodeData[T]()` | `Data`, raw |
 
-## Product Management
+An accessor called on another type is a `*ValidationError`. Webhook data never carries what only
+API reads return (`Customer`, `Refund`/`Refundable`, `Dunning`, `Approval`, `ProductName`).
 
-```go
-// Create
-product, err := client.Products.Create(&qbf.CreateProduct{
-    Name:        "Premium Plan",
-    Description: "Access to all features",
-    Price:       29.99,          // greater than 0
-    Reference:   new("PROD-001"), // optional, auto-generated if omitted
-})
+### The event log
 
-// Get
-product, err = client.Products.Get(product.ID)
-product, err = client.Products.GetByReference("PROD-001")
-
-// List all active products (hidden products created by inline checkouts are excluded)
-products, err := client.Products.GetAll()
-
-// Update — partial: omitted fields keep their current value
-updated, err := client.Products.Update(product.ID, &qbf.UpdateProduct{
-    Price: new(39.99), // name and description unchanged
-})
-
-updated, err = client.Products.Update(product.ID, &qbf.UpdateProduct{
-    Name:        new("Premium Plus"),
-    Description: new("Enhanced features"),
-    Price:       new(39.99),
-})
-
-// Delete (soft delete)
-err = client.Products.Delete(product.ID)
-```
-
-## User Management
-
-```go
-// Create (admin only)
-user, err := client.Users.Create(&qbf.CreateUser{
-    Name:               "Alice",
-    LastName:           "Smith",
-    Email:              "alice@example.com",
-    Role:               qbmodels.RoleUser, // RoleUser or RoleAdmin ("user" / "admin"); owner and handle are read-only
-    OrganizationFeeBps: 100,               // 1% fee, optional, 0-5000
-})
-
-// Get current user (from API key, or the acted-for user through OnBehalfOf)
-me, err := client.Users.Get()
-
-// Get by ID (admin only)
-user, err = client.Users.GetByID(42)
-
-// Get by email (admin only for other users in the organization)
-user, err = client.Users.GetByEmail("alice@example.com")
-
-// List all (admin only)
-users, err := client.Users.GetAll()
-
-// Update — partial: omitted fields keep their current value
-updated, err := client.Users.Update(user.ID, &qbf.UpdateUser{
-    Name: new("Alicia"),
-})
-
-// organizationFeeBps requires admin authority (an admin/owner key, or an
-// organization-level key via OnBehalfOf). A non-admin caller sending it gets a 403.
-updated, err = client.Users.Update(user.ID, &qbf.UpdateUser{
-    OrganizationFeeBps: new(uint16(250)), // 2.5%; new(uint16(0)) explicitly sets 0
-})
-
-// Note: passwords cannot be changed through this SDK. It is a JWT-only, self-service
-// operation on the API, so the field is intentionally absent from UpdateUser.
-
-// Delete (admin only)
-err = client.Users.Delete(user.ID)
-```
-
-`Create` and `Update` validate before sending (same name/email rules as customers, `Role` in
-`{admin, user}`, `OrganizationFeeBps` ≤ 5000). `User.Role` on responses can also be
-`RoleOwner` or `RoleHandle` — the full hierarchy is `handle < user < admin < owner`.
-
-## API Key Management
-
-The SDK exposes **read** access to API keys. Creating and deleting keys is a
-JWT-authenticated operation (performed from the [QBitFlow dashboard](https://qbitflow.app)),
-so it is intentionally not available through the API-key–authenticated SDK. The secret key
-value is never returned on a key record.
+Every event of the space, newest first, with each one's deliveries:
 
 ```go
-// Keys visible to the caller: a user key sees its own keys, an organization key every key
-// in the organization
-keys, err := client.ApiKeys.GetAll()
-
-// List for a specific user (admin only)
-keys, err = client.ApiKeys.GetForUser(userID)
+for event, err := range client.Webhooks.Events.Iterate(ctx, &qbitflow.EventListParams{
+	Type: qbitflow.EventTypePaymentCompleted,
+}) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	detail, err := client.Webhooks.Events.Get(ctx, event.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, d := range detail.Deliveries {
+		fmt.Println(event.ID, d.URL, d.Delivered, len(d.Attempts))
+	}
+	break // the first one is enough here: breaking stops the fetching
+}
 ```
 
 ## Currencies
 
-Resolve the currency IDs returned in `SessionCheckout.AvailableCurrencies`. These endpoints
-are public.
-
 ```go
-// All supported currencies (native + tokens); pass true for test-network currencies
-currencies, err := client.Currencies.GetAllAvailable(false)
-
-// Only the main (native/blockchain) currencies
-mains, err := client.Currencies.GetAllMain(false)
-```
-
-A token's `MainCurrency` / `MainCurrencyID` point to its native currency; they are `nil` for a
-main currency.
-
-## Webhook Handling
-
-### Verifying a webhook signature
-
-Every webhook QBitFlow sends carries three headers:
-
-| Header | Meaning |
-|---|---|
-| `X-Webhook-Signature-256` | HMAC signature, formatted `sha256=<hex>` |
-| `X-Webhook-Timestamp` | Send time, in unix seconds |
-| `X-Webhook-Id` | Transaction id, e.g. `pay@<uuid>` |
-
-There are two ways to check a webhook is genuine, and you can use either:
-
-| | Needs the secret | Network call | Use when |
-|---|---|---|---|
-| **Local** | yes | none | Default. Faster, and keeps working if the API is unreachable. |
-| **Remote** | no | one per webhook | You would rather not hold the secret at all. |
-
-Local verification checks that the timestamp is within a replay window (5 minutes by default),
-that the HMAC matches, and compares in constant time so a timing side channel cannot be used to
-guess the signature.
-
-**Why the signature covers a canonical rendering, not the raw bytes.** JSON object key
-order is not significant, and proxies, frameworks and logging layers routinely re-serialize
-a body and reorder keys. Signing raw bytes would reject a payload that is in fact
-untouched. So both sides sign `<timestamp>.<canonical-json>`, where canonical means keys
-sorted at every level and no insignificant whitespace. You do not have to do anything for
-this — pass the body you received and the SDK handles it. Pass the **raw body** (or a generic
-`map[string]any` decoded from it), never an SDK struct such as `SessionWebhookResponse`: a
-struct does not model every field the server sends, so re-encoding it changes the payload
-and the signature no longer matches.
-
-Get your webhook secret from the QBitFlow dashboard. Treat it like a password: keep it in
-your environment or secret manager, never in source control.
-
-```go
-import (
-    "encoding/json"
-    "net/http"
-    "os"
-
-    qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-    qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
-)
-
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
-    secret := os.Getenv("QBITFLOW_WEBHOOK_SECRET")
-
-    // Reads the body (at most qbf.MaxWebhookBodySize, 5 MiB), checks the headers, verifies
-    // the signature, and hands back the raw body so you decode it exactly once.
-    body, err := qbf.VerifyWebhookRequest(r, secret, nil)
-    if err != nil {
-        http.Error(w, "invalid webhook", http.StatusBadRequest)
-        return
-    }
-
-    var event qbmodels.SessionWebhookResponse
-    if err := json.Unmarshal(body, &event); err != nil {
-        http.Error(w, "bad payload", http.StatusBadRequest)
-        return
-    }
-
-    // Act on the event, then acknowledge.
-    w.WriteHeader(http.StatusOK)
-}
-```
-
-If you already have the pieces, verify them directly:
-
-```go
-err := qbf.VerifyWebhookSignature(secret, timestamp, signature, body, nil)
-```
-
-To widen or narrow the replay window:
-
-```go
-opts := &qbf.VerifyOptions{MaxTimestampAge: 10 * time.Minute} // 0 or negative = the 5-minute default
-err := qbf.VerifyWebhookSignature(secret, timestamp, signature, body, opts)
-```
-
-Pull the headers out yourself when you need the transaction id, or to acknowledge the
-dashboard's connectivity test — **after** verifying its signature like any other delivery:
-
-```go
-h := qbf.ExtractWebhookHeaders(r.Header)
-if err := qbf.VerifyWebhookSignature(secret, h.Timestamp, h.Signature, body, nil); err != nil {
-    http.Error(w, "invalid webhook", http.StatusBadRequest)
-    return
-}
-if h.IsTest() {
-    w.WriteHeader(http.StatusOK) // connectivity check, verified, nothing to process
-    return
-}
-```
-
-To verify through the API instead, with no secret in your process:
-
-```go
-ok, err := client.Webhooks.Verify(body, signature, timestamp)
-```
-
-`Verify` takes the raw body (`[]byte`, `json.RawMessage` or `string`, forwarded verbatim) or a
-generic decoded value. A missing or invalid payload is a `*qberrors.ValidationError` raised
-before any request. It returns `(false, nil)` only when the API answers 400 ("signature
-rejected"); any other failure — an outage, an expired key — is returned as its typed error, so
-you can answer non-200 and let QBitFlow retry instead of dropping a real event.
-
-Webhook destination URLs are configured under settings in the [QBitFlow dashboard](https://qbitflow.app),
-**not** in code. There are two independent webhooks you can enable:
-
-| Dashboard setting | Payload type | Fired when |
-|---|---|---|
-| **Transaction webhook** | `SessionWebhookResponse` | a checkout completes (a one-time payment, or a subscription's first billed period) |
-| **Subscription status webhook** | `SubscriptionWebhook` | a subscription transitions between statuses (e.g. `trial` → `active`), or a renewal period is billed |
-
-Every webhook is signed with HMAC-SHA256. Verify it (locally or with `client.Webhooks.Verify`)
-before trusting the payload. Responding with a status `>= 400` makes QBitFlow retry the delivery.
-
-Webhook headers: `X-Webhook-Signature-256`, `X-Webhook-Timestamp`, `X-Webhook-Id`
-(`qbf.HeaderSignature`, `qbf.HeaderTimestamp`, `qbf.HeaderWebhookID`).
-
-### Test Webhook Reachability
-
-The dashboard's **"Test webhook"** action sends a probe to your configured URL to confirm the
-endpoint is reachable. Its payload may not match a real webhook's shape, so your handler should
-not process it: when `X-Webhook-Id` equals `qbf.TEST_WEBHOOK_ID`, return HTTP `200` and skip
-the business logic — but **only after the signature check has passed**, so the dashboard button
-exercises your real verification path end to end rather than passing with a broken secret.
-This assumes the probe is signed like a normal delivery.
-
-### Transaction Webhook Handler
-
-```go
-package main
-
-import (
-    "encoding/json"
-    "net/http"
-    "os"
-
-    qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-    qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
-)
-
-var webhookSecret = os.Getenv("QBITFLOW_WEBHOOK_SECRET")
-
-func transactionWebhookHandler(w http.ResponseWriter, r *http.Request) {
-    body, err := qbf.VerifyWebhookRequest(r, webhookSecret, nil)
-    if err != nil {
-        http.Error(w, "unauthorized", http.StatusUnauthorized)
-        return
-    }
-
-    // Reachability check from the dashboard "Test webhook" action — after verification.
-    if qbf.ExtractWebhookHeaders(r.Header).IsTest() {
-        w.WriteHeader(http.StatusOK)
-        return
-    }
-
-    var event qbmodels.SessionWebhookResponse
-    if err := json.Unmarshal(body, &event); err != nil {
-        http.Error(w, "bad payload", http.StatusBadRequest)
-        return
-    }
-
-    // Status is nullable: acknowledge a delivery without one rather than rejecting it,
-    // which would only make QBitFlow retry it.
-    if event.Status != nil && event.Status.Status == qbmodels.TransactionStatusCompleted {
-        switch event.TxType {
-        case qbmodels.TransactionTypeOneTimePayment:
-            // event.Session.Reference echoes the reference you set when creating the
-            // session, so you can match the transaction to your own order/invoice.
-        case qbmodels.TransactionTypeCreateSubscription:
-            // The first period is billed. event.UUID is the *session* UUID; the
-            // subscription's own sub@ UUID arrives with the subscription webhooks.
-        }
-    }
-
-    w.WriteHeader(http.StatusOK)
-}
-```
-
-### Subscription Status Webhook Handler
-
-Configure the **Subscription status webhook** in the dashboard to receive lifecycle transitions
-and renewals.
-
-```go
-func subscriptionStatusWebhookHandler(w http.ResponseWriter, r *http.Request) {
-    body, err := qbf.VerifyWebhookRequest(r, webhookSecret, nil)
-    if err != nil {
-        http.Error(w, "unauthorized", http.StatusUnauthorized)
-        return
-    }
-    if qbf.ExtractWebhookHeaders(r.Header).IsTest() {
-        w.WriteHeader(http.StatusOK)
-        return
-    }
-
-    var event qbmodels.SubscriptionWebhook
-    if err := json.Unmarshal(body, &event); err != nil {
-        http.Error(w, "bad payload", http.StatusBadRequest)
-        return
-    }
-
-    // event.SubscriptionReference carries your own reference for the subscription ("" if
-    // none was set).
-
-    switch event.Type {
-    case qbmodels.SubscriptionWebhookTypeStatusTransition:
-        transition, err := event.StatusTransition()
-        if err != nil {
-            http.Error(w, "bad payload", http.StatusBadRequest)
-            return
-        }
-
-        switch transition.CurrentStatus {
-        case qbmodels.SubscriptionStatusActive:
-            // Trial converted or payment recovered — grant/keep access.
-        case qbmodels.SubscriptionStatusPastDue, qbmodels.SubscriptionStatusLowOnFunds:
-            // Prompt the customer to top up their allowance.
-        case qbmodels.SubscriptionStatusCancelled, qbmodels.SubscriptionStatusTrialExpired:
-            // Revoke access.
-        }
-
-    case qbmodels.SubscriptionWebhookTypeBilling:
-        billing, err := event.Billing()
-        if err != nil {
-            http.Error(w, "bad payload", http.StatusBadRequest)
-            return
-        }
-        _ = billing // Record the renewal (billing.Amount, billing.Currency…) against event.SubscriptionUUID.
-    }
-
-    w.WriteHeader(http.StatusOK)
-}
-```
-
-`examples/webhook_handler` is a complete server with both endpoints, local or remote
-verification, and success/cancel redirect pages.
-
-## Error Handling
-
-Every failure is one of the types in `pkg/errors`, chosen by HTTP status — the same mapping
-the JavaScript, Python and PHP SDKs use:
-
-| Condition | Type |
-|---|---|
-| 400, 422 — and client-side validation before a request (`StatusCode` 0) | `*qberrors.ValidationError` |
-| 401 | `*qberrors.AuthenticationError` |
-| 403 | `*qberrors.ForbiddenError` |
-| 404 (also: a resource you do not own — existence is never revealed) | `*qberrors.NotFoundError` |
-| 409 (e.g. billing not yet due) | `*qberrors.ConflictError` |
-| 429 | `*qberrors.RateLimitError` (`RetryAfter *int` seconds, from `Retry-After` — seconds or an HTTP date) |
-| other 4xx | `*qberrors.QBitFlowError` (the base type, with `StatusCode`) |
-| 5xx after retries, a 3xx (redirects are never followed), a 2xx whose body is empty or not the expected JSON | `*qberrors.ServerError` |
-| no response (connection refused, DNS, TLS, timeout) after retries | `*qberrors.NetworkError` |
-
-Every type carries `Message`, `StatusCode` and `Fields []qberrors.FieldError` — the API's
-per-field `errors[]` list, kept for any status. The message follows one precedence: `error`,
-then the joined field list (`Field: message; Field2: message`), then `message`, then a
-non-JSON body, then the HTTP status text. Error bodies are parsed the same way for the CSV
-export.
-
-Use `errors.As`. Every type unwraps to `*qberrors.QBitFlowError`, so a `*QBitFlowError`
-target matches any SDK error — put it last:
-
-```go
-import (
-    "errors"
-    qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
-)
-
-payment, err := client.Payments.GetPayment("pay@...")
+currencies, err := client.Currencies.ListAvailable(ctx, &qbitflow.CurrencyListParams{Test: true})
 if err != nil {
-    var (
-        validation *qberrors.ValidationError
-        notFound   *qberrors.NotFoundError
-        rateLimit  *qberrors.RateLimitError
-        network    *qberrors.NetworkError
-        apiErr     *qberrors.QBitFlowError
-    )
-    switch {
-    case errors.As(err, &validation):
-        for _, f := range validation.Fields { // empty for client-side validation
-            fmt.Printf("%s: %s\n", f.Field, f.Message)
-        }
-    case errors.As(err, &notFound):
-        fmt.Println("not found")
-    case errors.As(err, &rateLimit):
-        if rateLimit.RetryAfter != nil {
-            time.Sleep(time.Duration(*rateLimit.RetryAfter) * time.Second)
-        }
-    case errors.As(err, &network):
-        fmt.Printf("no response: %v\n", network.Err)
-    case errors.As(err, &apiErr): // any other failure (401, 403, 409, 5xx, …)
-        fmt.Printf("API error %d: %s\n", apiErr.StatusCode, apiErr.Message)
-    }
+	log.Fatal(err)
+}
+byID := make(map[uint64]qbitflow.Currency, len(currencies))
+for _, c := range currencies {
+	byID[c.ID] = c // e.g. 6-decimal USDC
+}
+
+if len(currencies) > 0 {
+	c, err := client.Currencies.Get(ctx, currencies[0].ID) // resolve one id
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(c.Symbol, c.Decimals, len(byID))
 }
 ```
 
-`qberrors.StatusCodeOf(err)` and `qberrors.FieldsOf(err)` read the status and field list from
-any SDK error — also when you have wrapped it with `fmt.Errorf("...: %w", err)`.
+`ListAvailable` lists every currency checkouts can take, `ListMain` the chains' native coins, and
+`Get` one by id, to resolve the `CurrencyID`, `AvailableCurrencyIDs` and `AcceptedCurrencyIDs`
+fields. These routes are public and **limited to 60 requests a minute per IP: cache the list** at
+start-up instead of reading it per request. Payments, bills and subscriptions already carry their
+`Currency`.
 
-## Retries & Timeouts
+## Pagination and iterators
 
-The SDK retries **idempotent requests only** — HTTP GETs — after a network/timeout error or a
-`5xx` response, with exponential back-off of 1s, 2s, 4s (3 retries by default). It never
-retries:
+Paginated lists return a `*Page[T]`: `Items`, and `NextCursor` (nil on the last page, else the
+value to pass back as the params' `Cursor`, verbatim).
 
-- `POST`, `PUT` or `DELETE` (creating a session or customer twice is not idempotent);
-- the GETs that perform an action: `ForceCancel`, `ExecuteTestBillingCycle` and
-  `TriggerTestClaimFunds`;
-- `4xx`, `429` or `3xx` responses — they are returned immediately as their typed error.
-  Redirects are never followed: following one would re-send your API key to the redirect
-  target.
+```go
+params := &qbitflow.CustomerListParams{Limit: 100}
+for {
+	page, err := client.Customers.List(ctx, params)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, c := range page.Items {
+		fmt.Println(c.Email)
+	}
+	if !page.HasMore() {
+		break
+	}
+	params.Cursor = *page.NextCursor
+}
+```
 
-`Config.Timeout` bounds each attempt (default 30s). `Config.MaxRetries` sets the retry count:
-following the Go convention that the zero value is the default, `0` keeps the default of 3,
-and a negative value disables retries, as does `Config.DisableRetries: true`. The same policy
-applies in the JavaScript, Python and PHP SDKs (where an explicit `0` disables retries).
+Each paginated list has an `Iterate` twin returning an `iter.Seq2[T, error]`: it fetches one
+page at a time, only as you consume it, keeps your filters and page size, and stops when you
+`break`. An error is yielded once, as `(zero, err)`, and ends the sequence.
 
-## Client-Side Validation
+```go
+for c, err := range client.Customers.Iterate(ctx, &qbitflow.CustomerListParams{Verified: new(true)}) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(c.UUID, c.Email)
+}
+```
 
-The SDK mirrors the API's `binding` rules and rejects invalid input with a
-`*qberrors.ValidationError` **before** any request is sent, so the same field rejected locally
-and rejected by the API surfaces as one type. Input the API accepts is not rejected locally.
+| Method | Iterator | Page size: default / max |
+|---|---|---|
+| `Customers.List` | `Iterate` | 10 / 100 |
+| `Payments.List`, `Payments.ListCombined` | `Iterate`, `IterateCombined` | 10 / 50 |
+| `Failures.List` | `Iterate` | 10 / 50 |
+| `Subscriptions.List`, `Subscriptions.ListBills` | `Iterate`, `IterateBills` | 20 / 100 |
+| `Refunds.ListInactive` | `IterateInactive` | 10 / 50 |
+| `Members.List`, `Invitations.List` | `Iterate` | 20 / 100 |
+| `Webhooks.Events.List` (cursor `evt_…`) | `Iterate` | 20 / 100 |
 
-| Where | Rule |
+The other lists are short and return a plain slice: `Products.List`, `Refunds.List`,
+`Wallets.*`, `Currencies.*`, `Webhooks.Endpoints.List` (at most 10), `Members.ListHeldFunds` and
+`Subscriptions.GetPublicHistory` (the 10 latest bills).
+
+## Errors
+
+Every error the SDK returns is one of the types below, matched with `errors.As`. Each embeds an
+`*APIError`, so an `*APIError` target matches any of them:
+
+| Type | When | Codes and fields worth knowing |
+|---|---|---|
+| `*ValidationError` | 400 `validation_failed`, or input the SDK refused **before sending** (`StatusCode` 0) | `FieldErrors`: each failing input by its wire name, dotted when nested (`frequency.unit`) |
+| `*BadRequestError` | any other 400 | `bad_request`, `foreign_key_violation` (`Details["field"]`) |
+| `*AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
+| `*PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`Details["policy"]`), `plan_required` |
+| `*NotFoundError` | 404 | unknown, deleted, or outside the request's space |
+| `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `refund_already_exists` (`Details["refundUuid"]`), `held_funds_released`, `held_funds_pending`, `already_joined`, `payment_not_due`, `idempotency_key_in_use`, `conflict` |
+| `*GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
+| `*IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
+| `*RateLimitError` | 429 | `RetryAfter` (a `time.Duration`), `Limit`, `PeriodSeconds` |
+| `*ServerError` | 5xx (503 `network_unavailable`, 504 `timeout`), an unexpected 3xx (redirects are never followed), a 2xx whose body is not the expected JSON | |
+| `*NetworkError` | no response: DNS, connection, TLS, timeout, cancelled context | `Err`: `errors.Is(err, context.DeadlineExceeded)` works through it |
+| `*WebhookSignatureError` | a webhook signature refused, locally or by `VerifyRemote` | `Reason` |
+| `*APIError` | any other HTTP error (e.g. 413 `request_too_large`) | |
+
+`*APIError` carries `StatusCode`, `Code` (branch on it, never on `Message`), `Message`, `Details`
+(never nil), `RequestID`, `FieldErrors`, `RawBody` and `Err`. Its message reads
+`"<message> (status <status>, code <code>, request <requestId>)"`, followed by
+`"; <field>: <message>"` for each field error.
+
+```go
+_, err := client.Customers.Create(ctx, &qbitflow.CreateCustomerParams{Name: "Ada", Email: "ada@example.com"})
+
+var (
+	validation *qbitflow.ValidationError
+	conflict   *qbitflow.ConflictError
+	rateLimit  *qbitflow.RateLimitError
+	apiErr     *qbitflow.APIError
+)
+switch {
+case err == nil:
+	fmt.Println("created")
+case errors.As(err, &validation):
+	for _, f := range validation.FieldErrors {
+		fmt.Printf("%s: %s\n", f.Field, f.Message) // show it next to the form field
+	}
+case errors.As(err, &conflict) && conflict.Code == "unique_violation":
+	fmt.Println("taken:", conflict.Details["field"]) // email or reference
+case errors.As(err, &rateLimit):
+	fmt.Println("slow down, retry in", rateLimit.RetryAfter)
+case errors.As(err, &apiErr):
+	// Quote the request id to support.
+	fmt.Printf("QBitFlow error %d %s (request %s)\n", apiErr.StatusCode, apiErr.Code, apiErr.RequestID)
+}
+```
+
+**Client-side validation.** Each params type has a `Validate` method, run before every request:
+names and texts (lengths in characters, no markup characters), references
+(`A-Z a-z 0-9 . _ : @ -`, 1 to 100), emails, phone numbers, absolute `http(s)` URLs, prices above
+0, percents (at most 2 decimals), durations (a frequency between 1 unit and 1 year), UUIDs and
+transaction ids, dates, the checkout's product choice, and exclusive filters. A failure is a
+`*ValidationError` with `StatusCode` 0 and nothing is sent. What depends on the key's mode or on
+stored data is left to the API: the 5 USD test-mode cap, `https`-only live URLs, the frequency
+minimum (1 hour live, 5 minutes test), the 95-day export window, uniqueness.
+
+## Retries and idempotency
+
+| | |
 |---|---|
-| Customer / user `Name`, `LastName` | 2–100 code points of Unicode letters, decimal digits, spaces, `- _ ' .` (whitespace-only is accepted, as by the API) |
-| Customer / user `Email`, `GetByEmail` lookups | required; one `@`, non-empty local part, a domain containing `.` that does not start or end with `.`, no whitespace; never normalised |
-| `CreateUser.Role` | `RoleAdmin` or `RoleUser` |
-| `OrganizationFeeBps` | 0–5000 |
-| Product `Name` / `Description` (and inline session products) | `producttext`: 2–100 / 2–500 code points, not blank, no `<>{}[]\`\|;"~^` or control characters other than `\n \r \t` |
-| Product `Price`, inline session `Price` | a finite number > 0 |
-| Session `ProductID` / `ProductReference` / inline triplet | one of them is required; `ProductID` > 0 |
-| Session `CustomerUUID` | a bare UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`); `""` means not provided |
-| Session `SuccessURL` / `CancelURL` | absolute `http(s)://` URL (scheme case-insensitive) with a host; `""` means not provided |
-| Subscription `Frequency` / `TrialPeriod` / `MinPeriods` | `Frequency.Value` 1–4294967295, `TrialPeriod.Value` 0–4294967295, unit in seconds…years; `MinPeriods` 0 = none |
-| Accounting `From` / `To` | required, `YYYY-MM-DD`, real dates, `From` ≤ `To` |
-| Cursor `limit` | positive when given |
-| Every identifier argument, every DTO / options argument | non-empty string / positive integer / non-nil |
+| Retried methods | every read (GET), and the 7 creates: `CheckoutSessions.CreatePayment`, `CheckoutSessions.CreateSubscription`, `Products.Create`, `Customers.Create`, `Webhooks.Endpoints.Create`, `Invitations.Create`, `Refunds.Initiate` |
+| Never retried | every other write: updates, deletes, `CheckoutSessions.Expire`, `Subscriptions.Cancel`, `Subscriptions.ExecuteTestBilling`, `Members.Trust`, `Members.Remove`, `Invitations.Revoke`, `Webhooks.VerifyRemote` |
+| Retried on | a network error or timeout, a 5xx, a 429, a 409 `idempotency_key_in_use` |
+| Not retried on | any other 4xx (422 `idempotency_key_reused` included), a 3xx, an unusable response |
+| Attempts | 3 retries by default (`WithMaxRetries(n)`; `0` disables them) |
+| Back-off | 1 s, 2 s, 4 s…; a 429 waits for its `Retry-After` if longer. A wait above 60 s is not made: the `*RateLimitError` is returned at once |
 
-Update DTOs validate only the fields you set; an empty string for a customer's or user's
-name, last name or email means "not provided" and is left out of the request. Length is
-counted in characters (code points), as the server does, so accented and CJK text is measured
-correctly. A request body that cannot be encoded as JSON (NaN or ±Inf in a float) is also a
-`*qberrors.ValidationError`.
+`qbitflow.IsRetryable(err)` says whether an error is of a transient kind. Cancelling the context
+stops the waiting (a `*NetworkError`). `WithTimeout` bounds each attempt; give the context a
+deadline to bound the whole call.
+
+**Idempotency keys.** Each call of a create sends a fresh `Idempotency-Key` (a UUID v4) and reuses it
+on every retry of that call: a create retried after a timeout answers the first result instead of
+opening a second checkout. To retry **across processes** (a queue re-running a job after a crash),
+pass your own stable key:
+
+```go
+orderID := "order-1044"
+session, err := client.CheckoutSessions.CreatePayment(ctx,
+	&qbitflow.CreatePaymentSessionParams{ProductName: "T-shirt", Price: 4.99, Reference: orderID},
+	qbitflow.WithIdempotencyKey("checkout-"+orderID), // the same key returns the same session
+	qbitflow.WithRequestID("job-7781"),               // sent as X-Request-Id, echoed in errors
+)
+var idem *qbitflow.IdempotencyError
+if errors.As(err, &idem) {
+	log.Fatal("this key was already used with other params") // 422 idempotency_key_reused
+}
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(session.Link)
+```
+
+A key is 1 to 255 printable ASCII characters without spaces, and only successful answers are kept
+(24 hours): after a 4xx, the same key runs the request again. A `409 idempotency_key_in_use` (the
+first request still running) is retried automatically. Other methods ignore the option. Retry
+the other writes yourself only after reading the resource's state (a 504 may have done the work).
+
+## Configuration
+
+```go
+client, err := qbitflow.NewClient(os.Getenv("QBITFLOW_API_KEY"),
+	qbitflow.WithTimeout(10*time.Second),
+	qbitflow.WithMaxRetries(5),
+	qbitflow.WithHTTPClient(&http.Client{Transport: http.DefaultTransport}), // proxies, tracing…
+)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(client != nil)
+```
+
+| Client option | Default | |
+|---|---|---|
+| `WithBaseURL(url)` | `https://api.qbitflow.app/v2` (`qbitflow.DefaultBaseURL`) | an absolute `http(s)` URL; a trailing `/` is stripped |
+| `WithTimeout(d)` | 30 s (`DefaultTimeout`) | per attempt; positive |
+| `WithMaxRetries(n)` | 3 (`DefaultMaxRetries`) | `0` disables retries; negative is refused |
+| `WithHTTPClient(c)` | a plain `*http.Client` | the SDK uses a copy that never follows redirects |
+| `WithOnBehalfOf(userUUID)` | none | every request acts in that member's space |
+
+| Request option (any method, last arguments) | |
+|---|---|
+| `WithOnBehalfOf(userUUID)` | acts in that member's space for this call; `""` forces the organization's |
+| `WithIdempotencyKey(key)` | the 7 creates only: your own `Idempotency-Key` |
+| `WithRequestID(id)` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
+
+| Webhook option (`VerifyWebhook`, `VerifyWebhookRequest`, `ConstructEvent`) | Default |
+|---|---|
+| `WithTolerance(d)` | 300 s (`DefaultWebhookTolerance`) |
+| `WithClock(func() time.Time)` | `time.Now` |
+
+A bad option makes `NewClient` return a `*ValidationError`. A client's configuration never changes
+after `NewClient`; `client.OnBehalfOf` derives clients that share it. Every request sends
+`User-Agent: qbitflow-go/3.0.0` (`qbitflow.Version`).
+
+## Migrating from 2.x
+
+3.0.0 is a rewrite for API v2: module `github.com/QBitFlow/qbitflow-go-sdk/v3`, base URL `/v2`,
+one package, `context.Context` on every call, UUID ids, members and invitations instead of users
+and claims, a new webhook signature, typed errors. **[MIGRATION-v3.md](MIGRATION-v3.md)** maps
+every 2.x method and type to its replacement, with before/after code for the common tasks.
+
+## Examples
+
+Runnable programs in [`examples/`](examples) (`QBITFLOW_API_KEY=sk_… go run ./examples/<name>`):
+
+| Example | Shows |
+|---|---|
+| [`checkout`](examples/checkout) | a payment checkout, its status, expiry |
+| [`subscriptions`](examples/subscriptions) | a subscription checkout with a trial, filtered lists, bills, cancel at period end |
+| [`marketplace`](examples/marketplace) | invite a seller, sell `OnBehalfOf`, held funds, trust |
+| [`webhook_handler`](examples/webhook_handler) | a verified `net/http` receiver with deduplication and typed events |
+| [`errors_and_retries`](examples/errors_and_retries) | error types, `IsRetryable`, idempotency keys across processes |
 
 ## Testing
 
 ```bash
-go build ./... && go vet ./... && gofmt -l . && go test ./... && go test -race ./...
+go build ./... && go vet ./... && test -z "$($(go env GOROOT)/bin/gofmt -l .)" && go test ./... && go test -race ./...
 ```
 
-`go test ./...` runs the offline suite (stub servers, no key needed). To also run the
-integration tests, export **both** `QBITFLOW_API_KEY` (a live-scope key) and
-`QBITFLOW_BASE_URL` — the base URL is never defaulted, and a key without a base URL makes the
-integration tests fail. See [tests/README.md](tests/README.md).
+`go test ./...` runs the offline suite against stub servers. The live checks are behind a build
+tag and need an API key **and** an explicit base URL:
+
+```bash
+QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… go test -tags integration -run Live -v .
+```
+
+The read-only checks only read; the write checks also need `QBITFLOW_LIVE_WRITES=1`.
 
 ## License
 
-This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MPL-2.0 License: see the [LICENSE](LICENSE) file. See also
+[COMPLIANCE.md](COMPLIANCE.md) and the [trademark policy](TRADEMARKS.md).
 
 ## Support
 
 - 📖 [Documentation](https://qbitflow.app/docs)
 - 📧 [Email Support](mailto:support@qbitflow.app)
-- 🐛 [Issue Tracker](https://github.com/qbitflow/qbitflow-go-sdk/issues)
+- 🐛 [Issue Tracker](https://github.com/QBitFlow/qbitflow-go-sdk/issues)
 
 ## Changelog
 
@@ -1082,4 +1131,5 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Security
 
-For security issues, please email security@qbitflow.app instead of using the issue tracker.
+For security issues, please email security@qbitflow.app instead of using the issue tracker (see
+[SECURITY.md](SECURITY.md)).
