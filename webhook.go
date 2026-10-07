@@ -82,7 +82,7 @@ func VerifyWebhook(rawBody []byte, signatureHeader, secret string, opts ...Verif
 		return newSignatureError(WebhookSignatureMissingHeader, "missing QBitFlow-Signature header")
 	}
 
-	timestamp, signatures, ok := parseSignatureHeader(signatureHeader)
+	timestamp, rawT, signatures, ok := parseSignatureHeader(signatureHeader)
 	if !ok {
 		return newSignatureError(WebhookSignatureMalformedHeader, "malformed QBitFlow-Signature header: it needs one t=<unix seconds> and at least one v1=<signature>")
 	}
@@ -93,7 +93,8 @@ func VerifyWebhook(rawBody []byte, signatureHeader, secret string, opts ...Verif
 	}
 
 	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(strconv.FormatInt(timestamp, 10)))
+	// The signed text is t exactly as the header carries it (not its re-formatted integer).
+	mac.Write([]byte(rawT))
 	mac.Write([]byte{'.'})
 	mac.Write(rawBody)
 	expected := []byte(hex.EncodeToString(mac.Sum(nil)))
@@ -112,8 +113,9 @@ func VerifyWebhook(rawBody []byte, signatureHeader, secret string, opts ...Verif
 }
 
 // parseSignatureHeader splits "t=…,v1=…[,v1=…]": parts on ",", each on its first "=", spaces
-// trimmed, other keys ignored. It needs exactly one t made of ASCII digits, and a v1.
-func parseSignatureHeader(header string) (timestamp int64, signatures []string, ok bool) {
+// trimmed, other keys ignored. It needs exactly one t made of ASCII digits that fits an int64,
+// and a v1. rawT is t's text as received: the signature covers that text.
+func parseSignatureHeader(header string) (timestamp int64, rawT string, signatures []string, ok bool) {
 	seenT := false
 	for part := range strings.SplitSeq(header, ",") {
 		key, value, found := strings.Cut(part, "=")
@@ -124,18 +126,18 @@ func parseSignatureHeader(header string) (timestamp int64, signatures []string, 
 		switch key {
 		case "t":
 			if seenT || !isASCIIDigits(value) {
-				return 0, nil, false
+				return 0, "", nil, false
 			}
 			t, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
-				return 0, nil, false
+				return 0, "", nil, false
 			}
-			timestamp, seenT = t, true
+			timestamp, rawT, seenT = t, value, true
 		case "v1":
 			signatures = append(signatures, value)
 		}
 	}
-	return timestamp, signatures, seenT && len(signatures) > 0
+	return timestamp, rawT, signatures, seenT && len(signatures) > 0
 }
 
 func isASCIIDigits(s string) bool {

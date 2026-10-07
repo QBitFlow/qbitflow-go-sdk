@@ -347,6 +347,11 @@ func decodeResponse[T any](resp *response) (T, error) {
 	if len(bytes.TrimSpace(resp.body)) == 0 {
 		return zero, newServerError("empty response body where JSON was expected", resp, nil)
 	}
+	// A JSON null is an empty list for a list result (a Go server marshals a nil slice as null),
+	// but no answer at all where an object is expected.
+	if bytes.Equal(bytes.TrimSpace(resp.body), []byte("null")) && reflect.TypeFor[T]().Kind() != reflect.Slice {
+		return zero, newServerError("null response body where a JSON object was expected", resp, nil)
+	}
 	v, err := decodeJSON[T](resp.body)
 	if err != nil {
 		return zero, newServerError("unexpected response body", resp, err)
