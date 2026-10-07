@@ -112,7 +112,9 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 		if err != nil {
 			log.Fatalf("trust: %v", err)
 		}
-		fmt.Printf("trusted since %s\n", trusted.TrustedAt.Format(time.RFC3339))
+		if trusted.TrustedAt != nil {
+			fmt.Printf("trusted since %s\n", trusted.TrustedAt.Format(time.RFC3339))
+		}
 	}
 }
 
