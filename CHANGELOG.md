@@ -5,6 +5,191 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-09-23
+
+Aligns the SDK with docs revision `5e7d5a5` and with the behaviour contract shared by the Go,
+JavaScript, Python and PHP SDKs: one error taxonomy, one retry policy, one set of
+client-side validation rules, one response-typing policy and one webhook-verification
+contract.
+
+Response types now follow the Go types the API serializes, field for field: a value field
+is always usable (an omitted or null value decodes to its zero value), and only fields that
+are genuinely nullable on the server are pointers. Several fields changed type accordingly,
+so read **Changed (breaking)** before upgrading.
+
+> **⚠️ Breaking changes in a minor release.** They are listed under **Removed** and
+> **Changed (breaking)** below. Semver-aware resolvers treat `2.5.0` as a safe upgrade
+> from any `2.x`, so `^2` / `~2.1` constraints will pick it up automatically — review
+> before updating, or pin.
+
+> The module path stays `github.com/QBitFlow/qbitflow-go-sdk/v2`; no import changes needed.
+
+### Removed
+
+-   **WebSocket status URL helper removed** (`TransactionStatusService.GetTransactionStatusWSURL`)
+    — `/transaction/status/ws` is an internal endpoint for the QBitFlow checkout page (it
+    rejects non-frontend origins). Use webhooks, or poll `GetTransactionStatus`.
+-   **Pay-as-you-go** — `PayAsYouGoService`, the `PayAsYouGo` client field,
+    `SubscriptionTypePAYG`, and the PAYG-only `SessionCheckout.FreeCredits` field. The API
+    has no PAYG routes (session creation is disabled pending x402), so every method on the
+    service could only fail. The PAYG members of `TransactionType` and `TransactionShortType`
+    are kept, because a transaction response can still carry them.
+-   **`RefundStatusRejected`** (`"rejected"`, a value the API never sends). Use
+    `RefundStatusRefused` (`"refused"`); comparisons against the old constant were always
+    false, and now fail to compile.
+-   **`SubscriptionStatusTransitionWebhook`** — replaced by the real envelope
+    `SubscriptionWebhook`, see **Changed (breaking)**.
+-   **`qbmodels.StatusResponse`** — no REST route returns it.
+
+### Changed (breaking)
+
+-   **Response field types follow the server's Go types** (field → 2.1.0 type → 2.5.0 type):
+    -   `Payment.ProductID`: `*uint64` → `uint64` (0 when the payment has no product).
+    -   `Payment.Metadata`, `SubscriptionHistory.Metadata`: `*PaymentMetadata` →
+        `PaymentMetadata` (always sent). `CombinedPayment.Metadata` stays a pointer.
+    -   `CustomerUUID` on `Payment`, `Subscription`, `SubscriptionHistory` and
+        `SessionCheckout`: `string` → `*string` (nil when no customer is attached).
+        `CombinedPayment.CustomerUUID` stays a `string` (always sent).
+    -   `Subscription.LastBillingDate`: `*time.Time` → `time.Time` (the zero time until the
+        first billing — test with `IsZero()`).
+    -   `Customer.PhoneNumber`, `Customer.Address`, `Customer.Reference`: `*string` →
+        `string` ("" when unset).
+    -   `TransactionStatus.Message`: `*string` → `string` ("" when the API gives no message).
+    -   `SessionWebhookResponse.Status`: `TransactionStatus` → `*TransactionStatus` (the API
+        may send null).
+    -   `Currency` stays a value field on `Payment`, `Subscription` and `SubscriptionHistory`
+        and is added to `CombinedPayment`: the API sends the expanded currency on all four.
+    -   `RefundEntry`, `OrganizationFee` and `ReferralFee` keep their 2.1.0 value types:
+        `RefundEntry.TxHash` and `MerchantMessage` are `""` until the refund is handled,
+        `RespondedAt` and `Metadata` are nil until then.
+    -   JSON tags mirror the server's, so re-encoding a record keeps the fields the API sent
+        (for example `userId: 0` on a product).
+-   **Lists are never nil.** Every method returning a slice (including `CursorData.Items`
+    and `SessionCheckout.AvailableCurrencies` from `GetSession`) returns an empty, non-nil
+    slice when the API sends an empty or null list.
+-   **Typed errors for every HTTP status.** `pkg/errors` gains `AuthenticationError` (401),
+    `ForbiddenError` (403), `ConflictError` (409), `RateLimitError` (429, with
+    `RetryAfter *int` from the `Retry-After` header — delta-seconds or an HTTP date),
+    `ServerError` (5xx, a 3xx, or a 2xx whose body is empty or not the expected JSON) and
+    `NetworkError` (no response received). 400/422 return `ValidationError`, 404
+    `NotFoundError`, other 4xx the base `QBitFlowError`; `ValidationError` and
+    `NotFoundError` gained `StatusCode` (0 for client-side validation) and `Fields`. Every
+    type unwraps to `*QBitFlowError`, so a `*QBitFlowError` target in `errors.As` matches
+    any SDK error; code that type-switched on `err.(*qberrors.QBitFlowError)` must use
+    `errors.As`. `qberrors.StatusCodeOf` / `FieldsOf` read any SDK error, wrapped or not.
+-   **Redirects are never followed.** A 3xx is returned as a `ServerError` instead of being
+    replayed — as a GET, with the API key — against the redirect target.
+-   **A 2xx with an empty body** where a result is expected (anything but a 204 or a
+    `Delete`) is a `ServerError`, not a zero-valued result.
+-   **`CreateUser.Role` is `qbmodels.UserRole`.** Untyped string constants (`"user"`) still
+    compile; a `string` variable needs a conversion. Only `RoleAdmin` / `RoleUser` are
+    accepted (the API binds `oneof=admin user`).
+-   **`GetSession` takes a `closeToExpireError *bool`** on payments and subscriptions; pass
+    `nil` for the API default (`true`).
+-   **`Webhooks.Verify(payload any, signature, timestamp)`** — the payload may be raw JSON
+    (`[]byte`, `json.RawMessage`, `string`, forwarded verbatim) or a generic decoded value
+    (existing `[]byte` callers compile unchanged). It returns `(false, nil)` only for the
+    API's HTTP 400; every other failure — including a 422 — is returned as its typed error. A
+    missing or invalid payload is a `ValidationError` raised before any request.
+-   **Subscription webhooks use the documented envelope**
+    `SubscriptionWebhook{SubscriptionUUID, SubscriptionReference, Type, Data}`, where `Type`
+    is `SubscriptionWebhookTypeStatusTransition` or `SubscriptionWebhookTypeBilling`.
+    `SubscriptionReference` is a `string` ("" when none). Unwrap `Data` with
+    `StatusTransition()` or `Billing()`, which return a `*qberrors.ValidationError` when
+    `Type` does not match or `Data` does not decode.
+-   **`SessionCheckout.IsPayment()`** is true only for `txType` `"payment"` (or, without a
+    `txType`, for a session without a frequency); a session of an unknown type is neither a
+    payment nor a subscription.
+-   **`HeaderWebhookID` is `"X-Webhook-Id"`** (was `"X-Webhook-ID"`). Header lookups are
+    case-insensitive, so behaviour is unchanged; only the constant's value differs.
+-   **Client-side validation mirrors the API's rules** (see **Added**) and therefore rejects
+    input 2.1.0 let through: an inline session price of 0 (the API answers 400), a
+    `CustomerUUID` that is not a bare UUID, a nil options/DTO argument (previously a
+    panic), a zero cursor `limit`, and an accounting range whose `To` is before `From`.
+-   **Empty optional strings are left out of request bodies.** In session options and in the
+    customer/user update DTOs, a pointer to `""` is treated like nil — `new(os.Getenv(...))`
+    with an unset variable no longer sends `"customerUUID": ""` (a 400) or `"email": ""`.
+-   **A blank API key** makes every request fail with a `ValidationError` before anything is
+    sent, and a request body that cannot be encoded as JSON (NaN, ±Inf) is a
+    `ValidationError` rather than a base `QBitFlowError`.
+
+### Added
+
+-   **Client-level On-Behalf-Of** — `(*qbitflow.QBitFlow).OnBehalfOf(userID)` returns a
+    client whose every service (Currencies included) sends `On-Behalf-Of`, sharing the
+    transport and configuration; `0` acts at the organization level. The per-service
+    `OnBehalfOf` methods remain, and `qbf.Client.OnBehalfOf` backs both.
+-   **Retries for idempotent requests.** GET requests are re-sent after a network/timeout
+    error or a 5xx response, with exponential back-off (1s, 2s, 4s) and 3 retries by
+    default. POST, PUT and DELETE are never retried, nor are the three GETs that perform an
+    action (`ForceCancel`, `ExecuteTestBillingCycle`, `TriggerTestClaimFunds`): a timeout may
+    already have performed it. 4xx, 429 and 3xx are never retried. `Config.MaxRetries` sets
+    the count (0 keeps the default of 3, a negative value disables retries) and
+    `Config.DisableRetries` turns retries off.
+-   **`Accounting.ExportCSV`** — the CSV rendering of the export (`format=csv`) as a string;
+    JSON error bodies are parsed into the usual typed errors. `Export` remains the JSON form.
+-   **Client-side validation**, one shared rule set: `alphanumspace` names (Unicode letters,
+    decimal digits, spaces and `- _ ' .`, 2–100 code points; whitespace-only accepted, as by
+    the API), `producttext` product text, a structural email check (never normalised),
+    roles, `OrganizationFeeBps` ≤ 5000, prices finite and > 0, absolute http(s) redirect
+    URLs (case-insensitive scheme), bare-UUID `CustomerUUID`, subscription durations
+    (`Frequency` 1–4294967295, `TrialPeriod` 0–4294967295, known units; `MinPeriods` 0 =
+    none), accounting dates (`YYYY-MM-DD`, real dates, `From` ≤ `To`; the maximum span is left
+    to the API), positive identifiers and cursor limits. `CreateCustomer`, `UpdateCustomer`,
+    `CreateUser`, `UpdateUser`, `CreateProduct`, `UpdateProduct` and
+    `AccountingExportParams` expose `Validate()`.
+-   **`User-Agent: qbitflow-go/<Version>`** on every request, and the exported
+    `qbf.Version` constant. `Content-Type: application/json` is sent only with a body.
+-   **Webhook helpers**: `qbf.MaxWebhookBodySize` (5 MiB) — `VerifyWebhookRequest` reads at
+    most that much and refuses a larger body with a `ValidationError`. Thirteen golden
+    vectors shared with the other SDKs pin the canonical JSON byte for byte (key order by
+    UTF-8 bytes, HTML and U+2028/9 escaping, float64 number formatting, long decimal strings,
+    control characters, lone surrogates, `-0`); canonicalisation itself is unchanged.
+-   `SubscriptionWebhookType`, `SubscriptionWebhook`, `SubscriptionStatusTransition`,
+    `FieldError`, `qberrors.JoinFieldErrors`, `qberrors.StatusCodeOf`, `qberrors.FieldsOf`,
+    `SessionCheckout.UpgradingFromTrial`, `CombinedPayment.Currency`, the `RoleHandle` and
+    `RoleOwner` roles, and `qbmodels.AccountingEventType*` constants (the subscription-billing
+    value is listed under both spellings the API documents, `subscriptionHistory` and
+    `subHistory`).
+
+### Fixed
+
+-   **Validation errors are readable**: a 400 reads
+    `Validation Error: ProductName: ProductName is too short; Price: Price is too short`,
+    with the per-field detail in `Fields` (2.1.0 decoded every field as empty).
+-   **User-supplied path segments and query values are escaped.** A value containing `?`,
+    `#`, `%` or `&` no longer changes the shape of the request. A `/` is escaped too, but the
+    API currently cannot route a reference containing `/` (it answers 404).
+-   **Error messages** follow one precedence: `error`, then the joined `errors[]` list, then
+    `message`, then a non-JSON body (a proxy's HTML page), then the HTTP status text; the
+    `errors[]` list is parsed for any status.
+-   **Product text length is counted in code points**, not bytes, so valid accented or CJK
+    names are no longer rejected locally; product create also checks the description.
+-   **The webhook replay window is overflow-safe**: a signed timestamp centuries away is
+    rejected instead of wrapping around into the accepted window.
+-   The invalid-email error no longer echoes the caller's address.
+-   **`go test ./...` runs without a server**: the offline suite always runs; the
+    integration tests skip without `QBITFLOW_API_KEY` and require an explicit
+    `QBITFLOW_BASE_URL` when a key is set.
+-   Examples no longer use placeholder customer UUIDs the API rejects, keep accounting
+    ranges within a month, escape the values they echo into HTML, and handle subscription
+    webhooks on their own endpoint.
+
+### Behaviour notes
+
+-   **Unknown enum values are preserved.** Every enum-like field (`SubscriptionStatus`,
+    `RefundStatus`, `TransactionStatusValue`, `TransactionType`, `UserRole`, …) is a string
+    type: a value this SDK does not know yet decodes verbatim, is never an error, and is never
+    coerced to a default.
+-   **Webhook test probe.** The examples and README verify the signature *before*
+    short-circuiting the dashboard's connectivity probe (`TEST_WEBHOOK_ID`), so the dashboard
+    button exercises the real verification path end to end. This assumes the probe is signed
+    like a normal delivery.
+-   **Configure the client before use.** `SetBaseURL` / `SetTimeout` are not synchronised
+    with in-flight requests, and `OnBehalfOf` copies made earlier keep their base URL.
+-   `Delete` on customers, products and users returns only an `error` (the idiomatic Go
+    shape; the other SDKs return the API's confirmation message).
+
 ## [2.1.0] - 2026-09-21
 
 Aligns the SDK with docs revision `c3c8831`. Partial updates are now genuinely partial,

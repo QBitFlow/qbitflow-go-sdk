@@ -19,7 +19,6 @@ type QBitFlow struct {
 	// Transaction services
 	Payments          *qbf.PaymentService
 	Subscriptions     *qbf.SubscriptionService
-	PayAsYouGo        *qbf.PayAsYouGoService
 	TransactionStatus *qbf.TransactionStatusService
 
 	// Financial services
@@ -55,7 +54,6 @@ func newQBitFlowWithClient(client *qbf.Client) *QBitFlow {
 
 		Payments:          qbf.NewPaymentService(client),
 		Subscriptions:     qbf.NewSubscriptionService(client),
-		PayAsYouGo:        qbf.NewPayAsYouGoService(client),
 		TransactionStatus: qbf.NewTransactionStatusService(client),
 
 		Refunds:    qbf.NewRefundService(client),
@@ -65,7 +63,28 @@ func newQBitFlowWithClient(client *qbf.Client) *QBitFlow {
 	}
 }
 
+// OnBehalfOf returns a client whose every service acts on behalf of the given user of your
+// organization: each request carries the On-Behalf-Of header. It requires an
+// organization-level (admin/owner) API key.
+//
+// The returned client shares the transport, connection pool and configuration of q; q
+// itself is left untouched, so organization-level and per-user calls can be mixed freely.
+// A userID of 0 returns a client that acts at the organization level (no header sent).
+//
+//	userClient := client.OnBehalfOf(123)
+//	products, err := userClient.Products.GetAll()
+//	payments, err := userClient.Payments.GetAllPayments(nil, nil)
+//
+// Every service also has its own OnBehalfOf for a one-off call.
+func (q *QBitFlow) OnBehalfOf(userID uint64) *QBitFlow {
+	return newQBitFlowWithClient(q.client.OnBehalfOf(userID))
+}
+
 // SetBaseURL overrides the API base URL (useful for testing against a local server).
+//
+// Call it before using the client: it is not synchronised with in-flight requests, and
+// clients or services obtained from OnBehalfOf earlier keep the base URL they were
+// created with.
 func (q *QBitFlow) SetBaseURL(baseURL string) {
 	q.client.SetBaseURL(baseURL)
 }

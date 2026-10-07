@@ -1,157 +1,85 @@
-# Integration Tests
+# Tests
 
-This directory contains integration tests for the QBitFlow Go SDK.
+This directory holds the QBitFlow Go SDK test suite: offline unit tests that run
+everywhere, and integration tests that need an API server.
 
-## Running Tests
-
-### Basic Test Run
+## Running
 
 ```bash
+# Offline suite (no server, no key) — this is what CI runs
+go test ./...
+go test -race ./...
+
+# Offline + integration, against a server. Both variables are required: the base URL is
+# never defaulted. From the SDK root, with the workspace credentials file:
+set -a; source ../.local.env; set +a   # exports QBITFLOW_API_KEY and QBITFLOW_BASE_URL
 go test -v ./tests/...
-```
 
-### With API Key
-
-To run tests that require a valid API key:
-
-```bash
-export QBITFLOW_API_KEY="your-api-key-here"
-go test -v ./tests/...
-```
-
-### Run Specific Test
-
-```bash
+# One test (every integration test creates the records it needs)
 go test -v ./tests/... -run TestPaymentSession
-```
 
-### Run with Coverage
-
-```bash
-go test -cover ./tests/...
-```
-
-### Verbose Coverage Report
-
-```bash
-go test -coverprofile=coverage.out ./tests/...
-go tool cover -html=coverage.out
-```
-
-### Run Benchmarks
-
-```bash
+# Coverage / benchmarks
+go test -coverprofile=coverage.out ./tests/... && go tool cover -html=coverage.out
 go test -bench=. ./tests/...
 ```
 
-## Test Categories
+| `QBITFLOW_API_KEY` | `QBITFLOW_BASE_URL` | Integration tests |
+|---|---|---|
+| unset | any | skipped — the offline suite still runs |
+| set | unset | **fail**, with a message asking for the base URL |
+| set | set | run against `QBITFLOW_BASE_URL` |
 
-### Unit Tests
+## Offline tests (always run)
 
--   Client initialization
--   Validation logic
--   Model structures
--   Constants
+They use `net/http/httptest` stub servers, so they need neither a key nor network access:
 
-### Integration Tests
+- `error_mapping_test.go` — HTTP status → typed error (400/422 `ValidationError` with every
+  field, 401 `AuthenticationError`, 403 `ForbiddenError`, 404 `NotFoundError`, 409
+  `ConflictError`, 429 `RateLimitError` + `RetryAfter`, other 4xx `QBitFlowError`, 3xx / 5xx /
+  empty or non-JSON 2xx `ServerError`, transport `NetworkError`), message precedence,
+  `errors[]` on any status, every type matching `*QBitFlowError`, `StatusCodeOf` / `FieldsOf`
+  on wrapped errors, a real redirect (with `Location`) not followed, CSV export error bodies.
+- `request_building_test.go` — the method, path and query of every endpoint, path/query
+  escaping, identifier / nil-argument / page-limit guards, per-service
+  and client-level `OnBehalfOf`, webhook `Verify` semantics (false only on 400) and request
+  body, `closeToExpireError`, subscription-webhook envelope, response hydration (every field,
+  absent / null → zero values, nullable fields, currency objects, null lists → empty lists,
+  wrong JSON type → `ServerError`), session kind helpers, unknown enum values.
+- `validation_test.go` — client-side validation parity with the API, including the cases
+  verified against the live API (whitespace-only names accepted, `Jo²` rejected, inline
+  price 0 rejected, `customerUUID` rules, trial period and `minPeriods` 0 accepted, uint32
+  bounds, empty optional strings left out of the body, accounting dates).
+- `webhook_verify_test.go` — canonical JSON, signature computation, local verification,
+  header extraction, replay-window boundaries and overflow safety, timestamp parsing, the
+  request-body size bound, and the thirteen cross-SDK golden vectors.
+- `../pkg/qbitflow/retry_test.go` — the retry policy (GET only; never POST/PUT/DELETE, never
+  force-cancel / execute-billing / claim-funds test-trigger; network + 5xx only; 1s/2s/4s
+  back-off; `MaxRetries` 0 / negative / `DisableRetries`), redirects never followed,
+  `Retry-After` (seconds and HTTP date), blank API key, unencodable bodies, empty bodies,
+  and the request headers.
 
--   Payment session creation
--   Subscription management
--   Transaction status checking
--   Payment retrieval
+## Integration tests
 
-**Note:** Integration tests require:
+`integration_test.go` exercises the SDK against a real server (see the table above).
+Every test creates the customers, products and users it needs and deletes them afterwards,
+so any test can run on its own. An unexpected error is a failure, never a skip.
 
-1. A valid QBitFlow API key
-2. Access to the QBitFlow API
-3. May create actual sessions (in test mode if configured)
+Requirements:
 
-## Environment Variables
+1. A running QBitFlow API (`GET $QBITFLOW_BASE_URL/healthz` → 200).
+2. `QBITFLOW_API_KEY` — a **live-scope** organization key bound to a dedicated test user.
+   Live keys hit local chains only, and cannot use `test=true`.
+3. `QBITFLOW_BASE_URL` — the server to test against.
 
--   `QBITFLOW_API_KEY`: Your QBitFlow API key for integration tests
--   `QBITFLOW_BASE_URL`: (Optional) Custom API base URL for testing against different environments
+Never hard-code a key in a test, example or fixture.
 
-## Test Coverage
+`additional_tests/` holds an interactive walkthrough (`go run ./tests/additional_tests`)
+that needs you to complete payments in a browser; it also requires both variables.
 
-The test suite covers:
+## Adding tests
 
--   ✅ Client initialization and configuration
--   ✅ Payment session creation (product ID and custom)
--   ✅ Subscription session creation
--   ✅ Pay-as-you-go subscription creation
--   ✅ Transaction status checking
--   ✅ Payment retrieval and pagination
--   ✅ Validation error handling
--   ✅ All transaction types and statuses
--   ✅ Duration units
-
-## CI/CD Integration
-
-For CI/CD pipelines, tests that require API access will be skipped if:
-
--   No API key is provided
--   The API is not accessible
--   The test environment is not configured
-
-These tests will log a skip message instead of failing.
-
-## Best Practices
-
-1. **Always use test mode** when running integration tests
-2. **Clean up** any created resources after tests
-3. **Mock external calls** when possible for faster unit tests
-4. **Use table-driven tests** for multiple similar test cases
-5. **Log important information** for debugging test failures
-
-## Adding New Tests
-
-When adding new tests:
-
-1. Follow the existing naming convention: `Test<Feature>`
-2. Add table-driven tests for multiple scenarios
-3. Include error case testing
-4. Add benchmark tests for performance-critical code
-5. Document any special requirements or setup needed
-6. Skip tests gracefully if requirements are not met
-
-Example:
-
-```go
-func TestNewFeature(t *testing.T) {
-    t.Run("success case", func(t *testing.T) {
-        // Test implementation
-    })
-
-    t.Run("error case", func(t *testing.T) {
-        // Test implementation
-    })
-}
-```
-
-## Troubleshooting
-
-### Tests Skipping
-
-If tests are being skipped, ensure:
-
--   `QBITFLOW_API_KEY` environment variable is set
--   API key is valid and has proper permissions
--   You have network access to the QBitFlow API
-
-### Tests Failing
-
-If tests are failing:
-
-1. Check the error messages in test output
-2. Verify your API key is correct
-3. Ensure the API endpoint is accessible
-4. Check if you're in test mode vs. live mode
-5. Review the API documentation for any changes
-
-## Contact
-
-For issues with tests or test infrastructure:
-
--   Open an issue on GitHub
--   Contact the development team
--   Check the main README for support information
+- Offline behaviour goes in one of the offline files (stub the server with `httptest`).
+- A test that needs the API starts with `client := requireLive(t)` and creates its own
+  records (`newCustomer`, `newProduct`, `newUser`).
+- Name tests `Test<Feature>`, prefer table-driven cases, and never claim a green run that
+  did not happen — if the server was down, the integration tests were skipped, not passed.

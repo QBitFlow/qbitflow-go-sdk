@@ -1,345 +1,281 @@
+// Command webhook_handler is a small HTTP server that receives QBitFlow webhooks and the
+// checkout redirects.
+//
+// Configuration comes from the environment:
+//
+//	QBITFLOW_API_KEY         required (used for remote verification and status checks)
+//	QBITFLOW_BASE_URL        optional (defaults to the production API)
+//	QBITFLOW_WEBHOOK_SECRET  optional: when set, webhooks are verified locally (no API call)
+//
+// Point the dashboard's Transaction webhook at /webhook/transaction and the Subscription
+// status webhook at /webhook/subscription.
 package main
 
 import (
-	"os"
-
 	"encoding/json"
+	"errors"
 	"fmt"
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/QBitFlow/qbitflow-go-sdk/v2"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
 )
 
 // WebhookServer handles incoming webhooks from QBitFlow
 type WebhookServer struct {
 	client *qbitflow.QBitFlow
+	secret string
 }
 
-func main() {
-	// Initialize the QBitFlow client
-	client := qbitflow.New("your-api-key-here")
+// successPage is rendered with html/template, which escapes the query values it echoes —
+// writing them into HTML verbatim would make the page an XSS vector.
+var successPage = template.Must(template.New("success").Parse(`<html>
+<head><title>Payment Successful</title></head>
+<body>
+	<h1>Payment Successful!</h1>
+	<p>Thank you for your payment.</p>
+	<p>Transaction UUID: {{.UUID}}</p>
+	<p>Status: {{.Status}}</p>
+	<p><a href="/">Return to Home</a></p>
+</body>
+</html>
+`))
 
-	server := &WebhookServer{
-		client: client,
+func main() {
+	apiKey := os.Getenv("QBITFLOW_API_KEY")
+	if apiKey == "" {
+		log.Fatal("set QBITFLOW_API_KEY to run this example")
 	}
 
-	// Set up webhook handler
-	http.HandleFunc("/webhook", server.handleWebhook)
+	server := &WebhookServer{
+		client: qbitflow.NewWithConfig(qbf.Config{
+			APIKey:  apiKey,
+			BaseURL: os.Getenv("QBITFLOW_BASE_URL"), // "" = production
+		}),
+		secret: os.Getenv("QBITFLOW_WEBHOOK_SECRET"),
+	}
 
-	// Set up success/cancel redirect handlers
+	http.HandleFunc("/webhook/transaction", server.handleTransactionWebhook)
+	http.HandleFunc("/webhook/subscription", server.handleSubscriptionWebhook)
 	http.HandleFunc("/success", server.handleSuccess)
 	http.HandleFunc("/cancel", server.handleCancel)
 
 	fmt.Println("=== QBitFlow Webhook Handler Example ===")
 	fmt.Println("Starting webhook server on :8080...")
-	fmt.Println("\nEndpoints:")
-	fmt.Println("  POST /webhook - Webhook handler")
-	fmt.Println("  GET  /success - Success redirect handler")
-	fmt.Println("  GET  /cancel  - Cancel redirect handler")
-	fmt.Println()
+	fmt.Println("  POST /webhook/transaction   - Transaction webhook")
+	fmt.Println("  POST /webhook/subscription  - Subscription status webhook")
+	fmt.Println("  GET  /success               - Success redirect handler")
+	fmt.Println("  GET  /cancel                - Cancel redirect handler")
 
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// handleWebhook processes incoming webhook events
-func (s *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("📨 Received webhook event")
+// verify authenticates a webhook and returns its raw body, or writes the error response
+// and returns ok=false.
+//
+// Answering >= 400 makes QBitFlow retry the delivery, which is what you want for a
+// transient failure (the API was unreachable) but not for a forged request — both are
+// rejected here, with different statuses so your logs tell them apart.
+func (s *WebhookServer) verify(w http.ResponseWriter, r *http.Request) ([]byte, qbf.WebhookHeaders, bool) {
+	headers := qbf.ExtractWebhookHeaders(r.Header)
 
-	// 1. Read the raw body. Never act on it before verification passes — an unverified
-	//    webhook may be forged.
-	bodyBytes, err := io.ReadAll(r.Body)
+	if s.secret != "" {
+		// Local verification: needs the webhook secret, no network call. It reads at most
+		// qbf.MaxWebhookBodySize bytes and checks the 5-minute replay window.
+		body, err := qbf.VerifyWebhookRequest(r, s.secret, nil)
+		if err != nil {
+			log.Printf("local webhook verification failed: %v", err)
+			http.Error(w, "invalid webhook", http.StatusUnauthorized)
+			return nil, headers, false
+		}
+		return body, headers, true
+	}
+
+	// Remote verification: no secret needed, one API round-trip per webhook.
+	body, err := readBody(r)
 	if err != nil {
-		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		http.Error(w, "invalid webhook", http.StatusBadRequest)
+		return nil, headers, false
+	}
+	valid, err := s.client.Webhooks.Verify(body, headers.Signature, headers.Timestamp)
+	if err != nil {
+		var validation *qberrors.ValidationError
+		if errors.As(err, &validation) && validation.StatusCode == 0 {
+			// Missing headers or an empty/invalid body: not a genuine delivery.
+			http.Error(w, "invalid webhook", http.StatusBadRequest)
+			return nil, headers, false
+		}
+		// Outage, expired key, ...: not a verdict on the signature — let QBitFlow retry.
+		log.Printf("webhook verification unavailable: %v", err)
+		http.Error(w, "verification unavailable", http.StatusServiceUnavailable)
+		return nil, headers, false
+	}
+	if !valid {
+		http.Error(w, "invalid webhook", http.StatusUnauthorized)
+		return nil, headers, false
+	}
+	return body, headers, true
+}
+
+// readBody reads a request body with the same bound VerifyWebhookRequest uses.
+func readBody(r *http.Request) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, qbf.MaxWebhookBodySize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > qbf.MaxWebhookBodySize {
+		return nil, fmt.Errorf("webhook body exceeds %d bytes", qbf.MaxWebhookBodySize)
+	}
+	return body, nil
+}
+
+// handleTransactionWebhook processes transaction webhooks (a checkout completed).
+func (s *WebhookServer) handleTransactionWebhook(w http.ResponseWriter, r *http.Request) {
+	body, headers, ok := s.verify(w, r)
+	if !ok {
 		return
 	}
 
-	// 2. Pull out the QBitFlow headers. ExtractWebhookHeaders handles the casing for you.
-	headers := qbf.ExtractWebhookHeaders(r.Header)
-
-	// The dashboard's "Test webhook" button sends a fake event just to check the endpoint
-	// is reachable. Acknowledge it and stop — there is no transaction behind it.
+	// The dashboard's "Test webhook" button sends a probe to check the endpoint is
+	// reachable. It is checked *after* verification on purpose: the probe is signed like
+	// any other delivery, so this proves your whole verification setup works end to end.
 	if headers.IsTest() {
-		fmt.Println("✅ Connectivity test webhook received")
+		log.Println("connectivity test webhook received (signature verified)")
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	if headers.Signature == "" || headers.Timestamp == "" {
-		fmt.Println("❌ Missing required webhook headers for verification")
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// 3. Verify authenticity.
-	//
-	// Local verification is the recommended default: it needs your webhook secret (from
-	// the QBitFlow dashboard) but makes no network call, so it is faster and keeps working
-	// when the API is unreachable. If you would rather not hold the secret at all, the
-	// remote path below asks QBitFlow to check the signature instead.
-	if secret := os.Getenv("QBITFLOW_WEBHOOK_SECRET"); secret != "" {
-		// The replay window defaults to 5 minutes (qbf.DefaultMaxTimestampAge) and must
-		// match the server's setting. Override it with &qbf.VerifyOptions{MaxTimestampAge: …}.
-		if err := qbf.VerifyWebhookSignature(secret, headers.Timestamp, headers.Signature, bodyBytes, nil); err != nil {
-			fmt.Printf("❌ Local webhook verification failed: %v\n", err)
-			// Sending a >= 400 response will cause QBitFlow to retry the webhook
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		fmt.Println("🔐 Verified locally (no API round-trip)")
-	} else {
-		// Remote fallback: no secret needed, one API round-trip per webhook.
-		valid, err := s.client.Webhooks.Verify(bodyBytes, headers.Signature, headers.Timestamp)
-		if err != nil || !valid {
-			fmt.Printf("❌ Remote webhook verification failed: %v\n", err)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		fmt.Println("🔐 Verified via the QBitFlow API")
-	}
-
-	// 4. Only now is it safe to decode and act on the payload.
 	var webhook qbmodels.SessionWebhookResponse
-	if err := json.Unmarshal(bodyBytes, &webhook); err != nil {
-		http.Error(w, "Invalid webhook payload", http.StatusBadRequest)
+	if err := json.Unmarshal(body, &webhook); err != nil {
+		http.Error(w, "invalid webhook payload", http.StatusBadRequest)
 		return
 	}
 
-	fmt.Printf("📋 Webhook Details:\n")
-	fmt.Printf("   UUID: %s\n", webhook.UUID)
-	fmt.Printf("   Status: %s\n", webhook.Status.Status)
-	fmt.Printf("   Type: %s\n", webhook.TxType)
+	log.Printf("transaction webhook: uuid=%s type=%s", webhook.UUID, webhook.TxType)
 
-	fmt.Printf("   Transaction Hash: %s\n", webhook.Status.TxHash)
+	// Status is nullable: acknowledge a delivery without one rather than rejecting it,
+	// which would only make QBitFlow retry it.
+	if webhook.Status != nil && webhook.Status.Status == qbmodels.TransactionStatusCompleted {
+		customer := "collected at checkout"
+		if webhook.Session.CustomerUUID != nil {
+			customer = *webhook.Session.CustomerUUID
+		}
 
-	if webhook.Status.Message != nil {
-		fmt.Printf("   Message: %s\n", *webhook.Status.Message)
+		switch webhook.TxType {
+		case qbmodels.TransactionTypeOneTimePayment:
+			// Session.Reference echoes the reference you set when creating the session.
+			log.Printf("payment completed for order %q (customer %s), tx %s",
+				webhook.Session.Reference, customer, webhook.Status.TxHash)
+		case qbmodels.TransactionTypeCreateSubscription:
+			// The first period is already paid. webhook.UUID is the *session* UUID; the
+			// subscription's own sub@ UUID arrives with the subscription webhooks.
+			log.Printf("subscription started for customer %s (first period billed)", customer)
+		}
 	}
 
-	// Process webhook based on status
-	switch webhook.Status.Status {
-	case qbmodels.TransactionStatusCompleted:
-		s.handleCompletedTransaction(webhook)
+	w.WriteHeader(http.StatusOK)
+}
 
-	case qbmodels.TransactionStatusFailed:
-		s.handleFailedTransaction(webhook)
+// handleSubscriptionWebhook processes subscription webhooks: status transitions and
+// billing of a renewed period.
+func (s *WebhookServer) handleSubscriptionWebhook(w http.ResponseWriter, r *http.Request) {
+	body, headers, ok := s.verify(w, r)
+	if !ok {
+		return
+	}
+	if headers.IsTest() {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-	case qbmodels.TransactionStatusCancelled:
-		s.handleCancelledTransaction(webhook)
+	var event qbmodels.SubscriptionWebhook
+	if err := json.Unmarshal(body, &event); err != nil {
+		http.Error(w, "invalid webhook payload", http.StatusBadRequest)
+		return
+	}
 
-	case qbmodels.TransactionStatusPending:
-		s.handlePendingTransaction(webhook)
+	switch event.Type {
+	case qbmodels.SubscriptionWebhookTypeStatusTransition:
+		transition, err := event.StatusTransition()
+		if err != nil {
+			http.Error(w, "invalid webhook payload", http.StatusBadRequest)
+			return
+		}
+		log.Printf("subscription %s: %s -> %s", event.SubscriptionUUID,
+			transition.PreviousStatus, transition.CurrentStatus)
 
-	case qbmodels.TransactionStatusWaitingConfirmation:
-		s.handleWaitingConfirmation(webhook)
+		switch transition.CurrentStatus {
+		case qbmodels.SubscriptionStatusActive:
+			// Trial converted or payment recovered — grant/keep access.
+		case qbmodels.SubscriptionStatusPastDue, qbmodels.SubscriptionStatusLowOnFunds:
+			// Prompt the customer to top up their allowance.
+		case qbmodels.SubscriptionStatusCancelled, qbmodels.SubscriptionStatusTrialExpired:
+			// Revoke access.
+		}
+
+	case qbmodels.SubscriptionWebhookTypeBilling:
+		billing, err := event.Billing()
+		if err != nil {
+			http.Error(w, "invalid webhook payload", http.StatusBadRequest)
+			return
+		}
+		log.Printf("subscription %s renewed: %s, $%.2f", event.SubscriptionUUID, billing.UUID, billing.Amount)
 
 	default:
-		fmt.Printf("⚠️  Unhandled status: %s\n", webhook.Status.Status)
+		// A type this SDK does not know yet: acknowledge it so it is not retried forever.
+		log.Printf("unhandled subscription webhook type %q", event.Type)
 	}
 
-	// Always respond with 200 OK
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "ok",
-		"uuid":   webhook.UUID,
-	})
 }
 
-// handleCompletedTransaction processes completed transactions
-func (s *WebhookServer) handleCompletedTransaction(webhook qbmodels.SessionWebhookResponse) {
-	fmt.Println("✅ Transaction completed successfully!")
-
-	// Process based on transaction type
-	switch webhook.TxType {
-	case qbmodels.TransactionTypeOneTimePayment:
-		fmt.Println("   Type: One-time payment")
-		// Update order status, send confirmation email, etc.
-		s.fulfillOrder(webhook.Session.CustomerUUID, webhook.UUID)
-
-	case qbmodels.TransactionTypeCreateSubscription:
-		fmt.Println("   Type: Subscription creation")
-		// Activate subscription, grant access, send welcome email
-		s.activateSubscription(webhook.Session.CustomerUUID, webhook.UUID)
-
-	case qbmodels.TransactionTypeCreatePAYGSubscription:
-		fmt.Println("   Type: PAYG subscription creation")
-		// Activate PAYG subscription
-		s.activatePAYGSubscription(webhook.Session.CustomerUUID, webhook.UUID)
-
-	case qbmodels.TransactionTypeExecuteSubscriptionPayment:
-		fmt.Println("   Type: Subscription renewal payment")
-		// Handle recurring payment
-		s.handleSubscriptionRenewal(webhook.Session.CustomerUUID, webhook.UUID)
-	}
-
-	fmt.Printf("   Customer UUID: %s\n", webhook.Session.CustomerUUID)
-	fmt.Printf("   Product: %s\n", webhook.Session.ProductName)
-	fmt.Printf("   Amount: $%.2f\n", webhook.Session.Price)
-}
-
-// handleFailedTransaction processes failed transactions
-func (s *WebhookServer) handleFailedTransaction(webhook qbmodels.SessionWebhookResponse) {
-	fmt.Println("❌ Transaction failed")
-
-	// Log failure, send notification to customer
-	fmt.Printf("   Customer UUID: %s\n", webhook.Session.CustomerUUID)
-	fmt.Printf("   Product: %s\n", webhook.Session.ProductName)
-
-	if webhook.Status.Message != nil {
-		fmt.Printf("   Failure reason: %s\n", *webhook.Status.Message)
-	}
-
-	// Send email to customer about failed payment
-	s.notifyPaymentFailed(webhook.Session.CustomerUUID, webhook.UUID)
-}
-
-// handleCancelledTransaction processes cancelled transactions
-func (s *WebhookServer) handleCancelledTransaction(webhook qbmodels.SessionWebhookResponse) {
-	fmt.Println("🚫 Transaction cancelled")
-
-	// Log cancellation
-	fmt.Printf("   Customer UUID: %s\n", webhook.Session.CustomerUUID)
-	fmt.Printf("   Product: %s\n", webhook.Session.ProductName)
-
-	// Update analytics, maybe send follow-up email
-	s.handleCancellation(webhook.Session.CustomerUUID, webhook.UUID)
-}
-
-// handlePendingTransaction processes pending transactions
-func (s *WebhookServer) handlePendingTransaction(webhook qbmodels.SessionWebhookResponse) {
-	fmt.Println("⏳ Transaction pending")
-	fmt.Printf("   UUID: %s\n", webhook.UUID)
-
-	// Monitor transaction, maybe show pending status to customer
-}
-
-// handleWaitingConfirmation processes transactions waiting for confirmation
-func (s *WebhookServer) handleWaitingConfirmation(webhook qbmodels.SessionWebhookResponse) {
-	fmt.Println("⏰ Waiting for blockchain confirmation")
-	fmt.Printf("   UUID: %s\n", webhook.UUID)
-
-	fmt.Printf("   Tx Hash: %s\n", webhook.Status.TxHash)
-}
-
-// handleSuccess handles successful payment redirects
+// handleSuccess handles successful payment redirects.
 func (s *WebhookServer) handleSuccess(w http.ResponseWriter, r *http.Request) {
-	uuid := r.URL.Query().Get("uuid")
-	transactionType := r.URL.Query().Get("transactionType")
+	uuid := r.URL.Query().Get("uuid")                       // from the {{UUID}} placeholder
+	transactionType := r.URL.Query().Get("transactionType") // from the {{TRANSACTION_TYPE}} placeholder
 
-	fmt.Printf("✅ Success redirect received\n")
-	fmt.Printf("   UUID: %s\n", uuid)
-	fmt.Printf("   Type: %s\n", transactionType)
+	page := struct{ UUID, Status string }{UUID: uuid, Status: "unknown"}
 
-	// Get transaction status
+	// Never trust the redirect alone: ask the API for the transaction's actual state.
 	if uuid != "" && transactionType != "" {
-		txType := qbmodels.TransactionType(transactionType)
-		status, err := s.client.TransactionStatus.GetTransactionStatus(uuid, txType)
-		if err != nil {
-			fmt.Printf("❌ Error getting transaction status: %v\n", err)
+		status, err := s.client.TransactionStatus.GetTransactionStatus(uuid, qbmodels.TransactionType(transactionType))
+		var notFound *qberrors.NotFoundError
+		switch {
+		case errors.As(err, &notFound):
+			page.Status = "not processed yet"
+		case err != nil:
+			log.Printf("error getting transaction status: %v", err)
 			http.Error(w, "Failed to get transaction status", http.StatusInternalServerError)
 			return
-		}
-
-		fmt.Printf("   Status: %s\n", status.Status)
-
-		// If completed, fetch session details
-		if status.Status == qbmodels.TransactionStatusCompleted {
-			session, err := s.client.Payments.GetSession(uuid)
-			if err != nil {
-				fmt.Printf("❌ Error getting session: %v\n", err)
-			} else {
-				fmt.Printf("   Product: %s\n", session.ProductName)
-				fmt.Printf("   Price: $%.2f\n", session.Price)
-			}
+		default:
+			page.Status = string(status.Status)
 		}
 	}
 
-	// Render success page
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-		<html>
-		<head><title>Payment Successful</title></head>
-		<body>
-			<h1>✅ Payment Successful!</h1>
-			<p>Thank you for your payment.</p>
-			<p>Transaction UUID: %s</p>
-			<p><a href="/">Return to Home</a></p>
-		</body>
-		</html>
-	`, uuid)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := successPage.Execute(w, page); err != nil {
+		log.Printf("rendering success page: %v", err)
+	}
 }
 
-// handleCancel handles payment cancellation redirects
-func (s *WebhookServer) handleCancel(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("🚫 Cancel redirect received")
-
-	// Render cancel page
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `
-		<html>
-		<head><title>Payment Cancelled</title></head>
-		<body>
-			<h1>Payment Cancelled</h1>
-			<p>Your payment has been cancelled.</p>
-			<p><a href="/">Return to Home</a></p>
-		</body>
-		</html>
-	`)
-}
-
-// Business logic functions (implement based on your needs)
-
-func (s *WebhookServer) fulfillOrder(customerUUID, orderUUID string) {
-	fmt.Printf("   📦 Fulfilling order for customer %s\n", customerUUID)
-	// Your order fulfillment logic here:
-	// - Update database
-	// - Send confirmation email
-	// - Trigger delivery process
-	// - Update inventory
-}
-
-func (s *WebhookServer) activateSubscription(customerUUID, subscriptionUUID string) {
-	fmt.Printf("   🔓 Activating subscription for customer %s\n", customerUUID)
-	// Your subscription activation logic here:
-	// - Grant access to premium features
-	// - Update user permissions
-	// - Send welcome email
-	// - Schedule next billing reminder
-}
-
-func (s *WebhookServer) activatePAYGSubscription(customerUUID, subscriptionUUID string) {
-	fmt.Printf("   🔓 Activating PAYG subscription for customer %s\n", customerUUID)
-	// Your PAYG subscription activation logic here:
-	// - Set up usage tracking
-	// - Initialize usage counters
-	// - Grant access
-}
-
-func (s *WebhookServer) handleSubscriptionRenewal(customerUUID, paymentUUID string) {
-	fmt.Printf("   🔄 Processing subscription renewal for customer %s\n", customerUUID)
-	// Your renewal logic here:
-	// - Extend subscription period
-	// - Send renewal confirmation
-	// - Update analytics
-}
-
-func (s *WebhookServer) notifyPaymentFailed(customerUUID, transactionUUID string) {
-	fmt.Printf("   📧 Sending payment failure notification to customer %s\n", customerUUID)
-	// Your notification logic here:
-	// - Send email
-	// - Update retry schedule
-	// - Log for support team
-}
-
-func (s *WebhookServer) handleCancellation(customerUUID, transactionUUID string) {
-	fmt.Printf("   📊 Logging cancellation for customer %s\n", customerUUID)
-	// Your cancellation logic here:
-	// - Update analytics
-	// - Maybe send survey
-	// - Log for analysis
+// handleCancel handles payment cancellation redirects.
+func (s *WebhookServer) handleCancel(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprint(w, `<html>
+<head><title>Payment Cancelled</title></head>
+<body>
+	<h1>Payment Cancelled</h1>
+	<p>Your payment has been cancelled.</p>
+	<p><a href="/">Return to Home</a></p>
+</body>
+</html>
+`)
 }
