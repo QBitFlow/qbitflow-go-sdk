@@ -15,33 +15,30 @@ type ApiKeyService struct {
 	client *Client
 }
 
+// NewApiKeyService creates the API-key service bound to client.
 func NewApiKeyService(client *Client) *ApiKeyService {
 	return &ApiKeyService{client: client}
 }
 
 // OnBehalfOf returns an ApiKeyService that acts on behalf of the given user
 // within the same organization. Requires an admin-level (organization) API key.
+// A userID of 0 returns a copy that acts at the organization level (no header sent).
 func (s *ApiKeyService) OnBehalfOf(userID uint64) *ApiKeyService {
 	return NewApiKeyService(s.client.withOnBehalfOf(userID))
 }
 
-// GetAll returns the API keys associated with the caller (the key used for the request).
+// GetAll returns the API keys visible to the caller: a user-level key sees only that
+// user's keys, while an organization-level (admin/owner) key sees every key in the
+// organization. Through OnBehalfOf it returns the acted-for user's keys.
 func (s *ApiKeyService) GetAll() ([]qbmodels.ApiKey, error) {
-	var result []qbmodels.ApiKey
-	err := s.client.makeRequest("GET", "/api-key/", nil, &result)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
+	return getList[qbmodels.ApiKey](s.client, "/api-key/")
 }
 
 // GetForUser returns the API keys for a specific user (admin only).
 func (s *ApiKeyService) GetForUser(userID uint64) ([]qbmodels.ApiKey, error) {
-	var result []qbmodels.ApiKey
-	endpoint := "/api-key/user/" + fmt.Sprint(userID)
-	err := s.client.makeRequest("GET", endpoint, nil, &result)
-	if err != nil {
+	if err := requirePositive(userID, "User ID"); err != nil {
 		return nil, err
 	}
-	return result, nil
+
+	return getList[qbmodels.ApiKey](s.client, "/api-key/user/"+fmt.Sprint(userID))
 }

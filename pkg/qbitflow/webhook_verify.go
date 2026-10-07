@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
@@ -24,6 +24,10 @@ const DefaultMaxTimestampAge = 5 * time.Minute
 
 // signaturePrefix is the algorithm marker QBitFlow prefixes to the hex digest.
 const signaturePrefix = "sha256="
+
+// MaxWebhookBodySize is the largest webhook body VerifyWebhookRequest reads (5 MiB).
+// QBitFlow's webhooks are a few kilobytes; the bound only protects your endpoint.
+const MaxWebhookBodySize = 5 << 20
 
 // VerifyOptions tunes local webhook verification.
 type VerifyOptions struct {
@@ -66,11 +70,17 @@ func (o *VerifyOptions) now() time.Time {
 // Go's generic representation and re-encoding it — encoding/json sorts map keys, so the
 // result is stable regardless of the input's original ordering.
 //
-// payload may be raw JSON ([]byte, json.RawMessage or string) or an already-decoded value.
+// payload may be raw JSON ([]byte, json.RawMessage or string) — the normal case: pass the
+// body exactly as received — or a generic decoded value such as the map[string]any that
+// json.Unmarshal produces (without UseNumber). Do not pass an SDK struct such as
+// SessionWebhookResponse: it does not model every field the server sends, and fields at
+// their zero value may be dropped when it is re-encoded, so its canonical form differs
+// from the one QBitFlow signed and verification fails.
 //
-// NOTE ON ESCAPING: encoding/json escapes <, > and & as <, > and & by
-// default, and the server signs with the same default. The other QBitFlow SDKs reproduce
-// this escaping deliberately so that all four compute an identical signature.
+// NOTE ON ESCAPING: encoding/json escapes <, > and & as \u003c, \u003e and \u0026 by
+// default (and U+2028/U+2029 as \u2028/\u2029), and the server signs with the same
+// default. The other QBitFlow SDKs reproduce this escaping deliberately so that all four
+// compute an identical signature.
 func CanonicalJSON(payload any) ([]byte, error) {
 	var decoded any
 
@@ -151,6 +161,10 @@ func ComputeWebhookSignature(secret, timestamp string, payload any) (string, err
 //
 // A nil return means the webhook is authentic. Any error means do not trust the payload.
 //
+// Mind the argument order — timestamp before signature, payload last — which differs from
+// WebhookService.Verify(payload, signature, timestamp). A swapped pair fails safely (the
+// signature is not a unix timestamp) with an error that says so.
+//
 //	err := qbf.VerifyWebhookSignature(secret, timestamp, signature, body, nil)
 //	if err != nil {
 //		http.Error(w, "invalid webhook", http.StatusBadRequest)
@@ -193,13 +207,22 @@ func verifyTimestamp(timestamp string, opts *VerifyOptions) error {
 
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil {
+		if strings.HasPrefix(timestamp, signaturePrefix) {
+			return qberrors.NewValidationError(
+				"webhook timestamp looks like a signature: check the argument order (secret, timestamp, signature, payload)")
+		}
 		return qberrors.NewValidationError("webhook timestamp is not a unix-seconds integer")
 	}
 
-	age := time.Duration(math.Abs(float64(opts.now().Unix()-ts))) * time.Second
-	if age > opts.maxAge() {
+	// Compare in whole seconds with overflow-safe arithmetic: converting an arbitrary
+	// difference to a time.Duration (nanoseconds) overflows for timestamps a few centuries
+	// away and would wrap around into the accepted window.
+	maxAge := opts.maxAge()
+	maxSeconds := int64(maxAge / time.Second)
+	now := opts.now().Unix()
+	if ts < now-maxSeconds || ts > now+maxSeconds {
 		return qberrors.NewValidationError(
-			fmt.Sprintf("webhook timestamp expired: age %s exceeds the maximum of %s", age, opts.maxAge()))
+			fmt.Sprintf("webhook timestamp expired: it is more than %s from the current time", maxAge))
 	}
 
 	return nil
@@ -235,8 +258,10 @@ func ExtractWebhookHeaders(h http.Header) WebhookHeaders {
 // VerifyWebhookRequest reads and verifies an incoming *http.Request in one step, and
 // returns the raw body so you can decode it once verification has passed.
 //
-// It consumes r.Body. The body is returned rather than re-decoded for you, so you stay in
-// control of how the payload is parsed.
+// It consumes r.Body, reading at most MaxWebhookBodySize bytes: a larger body is refused
+// with a *qberrors.ValidationError, so an unauthenticated caller cannot make your endpoint
+// buffer an arbitrarily large request. The body is returned rather than re-decoded for
+// you, so you stay in control of how the payload is parsed.
 //
 //	body, err := qbf.VerifyWebhookRequest(r, secret, nil)
 //	if err != nil {
@@ -252,9 +277,18 @@ func VerifyWebhookRequest(r *http.Request, secret string, opts *VerifyOptions) (
 		return nil, qberrors.NewValidationError("request is required")
 	}
 
-	body, err := io.ReadAll(r.Body)
+	if r.Body == nil {
+		return nil, qberrors.NewValidationError("webhook body is required")
+	}
+
+	// Read one byte more than the limit to tell "exactly at the limit" from "over it".
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxWebhookBodySize+1))
 	if err != nil {
 		return nil, qberrors.NewValidationError(fmt.Sprintf("could not read webhook body: %v", err))
+	}
+	if len(body) > MaxWebhookBodySize {
+		return nil, qberrors.NewValidationError(
+			fmt.Sprintf("webhook body exceeds the maximum of %d bytes", MaxWebhookBodySize))
 	}
 
 	headers := ExtractWebhookHeaders(r.Header)

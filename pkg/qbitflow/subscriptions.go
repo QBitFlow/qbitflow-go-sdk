@@ -3,7 +3,6 @@ package qbf
 import (
 	"fmt"
 
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
 )
 
@@ -12,30 +11,40 @@ type SubscriptionService struct {
 	client *Client
 }
 
+// NewSubscriptionService creates the subscription service bound to client.
 func NewSubscriptionService(client *Client) *SubscriptionService {
 	return &SubscriptionService{client: client}
 }
 
 // OnBehalfOf returns a SubscriptionService that acts on behalf of the given user
 // within the same organization. Requires an admin-level (organization) API key.
+// A userID of 0 returns a copy that acts at the organization level (no header sent).
 func (s *SubscriptionService) OnBehalfOf(userID uint64) *SubscriptionService {
 	return NewSubscriptionService(s.client.withOnBehalfOf(userID))
 }
 
 // CreateSubscriptionSessionOptions are the options for creating a subscription session.
 // Provide either ProductID, ProductReference, or the (ProductName + Description + Price) triplet.
+//
+// Every string option treats "" like nil: the field is left out of the request.
 type CreateSubscriptionSessionOptions struct {
-	ProductID   *uint64 // Use an existing product by ID
-	ProductName *string // Or define a product inline (requires Description and Price)
-	Description *string
-	Price       *float64
-	Frequency   qbmodels.Duration  // Required: billing interval (e.g., {Value:1, Unit:"months"})
-	TrialPeriod *qbmodels.Duration // Optional: free trial before first charge
-	MinPeriods  *uint32            // Optional: minimum billing periods before cancellation is allowed
-	SuccessURL  *string
-	CancelURL   *string
+	ProductID   *uint64  // Use an existing product by ID (must be > 0)
+	ProductName *string  // Or define a product inline (requires Description and Price); producttext, 2-100 chars
+	Description *string  // producttext, 2-500 chars
+	Price       *float64 // USD, a finite number greater than 0
+	// Frequency is the required billing interval (e.g. {Value: 1, Unit: "months"}); Value
+	// must be within 1..4294967295.
+	Frequency qbmodels.Duration
+	// TrialPeriod is an optional free trial before the first charge; Value within
+	// 0..4294967295.
+	TrialPeriod *qbmodels.Duration
+	// MinPeriods is the optional minimum number of billing periods before cancellation is
+	// allowed; 0 means none (it is left out of the request).
+	MinPeriods *uint32
+	SuccessURL *string // absolute http(s) URL
+	CancelURL  *string // absolute http(s) URL
 
-	// CustomerUUID pre-associates a customer by their QBitFlow UUID.
+	// CustomerUUID pre-associates a customer by their QBitFlow UUID (a bare UUID, no prefix).
 	CustomerUUID *string
 	// Reference is your own reference for the subscription (e.g. an order/invoice ID). It is
 	// echoed back on the resulting Subscription and in webhooks, and usable with
@@ -66,33 +75,47 @@ type createSubscriptionSessionRequest struct {
 }
 
 // CreateSession creates a new subscription checkout session and returns a checkout link.
+//
+// The options are validated against the API's binding rules before any request is sent
+// (product selection, inline product text and price, redirect URLs, customer UUID, a
+// Frequency of 1..4294967295 with a known unit, TrialPeriod when set); a violation —
+// including nil options — returns a *qberrors.ValidationError.
 func (s *SubscriptionService) CreateSession(opts *CreateSubscriptionSessionOptions) (*qbmodels.LinkResponse, error) {
-	if opts.ProductID == nil && opts.ProductReference == nil && (opts.ProductName == nil || opts.Description == nil || opts.Price == nil) {
-		return nil, qberrors.NewValidationError("either ProductID, ProductReference, or ProductName, Description, and Price must be provided")
-	}
-	if opts.Frequency.Value <= 0 {
-		return nil, qberrors.NewValidationError("Frequency.Value must be greater than zero")
-	}
-	// Mirror the API's binding rules for an inline product and the redirect URLs, so
-	// invalid input is caught before the round-trip.
-	if err := validateInlineProduct(opts.ProductName, opts.Description, opts.Price, opts.SuccessURL, opts.CancelURL); err != nil {
+	if err := requireArgument(opts == nil, "Subscription session options"); err != nil {
 		return nil, err
+	}
+	if err := validateSessionProduct(opts.ProductID, opts.ProductReference, opts.ProductName,
+		opts.Description, opts.Price, opts.SuccessURL, opts.CancelURL, opts.CustomerUUID); err != nil {
+		return nil, err
+	}
+	if err := validateDuration("Frequency", opts.Frequency, 1); err != nil {
+		return nil, err
+	}
+	if opts.TrialPeriod != nil {
+		if err := validateDuration("TrialPeriod", *opts.TrialPeriod, 0); err != nil {
+			return nil, err
+		}
+	}
+
+	minPeriods := opts.MinPeriods
+	if minPeriods != nil && *minPeriods == 0 {
+		minPeriods = nil // 0 means "no minimum", which the API expresses by omission
 	}
 
 	req := &createSubscriptionSessionRequest{
 		ProductID:         opts.ProductID,
-		ProductName:       opts.ProductName,
-		Description:       opts.Description,
+		ProductName:       omitEmpty(opts.ProductName),
+		Description:       omitEmpty(opts.Description),
 		Price:             opts.Price,
-		SuccessURL:        opts.SuccessURL,
-		CancelURL:         opts.CancelURL,
-		CustomerUUID:      opts.CustomerUUID,
-		Reference:         opts.Reference,
-		ProductReference:  opts.ProductReference,
-		CustomerReference: opts.CustomerReference,
+		SuccessURL:        omitEmpty(opts.SuccessURL),
+		CancelURL:         omitEmpty(opts.CancelURL),
+		CustomerUUID:      omitEmpty(opts.CustomerUUID),
+		Reference:         omitEmpty(opts.Reference),
+		ProductReference:  omitEmpty(opts.ProductReference),
+		CustomerReference: omitEmpty(opts.CustomerReference),
 		Frequency:         opts.Frequency,
 		TrialPeriod:       opts.TrialPeriod,
-		MinPeriods:        opts.MinPeriods,
+		MinPeriods:        minPeriods,
 	}
 
 	var result qbmodels.LinkResponse
@@ -103,21 +126,29 @@ func (s *SubscriptionService) CreateSession(opts *CreateSubscriptionSessionOptio
 	return &result, nil
 }
 
-// GetSession retrieves a checkout session by its UUID.
-func (s *SubscriptionService) GetSession(sessionUUID string) (*qbmodels.SessionCheckout, error) {
-	var result qbmodels.SessionCheckout
-	endpoint := fmt.Sprintf("/transaction/session-checkout/%s?closeToExpireError=false", sessionUUID)
-	err := s.client.makeRequest("GET", endpoint, nil, &result)
-	if err != nil {
+// GetSession retrieves a checkout session by its UUID. The result is the unified
+// SessionCheckout; use IsPayment / IsSubscription to tell the kinds apart.
+//
+// closeToExpireError controls whether the API rejects a session that is close to expiry.
+// Pass nil to use the API's default (true).
+func (s *SubscriptionService) GetSession(sessionUUID string, closeToExpireError *bool) (*qbmodels.SessionCheckout, error) {
+	if err := requireNonEmpty(sessionUUID, "Session UUID"); err != nil {
 		return nil, err
 	}
-	return &result, nil
+
+	return getSession(s.client, sessionUUID, closeToExpireError)
 }
 
-// GetSubscription retrieves a subscription by its UUID.
+// GetSubscription retrieves a subscription by its UUID — the subscription's own sub@ UUID
+// (from a subscription webhook's SubscriptionUUID, or GetSubscriptionByReference), which
+// differs from the checkout session's UUID.
 func (s *SubscriptionService) GetSubscription(subscriptionUUID string) (*qbmodels.Subscription, error) {
+	if err := requireNonEmpty(subscriptionUUID, "Subscription UUID"); err != nil {
+		return nil, err
+	}
+
 	var result qbmodels.Subscription
-	endpoint := fmt.Sprintf("/transaction/subscription/%s", subscriptionUUID)
+	endpoint := fmt.Sprintf("/transaction/subscription/%s", escapePath(subscriptionUUID))
 	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {
 		return nil, err
@@ -129,11 +160,12 @@ func (s *SubscriptionService) GetSubscription(subscriptionUUID string) (*qbmodel
 // the session. Lets you resolve a subscription from your own order/invoice ID without storing
 // QBitFlow's UUID.
 func (s *SubscriptionService) GetSubscriptionByReference(reference string) (*qbmodels.Subscription, error) {
-	if reference == "" {
-		return nil, qberrors.NewValidationError("subscription reference cannot be empty")
+	if err := requireNonEmpty(reference, "Subscription reference"); err != nil {
+		return nil, err
 	}
+
 	var result qbmodels.Subscription
-	endpoint := fmt.Sprintf("/transaction/subscription/reference/%s/%s", qbmodels.SubscriptionTypeSubscription, reference)
+	endpoint := fmt.Sprintf("/transaction/subscription/reference/%s/%s", qbmodels.SubscriptionTypeSubscription, escapePath(reference))
 	err := s.client.makeRequest("GET", endpoint, nil, &result)
 	if err != nil {
 		return nil, err
@@ -141,33 +173,49 @@ func (s *SubscriptionService) GetSubscriptionByReference(reference string) (*qbm
 	return &result, nil
 }
 
-// GetPaymentHistory retrieves the billing history for a subscription.
+// GetPaymentHistory retrieves the billing history for a subscription (a public route: an
+// unknown subscription returns an empty list rather than an error).
 func (s *SubscriptionService) GetPaymentHistory(subscriptionUUID string) ([]qbmodels.SubscriptionHistory, error) {
-	var result []qbmodels.SubscriptionHistory
-	endpoint := fmt.Sprintf("/transaction/subscription/history/%s", subscriptionUUID)
-	err := s.client.makeRequest("GET", endpoint, nil, &result)
-	if err != nil {
+	if err := requireNonEmpty(subscriptionUUID, "Subscription UUID"); err != nil {
 		return nil, err
 	}
-	return result, nil
+
+	endpoint := fmt.Sprintf("/transaction/subscription/history/%s", escapePath(subscriptionUUID))
+	return getList[qbmodels.SubscriptionHistory](s.client, endpoint)
 }
 
-// ForceCancel immediately cancels a subscription, bypassing the normal user-signed cancellation flow.
+// ForceCancel cancels a subscription without the customer signing on-chain. It queues an
+// on-chain cancellation and returns immediately; the subscription's status reflects the
+// cancellation once the transaction settles.
+//
+// This request is never retried: a timeout may already have queued the cancellation.
 func (s *SubscriptionService) ForceCancel(subscriptionUUID string) (*qbmodels.SuccessResponse, error) {
+	if err := requireNonEmpty(subscriptionUUID, "Subscription UUID"); err != nil {
+		return nil, err
+	}
+
 	var result qbmodels.SuccessResponse
-	endpoint := fmt.Sprintf("/transaction/subscription/processing/force-cancel/%s", subscriptionUUID)
-	err := s.client.makeRequest("GET", endpoint, nil, &result)
+	endpoint := fmt.Sprintf("/transaction/subscription/processing/force-cancel/%s", escapePath(subscriptionUUID))
+	err := s.client.makeActionRequest(endpoint, &result)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
 }
 
-// ExecuteTestBillingCycle manually triggers a billing cycle for a subscription (test mode only).
+// ExecuteTestBillingCycle manually triggers a billing cycle for a test subscription (live
+// subscriptions are billed automatically). The API enforces the schedule: a subscription
+// that is not yet due is refused with a *qberrors.ConflictError (HTTP 409).
+//
+// This request is never retried: a timeout may already have run the cycle.
 func (s *SubscriptionService) ExecuteTestBillingCycle(subscriptionUUID string) (*qbmodels.SuccessResponse, error) {
+	if err := requireNonEmpty(subscriptionUUID, "Subscription UUID"); err != nil {
+		return nil, err
+	}
+
 	var result qbmodels.SuccessResponse
-	endpoint := fmt.Sprintf("/transaction/subscription/processing/execute-billing/%s", subscriptionUUID)
-	err := s.client.makeRequest("GET", endpoint, nil, &result)
+	endpoint := fmt.Sprintf("/transaction/subscription/processing/execute-billing/%s", escapePath(subscriptionUUID))
+	err := s.client.makeActionRequest(endpoint, &result)
 	if err != nil {
 		return nil, err
 	}

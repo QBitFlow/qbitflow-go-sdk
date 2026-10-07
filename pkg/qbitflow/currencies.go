@@ -13,6 +13,7 @@ type CurrencyService struct {
 	client *Client
 }
 
+// NewCurrencyService creates the currency service bound to client.
 func NewCurrencyService(client *Client) *CurrencyService {
 	return &CurrencyService{client: client}
 }
@@ -20,21 +21,11 @@ func NewCurrencyService(client *Client) *CurrencyService {
 // GetAllAvailable returns all supported currencies, native currencies and tokens alike.
 // Pass test=true to list test-network currencies.
 func (s *CurrencyService) GetAllAvailable(test bool) ([]qbmodels.Currency, error) {
-	var result []qbmodels.Currency
-	endpoint := fmt.Sprintf("/utils/all-available-currencies?test=%t", test)
-	if err := s.client.makeRequest("GET", endpoint, nil, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return getList[qbmodels.Currency](s.client, fmt.Sprintf("/utils/all-available-currencies?test=%t", test))
 }
 
 // GetAllMain returns only the main (native/blockchain) currencies, excluding tokens.
 // Pass test=true to list test-network currencies.
 func (s *CurrencyService) GetAllMain(test bool) ([]qbmodels.Currency, error) {
-	var result []qbmodels.Currency
-	endpoint := fmt.Sprintf("/utils/all-main-currencies?test=%t", test)
-	if err := s.client.makeRequest("GET", endpoint, nil, &result); err != nil {
-		return nil, err
-	}
-	return result, nil
+	return getList[qbmodels.Currency](s.client, fmt.Sprintf("/utils/all-main-currencies?test=%t", test))
 }

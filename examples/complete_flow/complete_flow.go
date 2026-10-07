@@ -1,31 +1,54 @@
+// Command complete_flow demonstrates a complete payment workflow, from session creation
+// through status polling to payment verification.
+//
+// Configuration comes from the environment:
+//
+//	QBITFLOW_API_KEY        required
+//	QBITFLOW_BASE_URL       optional (defaults to the production API)
+//	QBITFLOW_CUSTOMER_UUID  optional: a customer UUID to pre-associate with the session
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/QBitFlow/qbitflow-go-sdk/v2"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
 	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
 	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
 )
 
 func main() {
-	// Initialize the QBitFlow client
-	client := qbitflow.New("your-api-key-here")
+	apiKey := os.Getenv("QBITFLOW_API_KEY")
+	if apiKey == "" {
+		log.Fatal("set QBITFLOW_API_KEY to run this example")
+	}
+	client := qbitflow.NewWithConfig(qbf.Config{
+		APIKey:  apiKey,
+		BaseURL: os.Getenv("QBITFLOW_BASE_URL"), // "" = production
+	})
 
-	fmt.Println("=== Complete Payment Flow Example ===\n")
-	fmt.Println("This example demonstrates a complete payment workflow from")
-	fmt.Println("session creation through status checking and payment verification.\n")
+	fmt.Println("=== Complete Payment Flow Example ===")
+	fmt.Println()
 
-	// Step 1: Create a payment session
+	// Step 1: Create a payment session.
+	//
+	// The checkout page substitutes {{UUID}} and {{TRANSACTION_TYPE}} in the redirect URLs
+	// with the session's UUID and transaction type, so your success page knows what to
+	// verify.
 	fmt.Println("Step 1: Creating payment session...")
 	session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
-		ProductID:    new(uint64(1)),
-		SuccessURL:   new(string("https://yoursite.com/success?uuid={{UUID}}&type={{TRANSACTION_TYPE}}")),
-		CancelURL:    new(string("https://yoursite.com/cancel")),
-		CustomerUUID: new(string("customer-uuid-123")),
+		ProductName:  new("Ebook: Go in Practice"),
+		Description:  new("Digital download, delivered by email"),
+		Price:        new(19.99),
+		SuccessURL:   new("https://yoursite.com/success?uuid={{UUID}}&transactionType={{TRANSACTION_TYPE}}"),
+		CancelURL:    new("https://yoursite.com/cancel"),
+		CustomerUUID: new(os.Getenv("QBITFLOW_CUSTOMER_UUID")), // "" is left out of the request
+		Reference:    new("order-2001"),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create payment session: %v", err)
@@ -37,7 +60,7 @@ func main() {
 
 	// Step 2: Get session details
 	fmt.Println("Step 2: Retrieving session details...")
-	sessionDetails, err := client.Payments.GetSession(session.UUID)
+	sessionDetails, err := client.Payments.GetSession(session.UUID, nil)
 	if err != nil {
 		log.Fatalf("Failed to get session: %v", err)
 	}
@@ -47,143 +70,93 @@ func main() {
 	fmt.Printf("  Description: %s\n", sessionDetails.Description)
 	fmt.Printf("  Price: $%.2f USD\n", sessionDetails.Price)
 	fmt.Printf("  Organization: %s\n", sessionDetails.OrganizationName)
-	fmt.Printf("  Customer UUID: %s\n\n", sessionDetails.CustomerUUID)
+	if sessionDetails.CustomerUUID != nil {
+		fmt.Printf("  Customer UUID: %s\n", *sessionDetails.CustomerUUID)
+	} else {
+		fmt.Println("  Customer: collected during checkout")
+	}
+	fmt.Println()
 
 	// Step 3: At this point, you would redirect the user to session.Link
 	fmt.Println("Step 3: User payment flow...")
-	fmt.Printf("  🌐 Redirect user to: %s\n", session.Link)
-	fmt.Println("  👤 User selects cryptocurrency and completes payment")
-	fmt.Println("  ⏳ Waiting for payment confirmation...\n")
-
-	// Simulate waiting for payment (in real scenario, this would be async via webhook)
-	fmt.Println("  (In production, use webhooks for real-time updates)\n")
+	fmt.Printf("  Redirect user to: %s\n", session.Link)
+	fmt.Println("  (In production, use webhooks for real-time updates)")
+	fmt.Println()
 
 	// Step 4: Check transaction status (polling example)
 	fmt.Println("Step 4: Checking transaction status...")
-	fmt.Println("  (This demonstrates status checking - in production use webhooks)")
+	var status *qbmodels.TransactionStatus
+	for attempt := 1; attempt <= 5; attempt++ {
+		fmt.Printf("  Attempt %d/5: Checking status...\n", attempt)
 
-	// Example of polling transaction status
-	maxAttempts := 5
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		fmt.Printf("  Attempt %d/%d: Checking status...\n", attempt, maxAttempts)
+		status, err = client.TransactionStatus.GetTransactionStatus(session.UUID, qbmodels.TransactionTypeOneTimePayment)
 
-		status, err := client.TransactionStatus.GetTransactionStatus(
-			session.UUID,
-			qbmodels.TransactionTypeOneTimePayment,
-		)
-
-		if err != nil {
-			fmt.Printf("  ⚠️  Error checking status: %v\n", err)
-			// In production, handle NotFoundError specifically
-			// (Transaction might not be created yet if user hasn't started payment)
-		} else {
+		var notFound *qberrors.NotFoundError
+		switch {
+		case errors.As(err, &notFound):
+			// The session exists but nothing has been paid yet.
+			fmt.Println("  Not processed yet")
+		case err != nil:
+			fmt.Printf("  Error checking status: %v\n", err)
+		default:
 			fmt.Printf("  Current Status: %s\n", status.Status)
-
-			// Check if payment is completed
-			if status.Status == qbmodels.TransactionStatusCompleted {
-				fmt.Println("  ✅ Payment completed successfully!")
-
-				fmt.Printf("  📝 Transaction Hash: %s\n", status.TxHash)
-
-				break
-			} else if status.Status == qbmodels.TransactionStatusFailed {
-				fmt.Println("  ❌ Payment failed!")
-				if status.Message != nil {
-					fmt.Printf("  Reason: %s\n", *status.Message)
-				}
-				break
-			} else if status.Status == qbmodels.TransactionStatusCancelled {
-				fmt.Println("  🚫 Payment cancelled by user")
-				break
-			}
 		}
 
-		if attempt < maxAttempts {
+		if status != nil && isFinal(status.Status) {
+			break
+		}
+		if attempt < 5 {
 			time.Sleep(5 * time.Second)
 		}
 	}
 	fmt.Println()
 
-	// Step 5: Handle success redirect (example)
-	fmt.Println("Step 5: Handling success redirect...")
-	fmt.Println("  User is redirected to success URL with UUID and transaction type")
-	fmt.Println("  Example: https://yoursite.com/success?uuid=XXX&type=payment")
-	fmt.Println()
+	// Step 5: On the success page, verify the transaction before fulfilling the order —
+	// never trust the redirect alone.
+	fmt.Println("Step 5: Verifying the transaction...")
+	switch {
+	case status == nil:
+		fmt.Println("  Transaction not processed yet; wait for the webhook.")
+	case status.Status == qbmodels.TransactionStatusCompleted:
+		fmt.Printf("  Payment completed, tx hash %s\n", status.TxHash)
 
-	// When user lands on success page, verify the transaction
-	fmt.Println("  Verifying transaction on success page...")
-	status, err := client.TransactionStatus.GetTransactionStatus(
-		session.UUID,
-		qbmodels.TransactionTypeOneTimePayment,
-	)
-
-	if err != nil {
-		fmt.Printf("  ❌ Error verifying transaction: %v\n", err)
-	} else {
-		fmt.Printf("  Transaction Status: %s\n", status.Status)
-
-		if status.Status == qbmodels.TransactionStatusCompleted {
-			// Step 6: Retrieve payment details
-			fmt.Println("\nStep 6: Retrieving payment details...")
-
-			// Note: GetPayment only works after payment is processed
-			// In this example, we'll show the session details instead
-			fmt.Println("  Payment confirmed! Session details:")
-			fmt.Printf("    Product: %s\n", sessionDetails.ProductName)
-			fmt.Printf("    Amount: $%.2f\n", sessionDetails.Price)
-			fmt.Printf("    Customer: %s\n", sessionDetails.CustomerUUID)
-
-			// Step 7: Fulfill order
-			fmt.Println("\nStep 7: Fulfilling order...")
-			fulfillOrder(sessionDetails.CustomerUUID, session.UUID, sessionDetails.ProductName)
-		} else {
-			fmt.Printf("  ⚠️  Transaction not completed yet. Status: %s\n", status.Status)
+		payment, err := client.Payments.GetPaymentByReference("order-2001")
+		if err != nil {
+			log.Fatalf("Failed to get payment: %v", err)
 		}
+		fmt.Printf("  Paid $%.2f in %s\n", payment.Amount, payment.Currency.Symbol)
+		fulfillOrder(payment)
+	case status.Status == qbmodels.TransactionStatusFailed:
+		// Message is "" when the API gives no reason.
+		fmt.Printf("  Payment failed: %s\n", status.Message)
+	default:
+		fmt.Printf("  Transaction not completed yet. Status: %s\n", status.Status)
 	}
 
-	// Step 8: Best practices summary
 	fmt.Println("\n" + strings.Repeat("=", 50))
-	fmt.Println("🎯 Best Practices Summary:")
+	fmt.Println("Best practices:")
+	fmt.Println("  - Configure webhook URLs in the QBitFlow dashboard and verify every signature")
+	fmt.Println("  - Verify the transaction status on success redirects")
+	fmt.Println("  - The SDK retries idempotent GETs on network errors and 5xx (1s/2s/4s back-off)")
 	fmt.Println(strings.Repeat("=", 50))
-	fmt.Println("\n1. Session Creation:")
-	fmt.Println("   ✓ Always provide webhook URL for real-time updates")
-	fmt.Println("   ✓ Use success/cancel URLs with {{UUID}} and {{TRANSACTION_TYPE}} placeholders")
-	fmt.Println("   ✓ Store session UUID in your database")
-
-	fmt.Println("\n2. Status Monitoring:")
-	fmt.Println("   ✓ Use webhooks instead of polling for production")
-	fmt.Println("   ✓ Implement proper error handling for all status checks")
-	fmt.Println("   ✓ Handle all transaction statuses (pending, failed, cancelled, etc.)")
-
-	fmt.Println("\n3. Security:")
-	fmt.Println("   ✓ Validate webhook signatures (if implemented)")
-	fmt.Println("   ✓ Verify transaction status on success redirects")
-	fmt.Println("   ✓ Never trust client-side data alone")
-
-	fmt.Println("\n4. User Experience:")
-	fmt.Println("   ✓ Show clear payment instructions")
-	fmt.Println("   ✓ Provide status updates during confirmation")
-	fmt.Println("   ✓ Handle cancellations gracefully")
-	fmt.Println("   ✓ Send confirmation emails after successful payments")
-
-	fmt.Println("\n5. Error Handling:")
-	fmt.Println("   ✓ Handle network errors")
-	fmt.Println("   ✓ Implement retry logic for transient failures")
-	fmt.Println("   ✓ Log all errors for debugging")
-	fmt.Println("   ✓ Provide helpful error messages to users")
-
-	fmt.Println("\n" + strings.Repeat("=", 50))
-	fmt.Println("\n=== Complete Flow Example Finished ===")
 }
 
-// fulfillOrder simulates order fulfillment
-func fulfillOrder(customerUUID, orderUUID, productName string) {
-	fmt.Println("  📦 Order fulfillment initiated:")
-	fmt.Printf("     - Customer UUID: %s\n", customerUUID)
-	fmt.Printf("     - Order UUID: %s\n", orderUUID)
-	fmt.Printf("     - Product: %s\n", productName)
-	fmt.Println("     - Updating database...")
-	fmt.Println("     - Sending confirmation email...")
-	fmt.Println("     - Granting access/delivering product...")
-	fmt.Println("  ✅ Order fulfilled successfully!")
+// isFinal reports whether a transaction status will not change any more.
+func isFinal(status qbmodels.TransactionStatusValue) bool {
+	switch status {
+	case qbmodels.TransactionStatusCompleted, qbmodels.TransactionStatusFailed,
+		qbmodels.TransactionStatusCancelled, qbmodels.TransactionStatusExpired:
+		return true
+	}
+	return false
+}
+
+// fulfillOrder simulates order fulfillment.
+func fulfillOrder(payment *qbmodels.Payment) {
+	fmt.Println("  Order fulfillment initiated:")
+	fmt.Printf("     - Payment UUID: %s\n", payment.UUID)
+	if payment.Reference != nil {
+		fmt.Printf("     - Order: %s\n", *payment.Reference)
+	}
+	fmt.Printf("     - Product: %s\n", payment.Name)
 }

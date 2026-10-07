@@ -1,4 +1,4 @@
-// Package qbitflow provides a Go SDK for the QBitFlow - Next Generation Crypto Payment Processing.
+// Package qbf provides the Go SDK for QBitFlow - Next Generation Crypto Payment Processing.
 //
 // The QBitFlow SDK allows you to easily integrate cryptocurrency payments into your
 // Go applications. It provides a simple and intuitive interface for creating payment
@@ -6,72 +6,80 @@
 //
 // # Installation
 //
-//	go get "github.com/QBitFlow/qbitflow-go-sdk/v2
+//	go get github.com/QBitFlow/qbitflow-go-sdk/v2
 //
 // # Quick Start
 //
 //	package main
 //
 //	import (
-//	    "fmt"
-//	    "log"
-//	    "github.com/QBitFlow/qbitflow-go-sdk/v2"
-//		"github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+//		"fmt"
+//		"log"
+//
+//		"github.com/QBitFlow/qbitflow-go-sdk/v2"
+//		qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
 //	)
 //
 //	func main() {
-//	    // Initialize the client
-//	    client := qbitflow.New("your-api-key-here")
+//		// Initialize the client
+//		client := qbitflow.New("your-api-key-here")
 //
-//	    // Create a payment session
-//	    session, err := client.Payments.CreateSession(qbf.CreateSessionOptions{
-//	        ProductID:    new(uint64(1)),
-//	        CustomerUUID: new(string("customer-123")),
-//	    })
+//		// Create a payment session for an existing product
+//		session, err := client.Payments.CreateSession(&qbf.CreateSessionOptions{
+//			ProductID: new(uint64(1)),
+//		})
+//		if err != nil {
+//			log.Fatal(err)
+//		}
 //
-//	    if err != nil {
-//	        log.Fatal(err)
-//	    }
-//
-//	    fmt.Printf("Payment link: %s\n", session.Link)
+//		fmt.Printf("Payment link: %s\n", session.Link)
 //	}
 //
 // # Features
 //
 //   - One-time payment sessions
 //   - Recurring subscriptions
-//   - Pay-as-you-go subscriptions
-//   - Transaction status tracking
-//   - Webhook support
-//   - Comprehensive error handling
-//   - Type-safe API
+//   - Transaction status: webhooks (recommended) or polling GetTransactionStatus
+//   - Webhook verification, locally (HMAC) or via the API
+//   - Customers, products, users, API keys (read), account claims
+//   - Refunds and accounting exports (JSON and CSV)
+//   - Acting on behalf of a user, per client (QBitFlow.OnBehalfOf) or per service
+//   - Client-side validation mirroring the API's rules
+//   - Automatic retries for idempotent requests
+//   - Typed errors and strongly typed responses
 //
 // # Services
 //
-// The SDK is organized into several services:
-//
-//   - Payments: Handle one-time payment operations
-//   - Subscriptions: Manage recurring subscriptions
-//   - PayAsYouGo: Handle usage-based subscriptions
-//   - TransactionStatus: Track transaction status
+// The SDK is organized into services exposed on the qbitflow.QBitFlow client:
+// Payments, Subscriptions, TransactionStatus, Customers, Products, Users, ApiKeys,
+// Webhooks, Currencies, Refunds, Accounting and Claims.
 //
 // # Error Handling
 //
-// The SDK provides custom error types for better error handling:
+// Every failure is one of the types in package qberrors, mapped from the HTTP status:
 //
-//   - QBitFlowError: General API errors with status codes
-//   - NotFoundError: 404 not found errors
-//   - ValidationError: Client-side validation errors
+//   - ValidationError: 400/422, and client-side validation before a request (StatusCode 0)
+//   - AuthenticationError: 401
+//   - ForbiddenError: 403
+//   - NotFoundError: 404
+//   - ConflictError: 409
+//   - RateLimitError: 429 (with RetryAfter)
+//   - ServerError: 5xx, a 3xx (redirects are never followed), or a 2xx whose body is empty
+//     or not the expected JSON
+//   - NetworkError: no response received
+//   - QBitFlowError: the base type, returned directly for any other 4xx
+//
+// Every type unwraps to *qberrors.QBitFlowError, so one errors.As target reads the status
+// of any failure.
 //
 // Example:
 //
 //	import qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
 //
-//	payment, err := client.Payments.GetPayment("invalid-uuid")
-//	if err != nil {
-//	    if _, ok := err.(*qberrors.NotFoundError); ok {
-//	        fmt.Println("Payment not found")
-//	    }
+//	payment, err := client.Payments.GetPayment("pay@...")
+//	var notFound *qberrors.NotFoundError
+//	if errors.As(err, &notFound) {
+//		fmt.Println("Payment not found")
 //	}
 //
 // # Configuration
@@ -79,9 +87,10 @@
 // You can customize the client configuration:
 //
 //	client := qbitflow.NewWithConfig(qbf.Config{
-//	    APIKey:  "your-api-key",
-//	    BaseURL: "https://api.qbitflow.app/v1",
-//	    Timeout: 30 * time.Second,
+//		APIKey:     "your-api-key",
+//		BaseURL:    "https://api.qbitflow.app/v1",
+//		Timeout:    30 * time.Second,
+//		MaxRetries: 3, // idempotent GETs only; 0 = default (3), negative or DisableRetries = off
 //	})
 //
 // For more information, see the full documentation at https://qbitflow.app/docs
