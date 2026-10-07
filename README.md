@@ -1112,7 +1112,7 @@ tag and need an API key **and** an explicit base URL:
 QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… go test -tags integration -run Live -v .
 ```
 
-The read-only checks only read; the write checks also need `QBITFLOW_LIVE_WRITES=1`.
+The read-only checks only read; the write checks also need `QBITFLOW_LIVE_WRITES=1` and a test-mode key (`QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a disposable server only).
 
 ## License
 
