@@ -1,0 +1,190 @@
+package qbitflow
+
+import (
+	"net/url"
+	"time"
+)
+
+// WebhookEndpoint is a webhook endpoint of a space.
+type WebhookEndpoint struct {
+	// UUID is the endpoint's id.
+	UUID string `json:"uuid"`
+	// Test is true in test mode.
+	Test bool `json:"test"`
+	// URL is where the events are posted.
+	URL string `json:"url"`
+	// Events are the event types it receives; empty: every type.
+	Events []EventType `json:"events"`
+	// IncludeMembers is true for an organization endpoint that also receives its members' events.
+	IncludeMembers bool `json:"includeMembers"`
+	// PayloadVersion is v2 (the event envelope), or v1 for an endpoint migrated from v1.
+	PayloadVersion WebhookPayloadVersion `json:"payloadVersion"`
+	// Description is a note for the dashboard.
+	Description string `json:"description"`
+	// CreatedAt is when it was created.
+	CreatedAt time.Time `json:"createdAt"`
+	// RotatedAt is when its secret last changed.
+	RotatedAt *time.Time `json:"rotatedAt,omitempty"`
+	// DisabledAt is when it was disabled; nil while enabled.
+	DisabledAt *time.Time `json:"disabledAt,omitempty"`
+	// DisabledReason is why: failing, owner or closed.
+	DisabledReason EndpointDisabledReason `json:"disabledReason,omitempty"`
+	// FailingSince is when its deliveries started failing.
+	FailingSince *time.Time `json:"failingSince,omitempty"`
+	// LastDeliveredAt is its last successful delivery.
+	LastDeliveredAt *time.Time `json:"lastDeliveredAt,omitempty"`
+}
+
+// WebhookEndpointCreated is Webhooks.Endpoints.Create's answer: the endpoint and its secret.
+type WebhookEndpointCreated struct {
+	WebhookEndpoint
+
+	// Secret (whsec_…) verifies the signature of its deliveries. Shown once: store it.
+	Secret string `json:"secret"`
+}
+
+// EventDetail is an event of the log with its deliveries (Webhooks.Events.Get).
+type EventDetail struct {
+	Event
+
+	// Deliveries are its deliveries to the space's endpoints.
+	Deliveries []EndpointDelivery `json:"deliveries"`
+}
+
+// EndpointDelivery is an event's deliveries to one endpoint.
+type EndpointDelivery struct {
+	// EndpointUUID is the endpoint.
+	EndpointUUID string `json:"endpointUuid"`
+	// URL is the endpoint's URL now.
+	URL string `json:"url"`
+	// Delivered is true when one attempt was answered with a 2xx.
+	Delivered bool `json:"delivered"`
+	// Attempts are its attempts, oldest first.
+	Attempts []DeliveryAttempt `json:"attempts"`
+}
+
+// DeliveryAttempt is one attempt to deliver an event to an endpoint.
+type DeliveryAttempt struct {
+	// UUID is the attempt's id.
+	UUID string `json:"uuid"`
+	// EventID is the event (evt_…).
+	EventID string `json:"eventId"`
+	// EventType is the event's type.
+	EventType EventType `json:"eventType"`
+	// EndpointUUID is the endpoint.
+	EndpointUUID string `json:"endpointUuid"`
+	// Attempt is 1 for the first, then one more per retry or resend.
+	Attempt int `json:"attempt"`
+	// Delivered is true when the endpoint answered with a 2xx.
+	Delivered bool `json:"delivered"`
+	// Skipped is true when it was not posted (a member's endpoint with members.webhooks off).
+	Skipped *bool `json:"skipped,omitempty"`
+	// StatusCode is the endpoint's answer; nil when it didn't answer.
+	StatusCode *int `json:"statusCode,omitempty"`
+	// Error is why it wasn't delivered.
+	Error string `json:"error,omitempty"`
+	// DurationMs is how long it took, in milliseconds.
+	DurationMs int `json:"durationMs"`
+	// AttemptedAt is when it was made.
+	AttemptedAt time.Time `json:"attemptedAt"`
+}
+
+// CreateWebhookEndpointParams creates a webhook endpoint (Webhooks.Endpoints.Create).
+type CreateWebhookEndpointParams struct {
+	// URL is required: where the events are posted (https and a public host in live mode).
+	URL string `json:"url"`
+	// Events are the event types to receive (at most 20, not webhook.test); empty: every type.
+	Events []EventType `json:"events,omitempty"`
+	// IncludeMembers makes an organization endpoint receive its members' events too (nil: true
+	// for an organization endpoint, false for a member's).
+	IncludeMembers *bool `json:"includeMembers,omitempty"`
+	// Description is a note for the dashboard (at most 200 characters).
+	Description string `json:"description,omitempty"`
+}
+
+// Validate checks the params (behaviour §8).
+func (p *CreateWebhookEndpointParams) Validate() error {
+	if p == nil {
+		return newValidationError("params are required")
+	}
+	var v validator
+	if v.required("url", p.URL) {
+		v.url("url", p.URL)
+	}
+	v.endpointEvents("events", p.Events)
+	v.text("description", p.Description, 0, 200)
+	return v.err()
+}
+
+// UpdateWebhookEndpointParams updates a webhook endpoint (Webhooks.Endpoints.Update): unset
+// fields are unchanged.
+type UpdateWebhookEndpointParams struct {
+	// URL is the new URL ("" = unchanged).
+	URL string `json:"url,omitempty"`
+	// Events replaces the event types: nil leaves them unchanged, an empty non-nil slice
+	// ([]EventType{}) means every type.
+	Events []EventType `json:"events,omitzero"`
+	// IncludeMembers changes whether an organization endpoint receives its members' events.
+	IncludeMembers *bool `json:"includeMembers,omitempty"`
+	// Description is the new note; a pointer to "" clears it, nil leaves it unchanged.
+	Description *string `json:"description,omitempty"`
+	// PayloadVersion v2 moves an endpoint migrated from v1 to the event envelope (never back).
+	PayloadVersion WebhookPayloadVersion `json:"payloadVersion,omitempty"`
+	// Enabled false pauses the endpoint; true enables it again.
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// Validate checks the params (behaviour §8).
+func (p *UpdateWebhookEndpointParams) Validate() error {
+	if p == nil {
+		return newValidationError("params are required")
+	}
+	var v validator
+	v.url("url", p.URL)
+	v.endpointEvents("events", p.Events)
+	if p.Description != nil {
+		v.text("description", *p.Description, 0, 200)
+	}
+	oneOf(&v, "payloadVersion", p.PayloadVersion, WebhookPayloadVersionV2)
+	return v.err()
+}
+
+// EventListParams filters Webhooks.Events.List.
+type EventListParams struct {
+	// Limit is the page size (server default 20, max 100; 0 = default).
+	Limit int
+	// Cursor is the previous page's NextCursor (evt_…); "" for the first page.
+	Cursor string
+	// Type keeps only the events of this type.
+	Type EventType
+	// IncludeMembers adds the members' events (organization space only).
+	IncludeMembers bool
+}
+
+// Validate checks the filters.
+func (p *EventListParams) Validate() error {
+	if p == nil {
+		return nil
+	}
+	var v validator
+	oneOf(&v, "type", p.Type, knownEventTypes...)
+	return v.err()
+}
+
+func (p *EventListParams) values() url.Values {
+	if p == nil {
+		return nil
+	}
+	q := url.Values{}
+	setPage(q, p.Limit, p.Cursor)
+	setString(q, "type", string(p.Type))
+	setBool(q, "includeMembers", p.IncludeMembers)
+	return q
+}
+
+// verifyWebhookBody is POST /webhooks/verify's body (Webhooks.VerifyRemote).
+type verifyWebhookBody struct {
+	EndpointUUID string `json:"endpointUuid"`
+	Body         string `json:"body"`
+	Signature    string `json:"signature"`
+}
