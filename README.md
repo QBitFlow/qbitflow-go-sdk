@@ -1,6 +1,6 @@
 # QBitFlow Go SDK
 
-[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat&logo=go)](https://golang.org/)
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 
 Official Go SDK for [QBitFlow](https://qbitflow.app) — a cryptocurrency payment processing platform supporting one-time payments, recurring subscriptions, refunds, and accounting exports.
@@ -35,7 +35,7 @@ Official Go SDK for [QBitFlow](https://qbitflow.app) — a cryptocurrency paymen
 go get github.com/QBitFlow/qbitflow-go-sdk/v2
 ```
 
-**Requires Go 1.26 or later.** The optional request fields are pointers, and the examples
+**Requires Go 1.27 or later.** The optional request fields are pointers, and the examples
 below set them with `new(value)` — Go 1.26 extended `new` to accept a value expression, not
 just a type.
 
