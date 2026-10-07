@@ -5,7 +5,8 @@
 //	QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… go test -tags integration -run Live -v .
 //
 // The read-only group only reads. The write group also needs QBITFLOW_LIVE_WRITES=1 and a
-// test-mode key; it creates a product, a customer, a checkout session and a webhook endpoint,
+// test-mode key (or QBITFLOW_ALLOW_LIVE_MODE_WRITES=1, for a live-mode key on a disposable
+// server such as one running on local chains); it creates a product, a customer, a checkout session and a webhook endpoint,
 // and deletes (or expires) each of them.
 package qbitflow_test
 
@@ -194,7 +195,7 @@ func TestLiveReadOnly(t *testing.T) {
 }
 
 // liveWriter is the client for the write group: it needs QBITFLOW_LIVE_WRITES=1 and a
-// test-mode key.
+// test-mode key, unless QBITFLOW_ALLOW_LIVE_MODE_WRITES=1 explicitly allows a live-mode one.
 func liveWriter(t *testing.T) (*qbitflow.Client, context.Context) {
 	t.Helper()
 	if os.Getenv("QBITFLOW_LIVE_WRITES") != "1" {
@@ -206,8 +207,8 @@ func liveWriter(t *testing.T) (*qbitflow.Client, context.Context) {
 	if err != nil {
 		t.Fatalf("Me: %v", err)
 	}
-	if me.Space == nil || !me.Space.Test {
-		t.Skip("write checks run on a test-mode key only")
+	if (me.Space == nil || !me.Space.Test) && os.Getenv("QBITFLOW_ALLOW_LIVE_MODE_WRITES") != "1" {
+		t.Skip("write checks run on a test-mode key only (QBITFLOW_ALLOW_LIVE_MODE_WRITES=1 allows a live-mode key)")
 	}
 	return c, ctx
 }
