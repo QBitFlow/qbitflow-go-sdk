@@ -56,3 +56,27 @@ func TestNullResponseBody(t *testing.T) {
 		t.Fatalf("null list body must decode to an empty list, got %v, %v", list, err)
 	}
 }
+
+// A "." or ".." path segment would be resolved as a relative path: refused before any request.
+func TestDotPathSegmentsRefused(t *testing.T) {
+	ts := newTestServer(t, staticReply(200, "{}"))
+	c, _ := newTestClient(t, ts)
+	ctx := context.Background()
+	for _, ref := range []string{".", ".."} {
+		_, err := c.Subscriptions.GetByReference(ctx, ref)
+		var ve *ValidationError
+		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "reference" {
+			t.Errorf("reference %q: want a ValidationError on reference, got %v", ref, err)
+		}
+		if _, err := c.Customers.GetByEmail(ctx, ref); !errors.As(err, &ve) {
+			t.Errorf("email %q: want a ValidationError, got %v", ref, err)
+		}
+	}
+	if n := len(ts.recorded()); n != 0 {
+		t.Fatalf("%d requests sent", n)
+	}
+	// "..." is an ordinary value, escaped like any other.
+	if _, err := c.Products.GetByReference(ctx, "..."); err != nil {
+		t.Fatalf("... must be sent: %v", err)
+	}
+}

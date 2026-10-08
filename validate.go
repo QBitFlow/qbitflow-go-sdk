@@ -404,5 +404,10 @@ func checkPathRequired(field, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return newFieldError(field, "is required")
 	}
+	// "." and ".." would be resolved as relative path segments (by URL parsers and by the
+	// server's path cleaning) and reach another route: refused, identically in every SDK.
+	if value == "." || value == ".." {
+		return newFieldError(field, `cannot be "." or ".."`)
+	}
 	return nil
 }
