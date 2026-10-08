@@ -1,6 +1,9 @@
 package qbitflow
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // CheckoutSession is a created checkout session: send the customer to Link.
 type CheckoutSession struct {
@@ -41,8 +44,15 @@ type PaymentSessionData struct {
 	ProductName string `json:"productName,omitempty"`
 	// Description is the product's description.
 	Description string `json:"description,omitempty"`
-	// Price is the price in USD.
+	// Price is the product's price in USD.
 	Price *float64 `json:"price,omitempty"`
+	// Fees is what a payment checkout adds to the price, line by line, in the order the checkout
+	// shows them: the merchant's lines, then the processing fee (when the customer pays it).
+	// Empty without any, and always on a subscription session.
+	Fees []FeeLine `json:"fees,omitempty"`
+	// Amount is what the customer pays in USD before the network fee: Price plus every line of
+	// Fees (the payment's Amount). The network fee comes on top. nil on a subscription session.
+	Amount *float64 `json:"amount,omitempty"`
 	// SuccessURL is where the customer goes after paying (placeholders filled).
 	SuccessURL string `json:"successUrl,omitempty"`
 	// CancelURL is where a customer who leaves the checkout goes.
@@ -107,10 +117,70 @@ type CreatePaymentSessionParams struct {
 	CustomerReference string `json:"customerReference,omitempty"`
 	// ExpiresInMinutes is the session's lifetime, 10 to 1440 (0 = the default).
 	ExpiresInMinutes uint32 `json:"expiresInMinutes,omitempty"`
+
+	// Fees adds amounts to the price (a tax, shipping, QBitFlow's processing fee), shown to the
+	// customer line by line and paid with it; nil for none. The session's and the payment's
+	// Amount is the price plus every line, and QBitFlow's fee is taken on it. The test-mode
+	// cap ($5) applies to that amount, fees included (400 validation_failed on fees).
+	Fees *CheckoutFees `json:"fees,omitempty"`
+}
+
+// CheckoutFees is what a one-time payment's checkout adds to its price
+// (CreatePaymentSessionParams.Fees). Subscription checkouts take no fees.
+type CheckoutFees struct {
+	// ProcessingFee has the customer pay QBitFlow's processing fee on top: a last line
+	// {Type: processingFee, Label: "Processing fee"}, computed by QBitFlow on the price and your
+	// lines at your platform fee p (never below 0.5 %) as base × p / (1 − p), rounded up to the
+	// cent. QBitFlow's fee is also taken on that line, so this gross-up leaves you at least the
+	// price and your lines, as if no fee were taken ($100 + $20 VAT at 1.5 % → a $1.83 fee,
+	// $121.83 charged, $120.00 kept). A marketplace's organization fee is not passed on.
+	// nil: the space's checkout.customerPaysProcessingFee setting decides (off by default; set
+	// in the dashboard); false turns it off for this checkout.
+	ProcessingFee *bool `json:"processingFee,omitempty"`
+	// Items are up to 10 lines of your own, shown in this order before the processing fee.
+	Items []FeeItem `json:"items,omitempty"`
+}
+
+// FeeItem is a line of the merchant's own on a checkout (CheckoutFees.Items).
+type FeeItem struct {
+	// Label is the line's name, as the checkout shows it: one line, 1 to 40 characters
+	// ("VAT (20%)", "Shipping").
+	Label string `json:"label"`
+	// Description is more about the line, at most 200 characters; optional.
+	Description string `json:"description,omitempty"`
+	// AmountUSD is the line's amount in USD: above 0, at most 1,000,000, with at most 2 decimals
+	// (sent as a JSON number).
+	AmountUSD float64 `json:"amountUsd"`
+}
+
+// maxFeeItems is the most lines CheckoutFees.Items may have.
+const maxFeeItems = 10
+
+// maxFeeItemUSD is the largest FeeItem.AmountUSD.
+const maxFeeItemUSD = 1_000_000
+
+// validate checks the fees (behaviour §8): at most 10 lines; each label the name rule, 1 to 40;
+// each description the text rule, at most 200; each amount in USD above 0, at most 1,000,000,
+// with at most 2 decimals.
+func (f *CheckoutFees) validate(v *validator, field string) {
+	if f == nil {
+		return
+	}
+	if len(f.Items) > maxFeeItems {
+		v.add(field+".items", "must have at most %d lines", maxFeeItems)
+	}
+	for i, item := range f.Items {
+		path := fmt.Sprintf("%s.items[%d]", field, i)
+		if v.required(path+".label", item.Label) {
+			v.name(path+".label", item.Label, 1, 40)
+		}
+		v.text(path+".description", item.Description, 0, 200)
+		v.usd(path+".amountUsd", item.AmountUSD, maxFeeItemUSD)
+	}
 }
 
 // Validate checks the params (behaviour §8): the product choice, names, texts, references,
-// URLs, the price and the lifetime.
+// URLs, the price, the lifetime and the fees.
 func (p *CreatePaymentSessionParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -155,6 +225,7 @@ func (p *CreatePaymentSessionParams) validate(v *validator) {
 			v.price("price", p.Price)
 		}
 	}
+	p.Fees.validate(v, "fees")
 }
 
 // CreateSubscriptionSessionParams creates a subscription checkout session

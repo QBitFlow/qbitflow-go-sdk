@@ -86,6 +86,15 @@ const (
 	CheckoutSessionStatusExpired             CheckoutSessionStatusValue = "expired"             // Expired unpaid. Final
 )
 
+// FeeLineType tells who added a line to a checkout's price (FeeLine.Type).
+type FeeLineType string
+
+// Fee line types.
+const (
+	FeeLineTypeCustom        FeeLineType = "custom"        // The merchant's own line: a tax, shipping, a service fee
+	FeeLineTypeProcessingFee FeeLineType = "processingFee" // QBitFlow's processing fee, which the merchant has the customer pay (computed by QBitFlow)
+)
+
 // AttemptStatus is a failed attempt's status.
 type AttemptStatus string
 

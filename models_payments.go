@@ -16,7 +16,8 @@ type Payment struct {
 	// To is the wallet that received it (the merchant's, or the organization's while it holds
 	// the member's funds).
 	To string `json:"to"`
-	// Amount is what the customer paid, in USD (the network fee paid on top excluded).
+	// Amount is what the customer paid, in USD: Price plus every line of Fees. It is what the
+	// contracts split (QBitFlow's fee is taken on it). The network fee paid on top is not in it.
 	Amount float64 `json:"amount"`
 	// AmountMinUnits is the amount in the token's min units (a decimal string).
 	AmountMinUnits string `json:"amountMinUnits"`
@@ -37,6 +38,12 @@ type Payment struct {
 
 	// Reference is the merchant's reference for the payment, set when creating its checkout.
 	Reference string `json:"reference,omitempty"`
+	// Price is the product's price in USD, as the checkout had it. Amount = Price + the sum of
+	// Fees' AmountUSD. On payments recorded before checkout fees existed, Price is Amount.
+	Price float64 `json:"price"`
+	// Fees is what the checkout added to the price, line by line, as the customer saw them (a
+	// tax, shipping, the processing fee when the customer paid it); empty without any.
+	Fees []FeeLine `json:"fees,omitempty"`
 	// Name is what was paid for: the checkout's product name when the checkout was created.
 	Name string `json:"name"`
 	// Description is the same, for the product's description.
@@ -71,6 +78,20 @@ type Payment struct {
 
 	// CheckoutOpenedAt is when its checkout session was created.
 	CheckoutOpenedAt *time.Time `json:"checkoutOpenedAt,omitempty"`
+}
+
+// FeeLine is an amount a one-time payment's checkout adds to its product's price, shown to the
+// customer and paid with it (Payment.Fees, PaymentSessionData.Fees).
+type FeeLine struct {
+	// Type is custom (the merchant's line) or processingFee (QBitFlow's fee, which the merchant
+	// has the customer pay).
+	Type FeeLineType `json:"type"`
+	// Label is the line's name, as the checkout shows it ("Processing fee" for the processing fee).
+	Label string `json:"label"`
+	// Description is more about the line, as the merchant wrote it; "" without one.
+	Description string `json:"description,omitempty"`
+	// AmountUSD is the line's amount in USD, a decimal string with at most 2 decimals ("4.99").
+	AmountUSD string `json:"amountUsd"`
 }
 
 // Bill is a subscription's paid bill (a subscription history entry, sub-hist@…).
@@ -158,7 +179,8 @@ type CombinedPayment struct {
 	Name string `json:"name"`
 	// Description is the same, for the description.
 	Description string `json:"description"`
-	// Amount is what the customer paid, in USD.
+	// Amount is what the customer paid, in USD (on a payment row, the price plus its checkout's
+	// fees).
 	Amount float64 `json:"amount"`
 	// AmountMinUnits is the amount in the currency's min units (a decimal string).
 	AmountMinUnits string `json:"amountMinUnits"`

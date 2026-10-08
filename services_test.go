@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -197,6 +199,42 @@ func routeCases(t *testing.T) []routeCase {
 					t.Errorf("%+v", s)
 				}
 			}},
+		{name: "CheckoutSessions.CreatePayment with fees", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			body: `{"reference":"order-1044","productName":"T-shirt","description":"Blue, size M","price":3.99,` +
+				`"fees":{"processingFee":true,"items":[{"label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":0.75},{"label":"VAT (20%)","amountUsd":20}]}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{Reference: "order-1044", ProductName: "T-shirt",
+					Description: "Blue, size M", Price: 3.99, Fees: &CheckoutFees{ProcessingFee: &yes, Items: []FeeItem{
+						{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75}, {Label: "VAT (20%)", AmountUSD: 20},
+					}}}, o...)
+			},
+			reply: fx("CheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment processing fee off", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":false,"items":[{"label":"Shipping","amountUsd":19.9}]}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
+					Fees: &CheckoutFees{ProcessingFee: &no, Items: []FeeItem{{Label: "Shipping", AmountUSD: 19.9}}}}, o...)
+			},
+			reply: fx("CheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment fees without processingFee", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			body: `{"productUuid":"` + uuidA + `","fees":{"items":[{"label":"Tax","amountUsd":1000000}]}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
+					Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: 1_000_000}}}}, o...)
+			},
+			reply: fx("CheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment processing fee only", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":true}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, Fees: &CheckoutFees{ProcessingFee: &yes}}, o...)
+			},
+			reply: fx("CheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment empty fees", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			body: `{"productUuid":"` + uuidA + `","fees":{}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, Fees: &CheckoutFees{}}, o...)
+			},
+			reply: fx("CheckoutSession")},
 		{name: "CheckoutSessions.CreateSubscription", method: "POST", path: "/transaction/session-checkout/new/subscription", idempotent: true, status: 201,
 			body: `{"productUuid":"` + uuidA + `","customerUuid":"` + uuidB + `","frequency":{"value":1,"unit":"weeks"},"trialPeriod":{"value":14,"unit":"days"},"minPeriods":0}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
@@ -742,7 +780,7 @@ func checkBody(t *testing.T, r recorded, want string) {
 // TestServiceRetries checks the retry policy per method: a 503 is retried by the reads and the 7
 // idempotent creates (with the same Idempotency-Key), never by the other writes.
 func TestServiceRetries(t *testing.T) {
-	idempotent := 0
+	idempotent := map[string]bool{} // the methods; a case named "<Method> <variant>" is the same method
 	for _, rc := range routeCases(t) {
 		t.Run(rc.name, func(t *testing.T) {
 			ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, n int) {
@@ -777,12 +815,12 @@ func TestServiceRetries(t *testing.T) {
 				}
 			}
 		})
-		if rc.idempotent && !strings.HasSuffix(rc.name, "minimal") {
-			idempotent++
+		if rc.idempotent {
+			idempotent[strings.Fields(rc.name)[0]] = true
 		}
 	}
-	if idempotent != 7 {
-		t.Errorf("%d idempotent methods, want 7", idempotent)
+	if len(idempotent) != 7 {
+		t.Errorf("%d idempotent methods, want 7: %v", len(idempotent), slices.Sorted(maps.Keys(idempotent)))
 	}
 }
 

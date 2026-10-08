@@ -91,6 +91,10 @@ func TestEventPaymentCompleted(t *testing.T) {
 	if p.ConfirmedAt == nil || p.CheckoutOpenedAt == nil {
 		t.Error("times")
 	}
+	// The docs' payment has a price and no fees: amount = price.
+	if p.Price != 10 || p.Fees != nil || p.Price != p.Amount {
+		t.Errorf("price %v, fees %+v", p.Price, p.Fees)
+	}
 }
 
 func TestEventSubscriptions(t *testing.T) {
@@ -222,6 +226,23 @@ func TestEventCheckoutExpired(t *testing.T) {
 	if p.TxType != TransactionTypePayment || p.Price == nil || *p.Price != 10 || len(p.AvailableCurrencyIDs) != 3 ||
 		p.OrganizationName != "Example Shop" || p.ExpiresAt == nil {
 		t.Errorf("payment session %+v", p)
+	}
+
+	if p.Fees != nil || p.Amount != nil {
+		t.Errorf("the docs' session has no fees: %+v %v", p.Fees, p.Amount)
+	}
+
+	withFees := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{
+		"uuid":"pay@2","txType":"payment","organizationName":"Shop","price":3.99,"amount":4.81,
+		"fees":[{"type":"custom","label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":"0.75"},
+		{"type":"processingFee","label":"Processing fee","amountUsd":"0.07"}]}`)}
+	ce, err = withFees.CheckoutExpired()
+	if err != nil || ce.Payment == nil {
+		t.Fatalf("session with fees: %+v %v", ce, err)
+	}
+	if f := ce.Payment.Fees; len(f) != 2 || f[0].Label != "Shipping" || f[0].Description == "" || f[0].AmountUSD != "0.75" ||
+		f[1].Type != FeeLineTypeProcessingFee || f[1].Description != "" || ce.Payment.Amount == nil || *ce.Payment.Amount != 4.81 {
+		t.Errorf("session fees %+v amount %v", ce.Payment.Fees, ce.Payment.Amount)
 	}
 
 	sub := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{

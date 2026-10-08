@@ -196,6 +196,14 @@ func (v *validator) percent(field string, value, maxPercent float64, positive bo
 	}
 }
 
+// usd checks an amount in USD: finite, above 0, at most maxUSD, with at most 2 decimals (the
+// cent) in its shortest decimal form.
+func (v *validator) usd(field string, value, maxUSD float64) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > maxUSD || !hasAtMostTwoDecimals(value) {
+		v.add(field, "must be an amount in USD above 0 and at most %s, with at most 2 decimals", strconv.FormatFloat(maxUSD, 'f', -1, 64))
+	}
+}
+
 // hasAtMostTwoDecimals reports whether value's shortest decimal form has at most 2 decimals
 // (the form encoding/json sends).
 func hasAtMostTwoDecimals(value float64) bool {
