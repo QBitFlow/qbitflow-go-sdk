@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	qbitflow "github.com/QBitFlow/qbitflow-go-sdk/v2"
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
+	qbitflow "github.com/QBitFlow/qbitflow-go-sdk/v3"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
 )
 
 // The payloads below are the API's real error envelopes, captured from the server:

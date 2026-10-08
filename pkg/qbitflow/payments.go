@@ -3,9 +3,9 @@ package qbf
 import (
 	"fmt"
 
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
-	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/utils"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/models"
+	"github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/utils"
 )
 
 // PaymentService handles one-time payment operations

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	qbitflow "github.com/QBitFlow/qbitflow-go-sdk/v2"
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
-	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	qbitflow "github.com/QBitFlow/qbitflow-go-sdk/v3"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/models"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 )
 
 // recorder captures the raw request line the SDK produced, so the URL can be asserted
@@ -68,22 +68,38 @@ func TestEscapingCoversEveryUserSuppliedSegment(t *testing.T) {
 		call func(c *qbitflow.QBitFlow)
 		want string
 	}{
-		{"customer by uuid", func(c *qbitflow.QBitFlow) { _, _ = c.Customers.Get(hostile) },
-			"/customer/uuid/a%2Fb"},
-		{"customer by reference", func(c *qbitflow.QBitFlow) { _, _ = c.Customers.GetByReference(hostile) },
-			"/customer/reference/a%2Fb"},
-		{"customer by email", func(c *qbitflow.QBitFlow) { _, _ = c.Customers.GetByEmail("a/b@x.com") },
-			"/customer/email/a%2Fb@x.com"},
-		{"payment by uuid", func(c *qbitflow.QBitFlow) { _, _ = c.Payments.GetPayment(hostile) },
-			"/transaction/payment/a%2Fb"},
-		{"payment by reference", func(c *qbitflow.QBitFlow) { _, _ = c.Payments.GetPaymentByReference(hostile) },
-			"/transaction/payment/reference/a%2Fb"},
-		{"subscription by uuid", func(c *qbitflow.QBitFlow) { _, _ = c.Subscriptions.GetSubscription(hostile) },
-			"/transaction/subscription/a%2Fb"},
-		{"refund by transaction", func(c *qbitflow.QBitFlow) { _, _ = c.Refunds.GetByTransactionUUID(hostile) },
-			"/transaction/refunds/by-transaction/a%2Fb"},
-		{"user by email", func(c *qbitflow.QBitFlow) { _, _ = c.Users.GetByEmail("a/b@x.com") },
-			"/user/email/a%2Fb@x.com"},
+		{
+			"customer by uuid", func(c *qbitflow.QBitFlow) { _, _ = c.Customers.Get(hostile) },
+			"/customer/uuid/a%2Fb",
+		},
+		{
+			"customer by reference", func(c *qbitflow.QBitFlow) { _, _ = c.Customers.GetByReference(hostile) },
+			"/customer/reference/a%2Fb",
+		},
+		{
+			"customer by email", func(c *qbitflow.QBitFlow) { _, _ = c.Customers.GetByEmail("a/b@x.com") },
+			"/customer/email/a%2Fb@x.com",
+		},
+		{
+			"payment by uuid", func(c *qbitflow.QBitFlow) { _, _ = c.Payments.GetPayment(hostile) },
+			"/transaction/payment/a%2Fb",
+		},
+		{
+			"payment by reference", func(c *qbitflow.QBitFlow) { _, _ = c.Payments.GetPaymentByReference(hostile) },
+			"/transaction/payment/reference/a%2Fb",
+		},
+		{
+			"subscription by uuid", func(c *qbitflow.QBitFlow) { _, _ = c.Subscriptions.GetSubscription(hostile) },
+			"/transaction/subscription/a%2Fb",
+		},
+		{
+			"refund by transaction", func(c *qbitflow.QBitFlow) { _, _ = c.Refunds.GetByTransactionUUID(hostile) },
+			"/transaction/refunds/by-transaction/a%2Fb",
+		},
+		{
+			"user by email", func(c *qbitflow.QBitFlow) { _, _ = c.Users.GetByEmail("a/b@x.com") },
+			"/user/email/a%2Fb@x.com",
+		},
 	}
 
 	for _, tc := range cases {
@@ -136,7 +152,8 @@ func TestWebSocketURLUsesAWebSocketScheme(t *testing.T) {
 			client := qbitflow.NewWithConfig(qbf.Config{APIKey: "sk_dummy", BaseURL: tc.base})
 
 			url := client.TransactionStatus.GetTransactionStatusWSURL(
-				"pay@1", qbmodels.TransactionTypeOneTimePayment)
+				"pay@1", qbmodels.TransactionTypeOneTimePayment,
+			)
 
 			// An http(s) URL is rejected outright by a WebSocket dialer
 			// ("malformed ws or wss URL"), so the scheme has to be rewritten.
@@ -157,7 +174,8 @@ func TestWebSocketURLEscapesQueryValues(t *testing.T) {
 	})
 
 	url := client.TransactionStatus.GetTransactionStatusWSURL(
-		"a&b", qbmodels.TransactionTypeOneTimePayment)
+		"a&b", qbmodels.TransactionTypeOneTimePayment,
+	)
 
 	if !strings.Contains(url, "txUUID=a%26b") {
 		t.Errorf("url = %q, want an escaped txUUID", url)
@@ -272,7 +290,6 @@ func TestWebhookVerifyReportsRejectionWithoutAnError(t *testing.T) {
 	client, _ := clientRecordingStatus(t, http.StatusBadRequest, `{"error":"invalid signature"}`)
 
 	ok, err := client.Webhooks.Verify([]byte(`{"a":1}`), "sha256=bad", "123")
-
 	if err != nil {
 		t.Fatalf("a rejected signature must not be an error: %v", err)
 	}
@@ -315,7 +332,6 @@ func TestWebhookVerifyAcceptsAValidSignature(t *testing.T) {
 	client, _ := clientRecordingStatus(t, http.StatusOK, `{"message":"valid"}`)
 
 	ok, err := client.Webhooks.Verify([]byte(`{"a":1}`), "sha256=good", "123")
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

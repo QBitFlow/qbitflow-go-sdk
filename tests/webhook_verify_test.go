@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 )
 
 const testSecret = "whsec_test_0123456789abcdef"

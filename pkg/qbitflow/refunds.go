@@ -3,8 +3,8 @@ package qbf
 import (
 	"fmt"
 
-	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-	"github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/utils"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/models"
+	"github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/utils"
 )
 
 // RefundService handles refund-related operations

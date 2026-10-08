@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
-	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/models"
 )
 
 const (

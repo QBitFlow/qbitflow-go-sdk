@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/QBitFlow/qbitflow-go-sdk/v2"
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	"github.com/QBitFlow/qbitflow-go-sdk/v3"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 )
 
 func main() {

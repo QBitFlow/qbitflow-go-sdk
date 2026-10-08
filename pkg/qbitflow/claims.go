@@ -3,7 +3,7 @@ package qbf
 import (
 	"fmt"
 
-	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/models"
 )
 
 // ClaimService manages account-claim operations.

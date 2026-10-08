@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/QBitFlow/qbitflow-go-sdk/v2"
-	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/models"
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	"github.com/QBitFlow/qbitflow-go-sdk/v3"
+	qbmodels "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/models"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 )
 
 const CUSTOMER_UUID = "your-customer-uuid-here"
