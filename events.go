@@ -300,3 +300,42 @@ func (e *Event) CheckoutExpired() (*CheckoutExpired, error) {
 func (e *Event) WebhookTest() (*WebhookTest, error) {
 	return decodeEventData[WebhookTest](e, EventTypeWebhookTest)
 }
+
+// validateEventData decodes the data of a known event type, so data that does not match its type is
+// refused whoever handles it; an unknown type is never checked. Used by WebhookRouter.
+func validateEventData(e *Event) error {
+	var err error
+	switch e.Type {
+	case EventTypePaymentCompleted:
+		_, err = e.PaymentCompleted()
+	case EventTypeSubscriptionCreated:
+		_, err = e.SubscriptionCreated()
+	case EventTypeSubscriptionBilled:
+		_, err = e.SubscriptionBilled()
+	case EventTypeSubscriptionStatusChanged:
+		_, err = e.SubscriptionStatusChanged()
+	case EventTypeSubscriptionActionRequiredChanged:
+		_, err = e.SubscriptionActionRequiredChanged()
+	case EventTypeSubscriptionBillingFailed:
+		_, err = e.SubscriptionBillingFailed()
+	case EventTypeSubscriptionUpcomingBill:
+		_, err = e.SubscriptionUpcomingBill()
+	case EventTypeRefundRequested:
+		_, err = e.RefundRequested()
+	case EventTypeRefundCompleted:
+		_, err = e.RefundCompleted()
+	case EventTypeRefundDenied:
+		_, err = e.RefundDenied()
+	case EventTypeMemberJoined:
+		_, err = e.MemberJoined()
+	case EventTypeMemberRemoved:
+		_, err = e.MemberRemoved()
+	case EventTypeHeldFundsReleased:
+		_, err = e.HeldFundsReleased()
+	case EventTypeCheckoutExpired:
+		_, err = e.CheckoutExpired()
+	case EventTypeWebhookTest:
+		_, err = e.WebhookTest()
+	}
+	return err
+}

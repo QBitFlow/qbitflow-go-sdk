@@ -124,7 +124,29 @@ but never published; its changes are part of 3.0.0).
 -   Client-side validation mirroring the API v2 validators, through each params type's
     `Validate` method, run before every request (no request is sent on failure).
 -   `User-Agent: qbitflow-go/3.0.0` and the `Version` constant.
--   Examples: `checkout`, `subscriptions`, `marketplace`, `webhook_handler`,
+-   Integration helpers, with the same behaviour in the four SDKs:
+    -   `WebhookRouter` (`NewWebhookRouter(secret, ...WebhookRouterOption)`): verifies, parses
+        and dispatches deliveries to a typed handler per event type (`OnPaymentCompleted`… 15
+        methods, `OnUnknown`, `OnAny`, chaining), and answers QBitFlow (`200`, `400` for a bad
+        signature or body, `500` when a handler fails). `Handle(ctx, rawBody, header)` returns a
+        `WebhookResult` (`Status`, `Event`, `Err`, `ResponseBody()`); the router is an
+        `http.Handler` (POST only, 1 MiB, the header read case-insensitively);
+        `WithWebhookErrorHandler` reports the errors.
+    -   `SignWebhook(rawBody, secret, t)`: the `QBitFlow-Signature` header QBitFlow would send,
+        to test webhook handlers.
+    -   `CheckoutSessions.WaitForCompletion(ctx, uuid, *WaitOptions)`: polls the status until it
+        is final (default timeout 10 minutes, interval 3 s, at least 1 s) and returns it, or the
+        last status seen at the timeout.
+    -   `Subscription.HasAccess(at)`: `CurrentPeriodEnd` set and `at` before it.
+    -   `FormatAmount` / `ParseAmount` and `Currency.FormatAmount`: exact conversions between a
+        token's smallest unit and a decimal amount (string arithmetic, never a float).
+    -   `Accounting.ExportJSONRange` / `ExportCSVRange`: an export over any range, in windows of
+        at most 95 days joined in order (the CSV header once).
+    -   `NewClientFromEnv`: a client from `QBITFLOW_API_KEY`, `QBITFLOW_BASE_URL` and
+        `QBITFLOW_ON_BEHALF_OF`, the options given overriding them.
+    -   `PlaceholderUUID` and `PlaceholderTransactionType`: the `{{UUID}}` and
+        `{{TRANSACTION_TYPE}}` redirect placeholders.
+-   Examples: `checkout`, `subscriptions`, `marketplace`, `webhook_handler` (a `WebhookRouter`),
     `errors_and_retries`; `MIGRATION-v3.md`.
 
 ### Changed

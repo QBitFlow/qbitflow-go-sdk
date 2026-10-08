@@ -3,7 +3,38 @@ package qbitflow
 import (
 	"context"
 	"net/http"
+	"time"
 )
+
+// Redirect placeholders for SuccessURL and CancelURL: QBitFlow replaces them literally when it
+// redirects the customer (the SDK never URL-encodes them).
+//
+//	SuccessURL: "https://shop.example.com/thanks?session=" + qbitflow.PlaceholderUUID
+const (
+	// PlaceholderUUID becomes the session's (and its transaction's) id: pay@… or sub@….
+	PlaceholderUUID = "{{UUID}}"
+	// PlaceholderTransactionType becomes the session's transaction type (payment, createSubscription…).
+	PlaceholderTransactionType = "{{TRANSACTION_TYPE}}"
+)
+
+// WaitForCompletion's defaults.
+const (
+	// DefaultWaitTimeout is how long WaitForCompletion polls when WaitOptions.Timeout is 0.
+	DefaultWaitTimeout = 10 * time.Minute
+	// DefaultWaitInterval is the wait between polls when WaitOptions.Interval is 0.
+	DefaultWaitInterval = 3 * time.Second
+	// minWaitInterval is the shortest wait between polls.
+	minWaitInterval = time.Second
+)
+
+// WaitOptions configures CheckoutSessions.WaitForCompletion. nil, or a zero field, keeps the
+// default.
+type WaitOptions struct {
+	// Timeout is how long to poll before giving up (default 10 minutes).
+	Timeout time.Duration
+	// Interval is the wait between two polls (default 3 s, at least 1 s).
+	Interval time.Duration
+}
 
 // CreatePayment opens a one-time payment checkout session
 // (POST /transaction/session-checkout/new/payment, 201) and returns its link, its pay@… id and
@@ -70,4 +101,52 @@ func (s *CheckoutSessionsService) Expire(ctx context.Context, uuid string, opts 
 	return s.client.callRef[CheckoutSessionStatus](ctx, endpoint{
 		method: http.MethodPost, path: pathf("/transaction/session-checkout/%s/expire", uuid),
 	}, opts)
+}
+
+// WaitForCompletion polls GetStatus until the session is final (completed or expired) and
+// returns that status. When opts.Timeout (default 10 minutes) elapses first, it returns the
+// last status seen, which is not final: check its Status. GetStatus's errors are returned as
+// they are (a 404 included), and the context's cancellation as its error (errors.Is(err,
+// context.Canceled) holds either way).
+//
+// For scripts, tests and back-office jobs: fulfil orders on the payment.completed webhook,
+// never by keeping a request waiting on this.
+func (s *CheckoutSessionsService) WaitForCompletion(ctx context.Context, uuid string, opts *WaitOptions, reqOpts ...RequestOption) (*CheckoutSessionStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := checkPathTxID("uuid", uuid); err != nil {
+		return nil, err
+	}
+	timeout, interval := DefaultWaitTimeout, DefaultWaitInterval
+	if opts != nil {
+		if opts.Timeout > 0 {
+			timeout = opts.Timeout
+		}
+		if opts.Interval != 0 {
+			interval = max(opts.Interval, minWaitInterval)
+		}
+	}
+
+	t := s.client.t
+	deadline := t.now().Add(timeout)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		status, err := s.GetStatus(ctx, uuid, reqOpts...)
+		if err != nil {
+			return nil, err
+		}
+		if status.Status == CheckoutSessionStatusCompleted || status.Status == CheckoutSessionStatusExpired {
+			return status, nil
+		}
+		remaining := deadline.Sub(t.now())
+		if remaining <= 0 {
+			return status, nil
+		}
+		if err := t.sleep(ctx, min(interval, remaining)); err != nil {
+			return nil, err
+		}
+	}
 }

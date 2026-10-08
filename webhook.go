@@ -92,12 +92,8 @@ func VerifyWebhook(rawBody []byte, signatureHeader, secret string, opts ...Verif
 		return newSignatureError(WebhookSignatureTimestampOutsideTolerance, "webhook timestamp is outside the tolerance ("+cfg.tolerance.String()+")")
 	}
 
-	mac := hmac.New(sha256.New, []byte(secret))
 	// The signed text is t exactly as the header carries it (not its re-formatted integer).
-	mac.Write([]byte(rawT))
-	mac.Write([]byte{'.'})
-	mac.Write(rawBody)
-	expected := []byte(hex.EncodeToString(mac.Sum(nil)))
+	expected := []byte(webhookSignature(secret, rawT, rawBody))
 
 	matched := false
 	for _, sig := range signatures {
@@ -110,6 +106,26 @@ func VerifyWebhook(rawBody []byte, signatureHeader, secret string, opts ...Verif
 		return newSignatureError(WebhookSignatureNoMatchingSignature, "no webhook signature matches")
 	}
 	return nil
+}
+
+// webhookSignature is hex(HMAC-SHA256(secret, t + "." + rawBody)), a v1 signature.
+func webhookSignature(secret, t string, rawBody []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(t))
+	mac.Write([]byte{'.'})
+	mac.Write(rawBody)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// SignWebhook returns the QBitFlow-Signature header QBitFlow would send with rawBody, signed
+// with secret at t ("t=<unix seconds>,v1=<hex>"; the zero time means now). Use it to test a
+// webhook handler: VerifyWebhook(body, SignWebhook(body, secret, time.Now()), secret) passes.
+func SignWebhook(rawBody []byte, secret string, t time.Time) string {
+	if t.IsZero() {
+		t = time.Now()
+	}
+	ts := strconv.FormatInt(t.Unix(), 10)
+	return "t=" + ts + ",v1=" + webhookSignature(secret, ts, rawBody)
 }
 
 // parseSignatureHeader splits "t=…,v1=…[,v1=…]": parts on ",", each on its first "=", spaces

@@ -3,8 +3,16 @@ package qbitflow
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+)
+
+// The environment variables NewClientFromEnv reads.
+const (
+	envAPIKey     = "QBITFLOW_API_KEY"      // the API key (required)
+	envBaseURL    = "QBITFLOW_BASE_URL"     // the API root (optional)
+	envOnBehalfOf = "QBITFLOW_ON_BEHALF_OF" // the member the client acts for (optional)
 )
 
 // Client is the QBitFlow API client. Create it with NewClient and share it: it is safe for
@@ -90,6 +98,25 @@ func NewClient(apiKey string, opts ...ClientOption) (*Client, error) {
 		newKey:     newUUIDv4,
 	}
 	return newClient(t, cfg.onBehalfOf, nil), nil
+}
+
+// NewClientFromEnv creates a client from the environment: the API key from QBITFLOW_API_KEY
+// (required: a *ValidationError naming it otherwise), the base URL from QBITFLOW_BASE_URL and
+// the default On-Behalf-Of from QBITFLOW_ON_BEHALF_OF when they are set (blank is unset). opts
+// come after them, so an explicit WithBaseURL or WithOnBehalfOf overrides the environment.
+func NewClientFromEnv(opts ...ClientOption) (*Client, error) {
+	apiKey := strings.TrimSpace(os.Getenv(envAPIKey))
+	if apiKey == "" {
+		return nil, newFieldError(envAPIKey, "is not set (the API key, sk_…)")
+	}
+	var fromEnv []ClientOption
+	if base := strings.TrimSpace(os.Getenv(envBaseURL)); base != "" {
+		fromEnv = append(fromEnv, WithBaseURL(base))
+	}
+	if member := strings.TrimSpace(os.Getenv(envOnBehalfOf)); member != "" {
+		fromEnv = append(fromEnv, WithOnBehalfOf(member))
+	}
+	return NewClient(apiKey, append(fromEnv, opts...)...)
 }
 
 // newClient wires a Client and its services around a shared transport.

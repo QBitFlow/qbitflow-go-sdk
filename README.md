@@ -15,8 +15,10 @@ Base and Solana, straight to yours.
 - **Safe retries**: reads and creates are retried on network errors, 5xx and 429, and every create
   sends an `Idempotency-Key`, so a retry never charges or creates twice.
 - **Iterators**: `for p, err := range client.Payments.Iterate(ctx, nil)` walks every page lazily.
-- **Webhooks** verified locally (`QBitFlow-Signature`, secret rotation included) and parsed into
-  typed events.
+- **Webhooks** verified locally (`QBitFlow-Signature`, secret rotation included), parsed into
+  typed events and dispatched by a `WebhookRouter` that is an `http.Handler`.
+- **Integration helpers**: `WaitForCompletion`, `HasAccess`, exact `FormatAmount` / `ParseAmount`,
+  exports over any range, `NewClientFromEnv`.
 
 > Coming from 2.x? Read [MIGRATION-v3.md](MIGRATION-v3.md): 3.0.0 targets API v2 and changes the
 > module path, the client and most names.
@@ -25,6 +27,7 @@ Base and Solana, straight to yours.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Integration recipes](#integration-recipes)
 - [Authentication and acting for a member](#authentication-and-acting-for-a-member)
 - [Checkout sessions](#checkout-sessions)
 - [Products and customers](#products-and-customers)
@@ -122,6 +125,142 @@ Then fulfil the order when the [`payment.completed` webhook](#webhooks) arrives 
 - **Enums** are named string types with constants (`qbitflow.SubscriptionStatusActive`). A value
   this SDK does not know yet is kept as is: give every `switch` a `default` branch.
 - **Times** are `time.Time`, with the offset the API sent.
+
+## Integration recipes
+
+A typical integration, each step in a few lines: create a checkout, receive the webhook, grant
+access. Every helper below is plain Go over the services, and behaves the same in the
+JavaScript, Python and PHP SDKs.
+
+### A webhook endpoint
+
+`WebhookRouter` verifies each delivery's signature, parses the event, runs the handler of its
+type with the typed data, and answers QBitFlow: `200`, `400` for a bad signature or body, `500`
+when a handler returns an error (QBitFlow then delivers it again). It is an `http.Handler`:
+
+```go
+router := qbitflow.NewWebhookRouter(os.Getenv("QBITFLOW_WEBHOOK_SECRET")).
+	OnPaymentCompleted(func(ctx context.Context, p *qbitflow.PaymentCompleted, e *qbitflow.Event) error {
+		return fulfilOrder(ctx, e.ID, p.Reference) // idempotent: deduplicate on e.ID
+	}).
+	OnCheckoutExpired(func(ctx context.Context, x *qbitflow.CheckoutExpired, e *qbitflow.Event) error {
+		if x.Payment != nil {
+			return releaseOrder(ctx, x.Payment.Reference)
+		}
+		return nil
+	})
+http.Handle("POST /webhooks/qbitflow", router) // net/http, chi, gorilla/mux…
+```
+
+With another framework (gin, echo, fiber…), hand `Handle` the **raw** body and the
+`QBitFlow-Signature` header, and answer what it returns:
+
+```go
+func answerWebhook(ctx context.Context, rawBody []byte, signature string) (status int, body []byte) {
+	res := router.Handle(ctx, rawBody, signature)
+	if res.Err != nil {
+		log.Printf("webhook %d: %v", res.Status, res.Err)
+	}
+	return res.Status, res.ResponseBody() // {"received":true} or {"error":"…"}
+}
+```
+
+### A checkout, its success page, and scripts
+
+```go
+session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+	ProductName: "Premium access",
+	Price:       4.99,
+	Reference:   "order-1042",
+	SuccessURL:  "https://shop.example.com/thanks?session=" + qbitflow.PlaceholderUUID,
+	CancelURL:   "https://shop.example.com/cart",
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("redirect the customer to", session.Link)
+```
+
+On the success page, `GetStatus(ctx, r.URL.Query().Get("session"))` tells the customer where their
+payment stands; the order itself is fulfilled by the webhook. In a script, a test or a back-office
+job, `WaitForCompletion` polls until the session is `completed` or `expired` (every 3 s, for at
+most 10 minutes by default):
+
+```go
+status, err := client.CheckoutSessions.WaitForCompletion(ctx, session.UUID,
+	&qbitflow.WaitOptions{Timeout: 15 * time.Minute, Interval: 5 * time.Second})
+if err != nil {
+	log.Fatal(err) // GetStatus's errors, or the context's
+}
+if status.Status != qbitflow.CheckoutSessionStatusCompleted {
+	fmt.Println("not paid (yet):", status.Status) // expired, or still open at the timeout
+}
+```
+
+### Access control
+
+A subscription grants access until the end of the period paid for, whatever its status:
+
+```go
+sub, err := client.Subscriptions.Get(ctx, subscriptionUUID, nil)
+if err != nil {
+	log.Fatal(err)
+}
+if sub.HasAccess(time.Now()) { // CurrentPeriodEnd set and now before it
+	fmt.Println("access until", sub.CurrentPeriodEnd)
+}
+```
+
+### Displaying amounts
+
+Exact token amounts are decimal strings in the token's smallest unit. Convert them exactly (no
+float on the way):
+
+```go
+payment, err := client.Payments.Get(ctx, paymentUUID, nil)
+if err != nil {
+	log.Fatal(err)
+}
+amount, err := payment.Currency.FormatAmount(payment.AmountMinUnits) // "1500000" USDC → "1.5"
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(amount, payment.Currency.Symbol)
+
+units, err := qbitflow.ParseAmount("1.5", 6) // "1500000"; "1.0000001" is a *ValidationError
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(units)
+```
+
+`qbitflow.FormatAmount(minUnits, decimals)` does the same without a `Currency`.
+
+### A yearly accounting export
+
+The API exports at most 95 days at a time; the `…Range` methods split any range into windows,
+request them in order and join the results (the CSV header once):
+
+```go
+csv, err := client.Accounting.ExportCSVRange(ctx, "2026-01-01", "2026-12-31") // 4 requests
+if err != nil {
+	log.Fatal(err)
+}
+if err := os.WriteFile("qbitflow-2026.csv", []byte(csv), 0o600); err != nil {
+	log.Fatal(err)
+}
+```
+
+### Configuration from the environment
+
+```go
+// QBITFLOW_API_KEY (required), QBITFLOW_BASE_URL and QBITFLOW_ON_BEHALF_OF (optional);
+// options given here override them.
+client, err := qbitflow.NewClientFromEnv(qbitflow.WithTimeout(10 * time.Second))
+if err != nil {
+	log.Fatal(err) // a *qbitflow.ValidationError naming QBITFLOW_API_KEY when it is not set
+}
+```
 
 ## Authentication and acting for a member
 
@@ -223,8 +362,10 @@ if err != nil {
 fmt.Println("subscribe at", session.Link)
 ```
 
-- **Redirect placeholders.** In `SuccessURL` and `CancelURL`, QBitFlow replaces `{{UUID}}` with the
-  session's id and `{{TRANSACTION_TYPE}}` with `payment` or `createSubscription`. In live mode both
+- **Redirect placeholders.** In `SuccessURL` and `CancelURL`, QBitFlow replaces `{{UUID}}`
+  (`qbitflow.PlaceholderUUID`) with the session's id and `{{TRANSACTION_TYPE}}`
+  (`qbitflow.PlaceholderTransactionType`) with `payment` or `createSubscription`; the SDK sends
+  them as they are, never URL-encoded. In live mode both
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `GetStatus`.
 - **Errors to expect:** `409 merchant_not_ready` (`Details["reason"]`) when the space's wallets
@@ -262,6 +403,12 @@ default: // created, or a status this SDK does not know
 
 **Never cancel an order on `LastAttempt`:** a failed attempt is not final, and the customer can pay
 from the same checkout until it expires. Release what the order holds on `checkout.expired`.
+
+`WaitForCompletion(ctx, uuid, &qbitflow.WaitOptions{Timeout, Interval})` polls `GetStatus` until the
+session is final and returns that status, or the last one seen when the timeout (default 10
+minutes) elapses first; the interval (default 3 s) is at least 1 s. It is meant for scripts, tests
+and back-office jobs ([recipe](#a-checkout-its-success-page-and-scripts)): orders are fulfilled on
+the webhook.
 
 ### Expire
 
@@ -697,7 +844,10 @@ if err := os.WriteFile("qbitflow-2026-09.csv", []byte(csv), 0o600); err != nil {
 ```
 
 The SDK checks the dates and `from <= to` before sending. **The API allows at most 95 days per
-export** and answers 400 beyond: split longer ranges. Rows are typed `payment`,
+export** and answers 400 beyond. `ExportJSONRange` and `ExportCSVRange` take any range: they split
+it into consecutive windows of at most 95 days (`[from, from+95d]`, the next one starting the day
+after, on calendar dates), request them in order and return the events joined (for CSV, the first
+window's header line once, then every window's rows). A range of 95 days or less is one request. Rows are typed `payment`,
 `subscriptionHistory`, `refund`, `organizationFee` or `referralFee`; amounts in a token's smallest
 unit are decimal strings, and the empty fields of a row are left out.
 
@@ -731,63 +881,105 @@ organization endpoint also receives its members' events unless created with
 `new(true)` enables it again) and `Delete` manage them. An endpoint's secret is shown and rotated in
 the dashboard only.
 
-### 2. Verify and handle the deliveries
+### 2. Handle the deliveries with the router
 
-Verify the `QBitFlow-Signature` header over the **raw body**, then parse the event and switch on
-its type:
+A `WebhookRouter` holds the endpoint's secret and one handler per event type. For each delivery it
+verifies the `QBitFlow-Signature` header over the **raw body**, parses the event, runs the handlers
+of its type with the typed data, then the `OnAny` ones, and answers:
 
 ```go
 // processed stands for your database: deliveries are at least once.
 var processed sync.Map
 
-func webhookHandler(secret string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Reads the body (at most 1 MiB) and checks its signature and timestamp.
-		body, err := qbitflow.VerifyWebhookRequest(r, secret)
-		if err != nil {
-			http.Error(w, "invalid signature", http.StatusBadRequest)
-			return
-		}
-		event, err := qbitflow.ParseEvent(body)
-		if err != nil {
-			http.Error(w, "not a v2 event", http.StatusBadRequest) // an endpoint still on v1
-			return
-		}
-		if _, seen := processed.LoadOrStore(event.ID, true); seen {
-			w.WriteHeader(http.StatusOK) // a retry of an event already handled
-			return
-		}
+func webhookRouter(secret string) *qbitflow.WebhookRouter {
+	return qbitflow.NewWebhookRouter(secret,
+		qbitflow.WithWebhookErrorHandler(func(e *qbitflow.Event, err error) {
+			log.Printf("webhook refused or failed: %v", err) // e is nil when the body could not be parsed
+		}),
+	).
+		OnPaymentCompleted(func(ctx context.Context, p *qbitflow.PaymentCompleted, e *qbitflow.Event) error {
+			if _, seen := processed.LoadOrStore(e.ID, true); seen {
+				return nil // a retry of an event already handled
+			}
+			log.Printf("fulfil order %q (%s): %.2f USD", p.Reference, p.UUID, p.Amount)
+			return nil
+		}).
+		OnCheckoutExpired(func(ctx context.Context, x *qbitflow.CheckoutExpired, e *qbitflow.Event) error {
+			if x.Payment != nil {
+				log.Printf("release order %q", x.Payment.Reference)
+			}
+			return nil
+		}).
+		OnSubscriptionStatusChanged(func(ctx context.Context, s *qbitflow.SubscriptionStatusChanged, e *qbitflow.Event) error {
+			log.Printf("%s: %s -> %s, access: %v", s.UUID, s.PreviousStatus, s.Status, s.HasAccess(time.Now()))
+			return nil
+		}).
+		OnUnknown(func(ctx context.Context, e *qbitflow.Event) error {
+			log.Printf("a type newer than this SDK: %s", e.Type) // e.DecodeData[T]() reads it
+			return nil
+		})
+}
+```
 
-		switch event.Type {
-		case qbitflow.EventTypePaymentCompleted:
-			payment, err := event.PaymentCompleted()
-			if err != nil {
-				processed.Delete(event.ID)
-				http.Error(w, "bad event", http.StatusBadRequest)
-				return
-			}
-			log.Printf("fulfil order %q (%s): %.2f USD", payment.Reference, payment.UUID, payment.Amount)
-		case qbitflow.EventTypeCheckoutExpired:
-			expired, err := event.CheckoutExpired()
-			if err == nil && expired.Payment != nil {
-				log.Printf("release order %q", expired.Payment.Reference)
-			}
-		case qbitflow.EventTypeSubscriptionStatusChanged:
-			change, err := event.SubscriptionStatusChanged()
-			if err == nil {
-				access := change.CurrentPeriodEnd != nil && time.Now().Before(*change.CurrentPeriodEnd)
-				log.Printf("%s: %s -> %s, access: %v", change.UUID, change.PreviousStatus, change.Status, access)
-			}
-		default:
-			// A type you don't handle, or one added after this SDK: acknowledge it.
-		}
-		w.WriteHeader(http.StatusOK)
+Mount it with `http.Handle("POST /webhooks/qbitflow", webhookRouter(secret))`, or call
+`router.Handle(ctx, rawBody, signatureHeader)` from another framework and answer its `Status` with
+its `ResponseBody()`.
+
+| Delivery | Answer | Handlers |
+|---|---|---|
+| Verified, of a type with handlers | `200 {"received":true}` | its type's (in registration order), then `OnAny` |
+| Verified, of a type without handlers | `200` | `OnAny` (and `OnUnknown` first for a type this SDK does not know) |
+| Bad, missing or stale signature | `400 {"error":"invalid signature"}` (`Err`: `*WebhookSignatureError`) | none |
+| Not a v2 event, or data that does not fit its type | `400 {"error":"invalid event"}` (`Err`: `*ValidationError`) | none |
+| A handler returned an error | `500 {"error":"internal error"}`: QBitFlow delivers it again | the ones after it are skipped |
+| Not a `POST` / body over 1 MiB (`ServeHTTP`) | `405` / `413 {"error":"body too large"}` | none |
+
+Handlers get the request's context. Return an error only for what a retry can fix, and keep the
+handlers idempotent: a retried event runs its handlers again. Register them before serving; the
+router is then safe for concurrent use. `NewWebhookRouter` takes `WithTolerance` and `WithClock`
+too.
+
+**Test your handlers** with `SignWebhook`, which signs a body as QBitFlow does:
+
+```go
+func TestWebhook(t *testing.T) {
+	body := []byte(`{"id":"evt_1","type":"webhook.test","version":"v2","createdAt":"2026-10-01T12:00:00Z","test":true,"data":{"endpointUuid":"e","message":"hi"}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/qbitflow", bytes.NewReader(body))
+	req.Header.Set(qbitflow.SignatureHeader, qbitflow.SignWebhook(body, "whsec_test", time.Now()))
+	rec := httptest.NewRecorder()
+	webhookRouter("whsec_test").ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
 	}
 }
 ```
 
-Mount it with `http.Handle("POST /webhooks/qbitflow", webhookHandler(secret))`. When your
-framework hands you the raw body and the header, `ConstructEvent` verifies and parses in one call:
+### Lower level: verify and parse yourself
+
+The router is built on these functions, usable on their own. `VerifyWebhookRequest` reads a
+`net/http` request's body (at most 1 MiB) and checks its signature; `ConstructEvent` verifies and
+parses a raw body; `ParseEvent` parses a body already verified:
+
+```go
+func handle(w http.ResponseWriter, r *http.Request, secret string) {
+	body, err := qbitflow.VerifyWebhookRequest(r, secret)
+	if err != nil {
+		http.Error(w, "invalid signature", http.StatusBadRequest)
+		return
+	}
+	event, err := qbitflow.ParseEvent(body)
+	if err != nil {
+		http.Error(w, "not a v2 event", http.StatusBadRequest) // an endpoint still on v1
+		return
+	}
+	if event.Type == qbitflow.EventTypePaymentCompleted {
+		if payment, err := event.PaymentCompleted(); err == nil {
+			log.Printf("fulfil order %q", payment.Reference)
+		}
+	}
+	w.WriteHeader(http.StatusOK) // to the types you ignore too
+}
+```
 
 ```go
 event, err := qbitflow.ConstructEvent(rawBody, signatureHeader, secret)
@@ -839,7 +1031,9 @@ log.Println(event.ID, event.Type)
 | `webhook.test` | `WebhookTest()` | `EndpointUUID`, `Message` (the dashboard's test) |
 | any other | `DecodeData[T]()` | `Data`, raw |
 
-An accessor called on another type is a `*ValidationError`. Webhook data never carries what only
+Each accessor has its router method, `On` + its name (`OnPaymentCompleted`, `OnRefundDenied`…;
+`OnUnknown` for the other types), whose handler gets the same data. An accessor called on another
+type is a `*ValidationError`. Webhook data never carries what only
 API reads return (`Customer`, `Refund`/`Refundable`, `Dunning`, `Approval`, `ProductName`).
 
 ### The event log
@@ -1071,10 +1265,14 @@ fmt.Println(client != nil)
 | `WithIdempotencyKey(key)` | the 7 creates only: your own `Idempotency-Key` |
 | `WithRequestID(id)` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
 
-| Webhook option (`VerifyWebhook`, `VerifyWebhookRequest`, `ConstructEvent`) | Default |
+| Webhook option (`VerifyWebhook`, `VerifyWebhookRequest`, `ConstructEvent`, `NewWebhookRouter`) | Default |
 |---|---|
 | `WithTolerance(d)` | 300 s (`DefaultWebhookTolerance`) |
 | `WithClock(func() time.Time)` | `time.Now` |
+| `WithWebhookErrorHandler(func(*Event, error))` (`NewWebhookRouter` only) | errors reported nowhere |
+
+`qbitflow.NewClientFromEnv(opts...)` reads the key from `QBITFLOW_API_KEY` (required), and
+`QBITFLOW_BASE_URL` and `QBITFLOW_ON_BEHALF_OF` when they are set; the options given override them.
 
 A bad option makes `NewClient` return a `*ValidationError`. A client's configuration never changes
 after `NewClient`; `client.OnBehalfOf` derives clients that share it. Every request sends
@@ -1096,7 +1294,7 @@ Runnable programs in [`examples/`](examples) (`QBITFLOW_API_KEY=sk_… go run ./
 | [`checkout`](examples/checkout) | a payment checkout, its status, expiry |
 | [`subscriptions`](examples/subscriptions) | a subscription checkout with a trial, filtered lists, bills, cancel at period end |
 | [`marketplace`](examples/marketplace) | invite a seller, sell `OnBehalfOf`, held funds, trust |
-| [`webhook_handler`](examples/webhook_handler) | a verified `net/http` receiver with deduplication and typed events |
+| [`webhook_handler`](examples/webhook_handler) | a `WebhookRouter` receiver: typed handlers, deduplication, retries on failure |
 | [`errors_and_retries`](examples/errors_and_retries) | error types, `IsRetryable`, idempotency keys across processes |
 
 ## Testing
