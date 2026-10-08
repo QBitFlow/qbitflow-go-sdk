@@ -20,22 +20,38 @@ import (
 )
 
 func main() {
-	secret := os.Getenv("QBITFLOW_WEBHOOK_SECRET")
-	if secret == "" {
+	if os.Getenv("QBITFLOW_WEBHOOK_SECRET") == "" {
 		log.Fatal("set QBITFLOW_WEBHOOK_SECRET")
 	}
-	app := &app{client: newClient(), seen: map[string]bool{}}
 
-	router := qbitflow.NewWebhookRouter(secret,
-		qbitflow.WithWebhookErrorHandler(func(e *qbitflow.Event, err error) {
-			if e == nil {
-				log.Printf("refused delivery: %v", err) // bad signature, or not a v2 event
-				return
-			}
-			log.Printf("event %s (%s) failed, QBitFlow will retry it: %v", e.ID, e.Type, err)
+	// docs:start webhook-handler
+	var fulfilled sync.Map // stands for your database: deliveries are at least once
+	router := qbitflow.NewWebhookRouter(os.Getenv("QBITFLOW_WEBHOOK_SECRET"),
+		qbitflow.WithWebhookErrorHandler(func(event *qbitflow.Event, err error) {
+			log.Printf("webhook refused or failed: %v", err) // event is nil when the body could not be parsed
 		}),
 	).
-		OnPaymentCompleted(app.paymentCompleted).
+		OnPaymentCompleted(func(ctx context.Context, payment *qbitflow.PaymentCompleted, event *qbitflow.Event) error {
+			if _, done := fulfilled.LoadOrStore(event.ID, true); done {
+				return nil // a retry of an event already handled
+			}
+			log.Printf("fulfil order %q: %.2f USD (%s)", payment.Reference, payment.Amount, payment.UUID)
+			return nil // an error answers 500, and QBitFlow delivers the event again
+		}).
+		OnCheckoutExpired(func(ctx context.Context, expired *qbitflow.CheckoutExpired, event *qbitflow.Event) error {
+			if expired.Payment != nil {
+				log.Printf("release order %q", expired.Payment.Reference)
+			}
+			return nil
+		})
+
+	// The router is an http.Handler: it verifies the QBitFlow-Signature header on the raw body,
+	// parses the event, runs the handlers of its type and answers 200, 400 or 500.
+	http.Handle("POST /webhooks/qbitflow", router)
+	// docs:end webhook-handler
+
+	// More handlers, registered before serving.
+	router.
 		OnSubscriptionCreated(func(_ context.Context, sub *qbitflow.SubscriptionCreated, _ *qbitflow.Event) error {
 			log.Printf("subscription %s created (%s), access: %v", sub.UUID, sub.Status, sub.HasAccess(time.Now()))
 			return nil
@@ -60,14 +76,6 @@ func main() {
 			log.Printf("member %s joined (invitation %s): sell with OnBehalfOf(%q)", joined.Email, joined.InvitationUUID, joined.UserUUID)
 			return nil
 		}).
-		OnCheckoutExpired(func(_ context.Context, expired *qbitflow.CheckoutExpired, _ *qbitflow.Event) error {
-			if expired.Payment != nil {
-				log.Printf("payment checkout %s expired: release order %q", expired.Payment.UUID, expired.Payment.Reference)
-			} else if expired.Subscription != nil {
-				log.Printf("subscription checkout %s expired", expired.Subscription.UUID)
-			}
-			return nil
-		}).
 		OnWebhookTest(func(_ context.Context, test *qbitflow.WebhookTest, _ *qbitflow.Event) error {
 			log.Printf("test event for endpoint %s: %s", test.EndpointUUID, test.Message)
 			return nil
@@ -77,53 +85,30 @@ func main() {
 			return nil
 		})
 
-	// The router is an http.Handler: 405 for other methods, 413 over 1 MiB.
-	http.Handle("/webhooks/qbitflow", router)
+	// A member's payment names them in e.UserUUID: read more in their space with OnBehalfOf.
+	// OnAny handlers run after the typed ones, on retries too.
+	if client := newClient(); client != nil {
+		router.OnAny(func(ctx context.Context, e *qbitflow.Event) error {
+			if e.Type != qbitflow.EventTypePaymentCompleted || e.UserUUID == "" {
+				return nil
+			}
+			payment, err := e.PaymentCompleted()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			full, err := client.OnBehalfOf(e.UserUUID).Payments.Get(ctx, payment.UUID, nil)
+			if err != nil {
+				return err // answers 500: QBitFlow delivers the event again later
+			}
+			log.Printf("  paid by %s", full.From)
+			return nil
+		})
+	}
+
 	log.Println("listening on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
-type app struct {
-	client *qbitflow.Client
-
-	// seen deduplicates on the event's id: deliveries are at least once (a retry carries the
-	// same id). Use your database in production.
-	mu   sync.Mutex
-	seen map[string]bool
-}
-
-// paymentCompleted fulfils an order once, whatever the number of deliveries.
-func (a *app) paymentCompleted(ctx context.Context, payment *qbitflow.PaymentCompleted, e *qbitflow.Event) error {
-	a.mu.Lock()
-	duplicate := a.seen[e.ID]
-	a.seen[e.ID] = true
-	a.mu.Unlock()
-	if duplicate {
-		return nil
-	}
-
-	amount := payment.AmountMinUnits
-	if formatted, err := payment.Currency.FormatAmount(payment.AmountMinUnits); err == nil {
-		amount = formatted + " " + payment.Currency.Symbol
-	}
-	log.Printf("payment %s completed: order %q, %s (%.2f USD)", payment.UUID, payment.Reference, amount, payment.Amount)
-
-	// Fulfil the order here. A member's payment names them in e.UserUUID: read more in their
-	// space with OnBehalfOf.
-	if e.UserUUID != "" && a.client != nil {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		full, err := a.client.OnBehalfOf(e.UserUUID).Payments.Get(ctx, payment.UUID, nil)
-		if err != nil {
-			// Returning the error answers 500: QBitFlow delivers the event again later.
-			a.mu.Lock()
-			delete(a.seen, e.ID)
-			a.mu.Unlock()
-			return err
-		}
-		log.Printf("  paid by %s", full.From)
-	}
-	return nil
 }
 
 // newClient builds the client for follow-up reads from QBITFLOW_API_KEY (and QBITFLOW_BASE_URL);

@@ -1,9 +1,10 @@
-// Command marketplace walks the marketplace flow with an organization API key: invite a seller,
-// act in their space once they joined (a product and a checkout of theirs), trust them, and
-// read the funds the organization holds for them.
+// Command marketplace walks the marketplace flow with an organization API key: list the members
+// and the pending invitations, invite a seller (and revoke the invitation), then act for a member
+// who joined: read them and their wallets, sell in their space, read the funds held for them,
+// and, on request, change their fee, trust them or remove them.
 //
-//	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] SELLER_EMAIL=seller@example.com go run ./examples/marketplace
-//	QBITFLOW_API_KEY=sk_… MEMBER_UUID=<a member's userUuid> go run ./examples/marketplace
+//	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [INVITE=1 [REVOKE=1]] go run ./examples/marketplace
+//	QBITFLOW_API_KEY=sk_… MEMBER_UUID=<a member's userUuid> [FEE=1] [TRUST=1] [REMOVE=1] go run ./examples/marketplace
 package main
 
 import (
@@ -22,99 +23,208 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
+	overview(ctx, client)
+	if os.Getenv("INVITE") == "1" {
+		invite(ctx, client)
+	}
+
 	memberUUID := os.Getenv("MEMBER_UUID")
 	if memberUUID == "" {
-		invite(ctx, client)
+		fmt.Println("set MEMBER_UUID to act for a member")
 		return
 	}
 	sellAs(ctx, client, memberUUID)
+	manage(ctx, client, memberUUID)
 }
 
-// invite invites a seller. They exist in the organization once they accepted.
-func invite(ctx context.Context, client *qbitflow.Client) {
-	email := os.Getenv("SELLER_EMAIL")
-	if email == "" {
-		log.Fatal("set SELLER_EMAIL (to invite) or MEMBER_UUID (to act for a member)")
-	}
-	fee := 5.0 // the organization keeps 5% of the seller's payments
-	created, err := client.Invitations.Create(ctx, &qbitflow.CreateInvitationParams{
-		Email:                  email,
-		TrustLayer:             true, // hold their payments until Members.Trust
-		OrganizationFeePercent: &fee,
-		RedirectURL:            "https://market.example.com/welcome",
-	})
-	var conflict *qbitflow.ConflictError
-	if errors.As(err, &conflict) && conflict.Code == "already_joined" {
-		fmt.Println(email, "is already a member")
-		return
-	}
+// overview lists the members and the pending invitations.
+func overview(ctx context.Context, client *qbitflow.Client) {
+	// docs:start members-list
+	page, err := client.Members.List(ctx, &qbitflow.MemberListParams{Limit: 20})
 	if err != nil {
-		log.Fatalf("invite: %v", err)
+		log.Fatal(err)
 	}
-	fmt.Printf("invitation %s sent; link: %s\n", created.Invitation.UUID, created.Link)
+	for _, m := range page.Items {
+		fmt.Printf("%s %s %s, fee %.2f %%, trusted: %v\n", m.UserUUID, m.Name, m.Email, m.OrganizationFeePercent, m.TrustedAt != nil)
+	}
+	// docs:end members-list
+
+	// docs:start invitations-list
+	invitations, err := client.Invitations.List(ctx, &qbitflow.InvitationListParams{
+		Status: qbitflow.InvitationStatusPending,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, inv := range invitations.Items {
+		fmt.Println(inv.UUID, inv.Email, "expires", inv.ExpiresAt.Format(time.RFC3339))
+	}
+	// docs:end invitations-list
+}
+
+// invite invites a seller, and revokes the invitation on request. They exist in the
+// organization once they accepted.
+func invite(ctx context.Context, client *qbitflow.Client) {
+	// docs:start members-invite
+	created, err := client.Invitations.Create(ctx, &qbitflow.CreateInvitationParams{
+		Email:                  "seller@example.com",
+		TrustLayer:             true,      // hold their payments until Members.Trust
+		OrganizationFeePercent: new(10.0), // your commission on their payments: 0 to 50 %
+		RedirectURL:            "https://shop.example.com/sellers/welcome",
+	})
+	if err != nil {
+		log.Fatal(err) // 409 already_joined for a member
+	}
+	// The link is also emailed. The seller exists once they accepted: wait for member.joined.
+	fmt.Println("invitation", created.Invitation.UUID, "link:", created.Link)
+	// docs:end members-invite
 
 	// Then wait for the member.joined webhook (see examples/webhook_handler):
 	//
 	//	joined, _ := event.MemberJoined()
 	//	// joined.InvitationUUID == created.Invitation.UUID; store joined.UserUUID,
 	//	// then run this program with MEMBER_UUID=<joined.UserUUID>.
+
+	if os.Getenv("REVOKE") != "1" {
+		return
+	}
+	invitationUUID := created.Invitation.UUID
+
+	// docs:start invitations-revoke
+	revoked, err := client.Invitations.Revoke(ctx, invitationUUID)
+	if err != nil {
+		log.Fatal(err) // 409 once accepted or revoked
+	}
+	fmt.Println("revoked the invitation of", revoked.Email)
+	// docs:end invitations-revoke
 }
 
-// sellAs acts in a member's space: OnBehalfOf sends On-Behalf-Of on every request.
+// sellAs reads a member and acts in their space.
 func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
-	member, err := client.Members.Get(ctx, memberUUID)
+	// docs:start members-get
+	member, err := client.Members.Get(ctx, memberUUID) // their userUuid
 	if err != nil {
-		log.Fatalf("member: %v", err)
+		log.Fatal(err)
 	}
-	fmt.Printf("member %s %s, trusted: %v\n", member.Name, member.LastName, member.TrustedAt != nil)
+	fmt.Printf("%s %s <%s>, fee %.2f %%, trusted: %v\n",
+		member.Name, member.LastName, member.Email, member.OrganizationFeePercent, member.TrustedAt != nil)
+	// docs:end members-get
+
+	// docs:start members-wallets
+	wallets, err := client.Wallets.ListForMember(ctx, memberUUID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, w := range wallets {
+		fmt.Println(w.Currency.Symbol, w.PublicKey)
+	}
+	// docs:end members-wallets
+
+	// docs:start client-on-behalf-of
+	// A client acting in the member's space (organization key): every request sends
+	// On-Behalf-Of. It shares the connections and settings of client.
+	seller := client.OnBehalfOf(memberUUID)
+	products, err := seller.Products.List(ctx, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(len(products), "products in the seller's space")
+	// docs:end client-on-behalf-of
 
 	// Is the seller ready to be paid? Their checkouts need a wallet accepting a currency.
 	currencies, err := client.Wallets.ListSupportedCurrencies(ctx, &qbitflow.SupportedCurrenciesParams{UserUUID: memberUUID})
 	if err != nil {
-		log.Fatalf("currencies: %v", err)
+		log.Fatal(err)
 	}
 	if len(currencies) == 0 {
 		fmt.Println("the seller has no wallet yet: their checkouts would answer 409 merchant_not_ready")
-		return
+	} else {
+		product, err := seller.Products.Create(ctx, &qbitflow.CreateProductParams{
+			Name: "Handmade mug", Price: 4.5, Reference: fmt.Sprintf("mug-%d", time.Now().Unix()),
+		})
+		if err != nil {
+			log.Fatalf("product: %v", err) // 403 policy_disabled if members.products is off
+		}
+		session, err := seller.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+			ProductUUID: product.UUID,
+			SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
+		})
+		if err != nil {
+			log.Fatalf("checkout: %v", err)
+		}
+		fmt.Printf("the buyer pays at %s\n", session.Link)
 	}
 
-	seller := client.OnBehalfOf(memberUUID)
-	product, err := seller.Products.Create(ctx, &qbitflow.CreateProductParams{
-		Name: "Handmade mug", Price: 4.5, Reference: fmt.Sprintf("mug-%d", time.Now().Unix()),
-	})
+	// docs:start members-held-funds
+	// What the organization holds for its members (their payments while untrusted).
+	summaries, err := client.Members.ListHeldFunds(ctx)
 	if err != nil {
-		log.Fatalf("product: %v", err) // 403 policy_disabled if members.products is off
+		log.Fatal(err)
 	}
-	session, err := seller.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
-		ProductUUID: product.UUID,
-		SuccessURL:  "https://market.example.com/orders/{{UUID}}",
-	})
-	if err != nil {
-		log.Fatalf("checkout: %v", err)
+	for _, s := range summaries {
+		fmt.Printf("%s: %.2f USD over %d lines\n", s.UserUUID, s.TotalAmount, s.Count)
 	}
-	fmt.Printf("the buyer pays at %s\n", session.Link)
 
-	// What the organization holds for the seller (their payments while untrusted).
 	held, err := client.Members.GetHeldFunds(ctx, memberUUID)
 	if err != nil {
-		log.Fatalf("held funds: %v", err)
+		log.Fatal(err)
 	}
-	fmt.Printf("held for them: %.2f USD over %d payments\n", held.TotalAmount, len(held.Ledgers))
-	// From the seller's side (their key, or OnBehalfOf): the same total.
-	if own, err := seller.Members.GetOwnHeldFunds(ctx); err == nil {
-		fmt.Printf("as seen by the seller: %.2f USD\n", own.TotalAmount)
+	fmt.Printf("owed to %s: %.2f USD over %d lines\n", memberUUID, held.TotalAmount, len(held.Ledgers))
+	// docs:end members-held-funds
+
+	// docs:start members-own-held-funds
+	// As the member: with their own key, or the organization's acting for them.
+	own, err := client.OnBehalfOf(memberUUID).Members.GetOwnHeldFunds(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("held for me: %.2f USD over %d lines\n", own.TotalAmount, len(own.Ledgers))
+	// docs:end members-own-held-funds
+}
+
+// manage changes a member's fee, trusts them or removes them, on request.
+func manage(ctx context.Context, client *qbitflow.Client, memberUUID string) {
+	if os.Getenv("FEE") == "1" {
+		// docs:start members-update
+		// The organization's commission on their payments, in percent (a checkout already
+		// created keeps its fee).
+		member, err := client.Members.Update(ctx, memberUUID, &qbitflow.UpdateMemberParams{
+			OrganizationFeePercent: 10,
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println("fee now", member.OrganizationFeePercent, "%")
+		// docs:end members-update
 	}
 
-	// Trust them: their new payments go to their wallets directly. What is held stays held
-	// until released in the dashboard.
-	if member.TrustedAt == nil && os.Getenv("TRUST") == "1" {
-		trusted, err := client.Members.Trust(ctx, memberUUID)
+	if os.Getenv("TRUST") == "1" {
+		// docs:start members-trust
+		// Their new payments go to their own wallets from now on. What is held stays held until
+		// you release it in the dashboard (heldFunds.released tells you).
+		member, err := client.Members.Trust(ctx, memberUUID)
 		if err != nil {
-			log.Fatalf("trust: %v", err)
+			log.Fatal(err)
 		}
-		if trusted.TrustedAt != nil {
-			fmt.Printf("trusted since %s\n", trusted.TrustedAt.Format(time.RFC3339))
+		if member.TrustedAt != nil {
+			fmt.Println("trusted since", member.TrustedAt.Format(time.RFC3339))
 		}
+		// docs:end members-trust
+	}
+
+	if os.Getenv("REMOVE") == "1" {
+		// docs:start members-remove
+		err := client.Members.Remove(ctx, memberUUID)
+		var conflict *qbitflow.ConflictError
+		switch {
+		case errors.As(err, &conflict) && conflict.Code == "held_funds_pending":
+			fmt.Println("not removed: release the funds held for them first")
+		case err != nil:
+			log.Fatal(err)
+		default:
+			fmt.Println("removed: their keys stop working and their checkouts close")
+		}
+		// docs:end members-remove
 	}
 }
 
