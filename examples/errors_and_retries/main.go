@@ -2,6 +2,9 @@
 // with errors.As, IsRetryable, and a stable Idempotency-Key across processes.
 //
 //	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] go run ./examples/errors_and_retries
+//
+// The last step opens a checkout for the order order-1042 (unique per space) with an idempotency
+// key: once that order is paid, it answers 409 unique_violation.
 package main
 
 import (
@@ -32,6 +35,32 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+
+	// docs:start errors-handling
+	payment, err := client.Payments.GetByReference(ctx, "order-1042")
+	var (
+		validation *qbitflow.ValidationError
+		notFound   *qbitflow.NotFoundError
+		apiErr     *qbitflow.APIError
+	)
+	switch {
+	case err == nil:
+		fmt.Println("order-1042 paid by", payment.UUID)
+	case errors.As(err, &validation):
+		// StatusCode 0: refused before sending; 400: refused by the API.
+		for _, f := range validation.FieldErrors {
+			fmt.Printf("%s: %s\n", f.Field, f.Message)
+		}
+	case errors.As(err, &notFound):
+		fmt.Println("no payment for order-1042")
+	case errors.As(err, &apiErr):
+		// Every SDK error embeds an *APIError: branch on Code, quote RequestID to support.
+		fmt.Printf("QBitFlow error %d %s (request %s), retryable: %v\n",
+			apiErr.StatusCode, apiErr.Code, apiErr.RequestID, qbitflow.IsRetryable(err))
+	default:
+		log.Fatal(err)
+	}
+	// docs:end errors-handling
 
 	// 1. Client-side validation: nothing is sent.
 	_, err = client.Products.Create(ctx, &qbitflow.CreateProductParams{Name: "x", Price: -1})
@@ -64,6 +93,41 @@ func main() {
 	describe("email taken", err)
 
 	_ = client.Customers.Delete(ctx, first.UUID) // clean up
+
+	checkoutOnce(ctx)
+}
+
+// checkoutOnce opens the checkout of an order with a client that retries, under a key that
+// makes a retried job return the same session.
+func checkoutOnce(ctx context.Context) {
+	// docs:start retries-idempotency
+	// Reads and creates are retried on network errors, 5xx and 429 (1 s, 2 s, 4 s…);
+	// WithMaxRetries(0) turns that off. The client reads QBITFLOW_API_KEY.
+	client, err := qbitflow.NewClientFromEnv(qbitflow.WithMaxRetries(5))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Each create sends an Idempotency-Key, the same on its retries. Derive your own from the
+	// order to retry across processes: the same key returns the same session, never a second one.
+	orderID := "order-1042"
+	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+		ProductName: "T-shirt",
+		Description: "Blue, size M",
+		Price:       4.99,
+		Reference:   orderID,
+		SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
+		CancelURL:   "https://shop.example.com/orders/cancel",
+	}, qbitflow.WithIdempotencyKey("checkout-"+orderID))
+	var reused *qbitflow.IdempotencyError
+	if errors.As(err, &reused) {
+		log.Fatal("this key was already used with other params") // 422 idempotency_key_reused
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Redirect the customer to", session.Link)
+	// docs:end retries-idempotency
 }
 
 // describe prints what an error is, the way an application would branch on it.
