@@ -6,8 +6,8 @@
 //
 // The read-only group only reads. The write group also needs QBITFLOW_LIVE_WRITES=1 and a
 // test-mode key (or QBITFLOW_ALLOW_LIVE_MODE_WRITES=1, for a live-mode key on a disposable
-// server such as one running on local chains); it creates a product, a customer, a checkout session and a webhook endpoint,
-// and deletes (or expires) each of them.
+// server such as one running on local chains); it creates a product, a customer, checkout
+// sessions (one with fees) and a webhook endpoint, and deletes (or expires) each of them.
 package qbitflow_test
 
 import (
@@ -319,6 +319,69 @@ func TestLiveWritesCheckout(t *testing.T) {
 	waited, err := c.CheckoutSessions.WaitForCompletion(ctx, session.UUID, &qbitflow.WaitOptions{Timeout: 10 * time.Second, Interval: time.Second})
 	if err != nil || waited.Status != qbitflow.CheckoutSessionStatusExpired {
 		t.Fatalf("WaitForCompletion: %+v %v", waited, err)
+	}
+}
+
+// TestLiveWritesCheckoutFees opens a payment checkout with fees (the catalog's feesCheckout
+// values: a line and the processing fee), reads its status and expires it. The session's fees
+// and amount are only readable from the checkout page's route (not the SDK's), so the check is
+// the round trip; in test mode it also checks the $5 cap counts the fees.
+func TestLiveWritesCheckoutFees(t *testing.T) {
+	c, ctx := liveWriter(t)
+	params := &qbitflow.CreatePaymentSessionParams{
+		ProductName: "T-shirt", Description: "Blue, size M", Price: 3.99, Reference: "order-1044-" + suffix(),
+		SuccessURL: "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
+		CancelURL:  "https://shop.example.com/orders/cancel",
+		Fees: &qbitflow.CheckoutFees{
+			Items:         []qbitflow.FeeItem{{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75}},
+			ProcessingFee: new(true),
+		},
+	}
+	session, err := c.CheckoutSessions.CreatePayment(ctx, params)
+	if err != nil {
+		var nr *qbitflow.ConflictError
+		if errors.As(err, &nr) && nr.Code == "merchant_not_ready" {
+			t.Skip("the space accepts no currency (merchant_not_ready)")
+		}
+		t.Fatal(err)
+	}
+	expire := func(uuid string) {
+		cleanup(t, "checkout session "+uuid, func(ctx context.Context) error {
+			_, err := c.CheckoutSessions.Expire(ctx, uuid)
+			var ce *qbitflow.ConflictError
+			if errors.As(err, &ce) {
+				return nil // already final
+			}
+			return err
+		})
+	}
+	expire(session.UUID)
+	if session.Link == "" || session.ExpiresAt.IsZero() {
+		t.Errorf("session %+v", session)
+	}
+	status, err := c.CheckoutSessions.GetStatus(ctx, session.UUID)
+	if err != nil || status.Status != qbitflow.CheckoutSessionStatusCreated {
+		t.Fatalf("GetStatus: %+v %v", status, err)
+	}
+
+	// Test mode caps the amount, fees included, at $5: $3.99 plus a $1.50 line is refused.
+	me, err := c.Me(ctx)
+	if err != nil {
+		t.Fatalf("Me: %v", err)
+	}
+	if me.Space != nil && me.Space.Test {
+		over := *params
+		over.Reference = "order-1044-cap-" + suffix()
+		over.Fees = &qbitflow.CheckoutFees{Items: []qbitflow.FeeItem{{Label: "Shipping", AmountUSD: 1.5}}}
+		s, err := c.CheckoutSessions.CreatePayment(ctx, &over)
+		if err == nil {
+			expire(s.UUID)
+			t.Fatalf("a $5.49 checkout was accepted in test mode: %+v", s)
+		}
+		var ve *qbitflow.ValidationError
+		if !errors.As(err, &ve) || ve.StatusCode != 400 {
+			t.Fatalf("over the test-mode cap: %v, want a 400 ValidationError", err)
+		}
 	}
 }
 

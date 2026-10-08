@@ -45,8 +45,12 @@ type WaitOptions struct {
 // give up on checkout.expired. SuccessURL and CancelURL may carry {{UUID}} and
 // {{TRANSACTION_TYPE}}, filled in on redirect.
 //
-// Errors: 400 validation_failed (test mode caps the price at $5, details.max; live mode needs
-// https URLs); 404 for an unknown product or customer; 409 merchant_not_ready
+// Fees (optional) adds lines to the price (a tax, shipping, QBitFlow's processing fee): the
+// customer pays the price plus every line (the session's and the payment's Amount), and the
+// network fee on top of that.
+//
+// Errors: 400 validation_failed (test mode caps the amount, fees included, at $5, details.max;
+// live mode needs https URLs); 404 for an unknown product or customer; 409 merchant_not_ready
 // (details.reason) when the space's wallets accept no currency.
 func (s *CheckoutSessionsService) CreatePayment(ctx context.Context, params *CreatePaymentSessionParams, opts ...RequestOption) (*CheckoutSession, error) {
 	if err := params.Validate(); err != nil {

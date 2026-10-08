@@ -94,6 +94,10 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 			return drop(c.Customers.Update(ctx, uuidA, &UpdateCustomerParams{PhoneNumber: ptr("call me")}))
 		}},
 		"Customers.List email": {"email", func() error { return drop(c.Customers.List(ctx, &CustomerListParams{Email: "x"})) }},
+		"CheckoutSessions.CreatePayment fee amount": {"fees.items[0].amountUsd", func() error {
+			return drop(c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
+				Fees: &CheckoutFees{Items: []FeeItem{{Label: "Shipping", AmountUSD: 4.999}}}}))
+		}},
 		"CheckoutSessions.CreatePayment mixed": {"productUuid", func() error {
 			return drop(c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, ProductReference: "pro"}))
 		}},

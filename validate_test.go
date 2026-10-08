@@ -3,6 +3,7 @@ package qbitflow
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -123,6 +124,63 @@ func TestRulePrice(t *testing.T) {
 	}
 	check(t, "update price", (&UpdateProductParams{Price: ptr(0.0)}).Validate(), "price")
 	check(t, "update no price", (&UpdateProductParams{}).Validate())
+}
+
+func TestRuleFees(t *testing.T) {
+	line := FeeItem{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75}
+	session := func(fees *CheckoutFees) *CreatePaymentSessionParams {
+		return &CreatePaymentSessionParams{ProductUUID: memberUUID, Fees: fees}
+	}
+	withItem := func(edit func(*FeeItem)) *CreatePaymentSessionParams {
+		item := line
+		edit(&item)
+		return session(&CheckoutFees{Items: []FeeItem{item}})
+	}
+	lines := func(n int) []FeeItem { return slices.Repeat([]FeeItem{line}, n) }
+
+	check(t, "no fees", session(nil).Validate())
+	check(t, "empty fees", session(&CheckoutFees{}).Validate())
+	check(t, "processing fee only", session(&CheckoutFees{ProcessingFee: ptr(true)}).Validate())
+	check(t, "processing fee off", session(&CheckoutFees{ProcessingFee: ptr(false), Items: lines(1)}).Validate())
+	check(t, "10 lines", session(&CheckoutFees{Items: lines(10)}).Validate())
+	check(t, "11 lines", session(&CheckoutFees{Items: lines(11)}).Validate(), "fees.items")
+	check(t, "11 lines, the last bad", session(&CheckoutFees{Items: append(lines(10), FeeItem{Label: "a|b", AmountUSD: 1})}).Validate(),
+		"fees.items", "fees.items[10].label")
+
+	// label: required, the name rule, 1 to 40 code points.
+	for _, label := range []string{"S", "VAT (20%)", strings.Repeat("l", 40), strings.Repeat("😀", 40), "Frais de port é"} {
+		check(t, "label "+label, withItem(func(i *FeeItem) { i.Label = label }).Validate())
+	}
+	for _, label := range []string{"", "   ", strings.Repeat("l", 41), strings.Repeat("😀", 41), "Ship\nping", "Ship\tping", "Ship|ping", "<b>", "bidi‮x"} {
+		check(t, "label "+label, withItem(func(i *FeeItem) { i.Label = label }).Validate(), "fees.items[0].label")
+	}
+
+	// description: optional, the text rule, at most 200.
+	for _, d := range []string{"", "x", strings.Repeat("d", 200), strings.Repeat("😀", 200), "Standard,\n\t3 to 5 days"} {
+		check(t, "description "+d, withItem(func(i *FeeItem) { i.Description = d }).Validate())
+	}
+	for _, d := range []string{"   ", strings.Repeat("d", 201), "nul\x00", "semi;colon", "{x}"} {
+		check(t, "description "+d, withItem(func(i *FeeItem) { i.Description = d }).Validate(), "fees.items[0].description")
+	}
+
+	// amountUsd: finite, above 0, at most 1,000,000, at most 2 decimals.
+	tenth, fifth := 0.1, 0.2
+	for _, a := range []float64{0.01, 0.75, 4.99, 19.9, 20, 1e2, 1_000_000} {
+		check(t, fmt.Sprint("amountUsd ", a), withItem(func(i *FeeItem) { i.AmountUSD = a }).Validate())
+	}
+	for _, a := range []float64{0, -1, -0.01, 0.001, 1.999, 1_000_000.01, 1_000_001, tenth + fifth, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		check(t, fmt.Sprint("amountUsd ", a), withItem(func(i *FeeItem) { i.AmountUSD = a }).Validate(), "fees.items[0].amountUsd")
+	}
+
+	// Every failing line is reported, by its index.
+	bad := session(&CheckoutFees{Items: []FeeItem{line, {Label: "", AmountUSD: 1}, {Label: "Tax", Description: " ", AmountUSD: 0}}})
+	check(t, "several lines", bad.Validate(), "fees.items[1].label", "fees.items[2].description", "fees.items[2].amountUsd")
+	err := withItem(func(i *FeeItem) { i.AmountUSD = 1.999 }).Validate()
+	if want := "fees.items[0].amountUsd must be an amount in USD above 0 and at most 1000000, with at most 2 decimals"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("message: %v", err)
+	}
+	// The fees and the session's own fields are reported together.
+	check(t, "fees and product", (&CreatePaymentSessionParams{Fees: &CheckoutFees{Items: lines(11)}}).Validate(), "productUuid", "fees.items")
 }
 
 func TestRulePercent(t *testing.T) {

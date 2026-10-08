@@ -32,7 +32,13 @@ var modelFixtures = map[string]struct {
 	"Payment": {`{"uuid":"pay@1",` + fxTransfer + `,"reference":"order-1","name":"Pro","description":"Lifetime","productUuid":"p-1",
 		"customerUuid":"c-1","customerReference":"crm-1","note":"thanks","customer":` + fxSummary + `,"metadata":` + fxMetadata + `,
 		"confirmedAt":"2026-10-01T11:59:58Z","paidMinUnits":"10004200","paidUsd":10.0042,"refund":` + fxRefundSm + `,"refundable":false,
-		"notRefundableReason":"refundExists","checkoutOpenedAt":"2026-10-01T11:00:00Z"}`, strict[Payment]},
+		"notRefundableReason":"refundExists","checkoutOpenedAt":"2026-10-01T11:00:00Z","price":8.5,
+		"fees":[{"type":"custom","label":"VAT (20%)","description":"French VAT","amountUsd":"1.30"},{"type":"processingFee","label":"Processing fee","amountUsd":"0.20"}]}`, strict[Payment]},
+	"PaymentSessionData": {`{"uuid":"pay@1","reference":"order-1044","productUuid":"p-1","productReference":"tshirt","productName":"T-shirt",
+		"description":"Blue, size M","price":3.99,"fees":[{"type":"custom","label":"Shipping","description":"Standard","amountUsd":"0.75"},
+		{"type":"processingFee","label":"Processing fee","amountUsd":"0.07"}],"amount":4.81,"successUrl":"https://x/ok","cancelUrl":"https://x/ko",
+		"redirectUrl":"https://x/thanks","organizationName":"Shop","userName":"Ada","test":true,"txType":"payment","availableCurrencyIds":[8],
+		"createdAt":"2026-10-01T12:00:00Z","expiresAt":"2026-10-01T13:00:00Z"}`, strict[PaymentSessionData]},
 	"Bill": {`{"uuid":"sub-hist@1",` + fxTransfer + `,"name":"Pro","description":"Monthly","productUuid":"p-1","subscriptionUuid":"sub@1",
 		"customerUuid":"c-1","customerReference":"crm-1","customer":` + fxSummary + `,"metadata":` + fxMetadata + `,
 		"periodStart":"2026-10-01T12:00:00Z","periodEnd":"2026-10-31T12:00:00Z","confirmedAt":"2026-10-01T11:59:58Z","paidMinUnits":"1",
@@ -170,6 +176,15 @@ func TestModelValues(t *testing.T) {
 		p.Metadata.OrganizationFee == nil || p.Metadata.OrganizationFee.FeePercent != 10 || *p.Metadata.TxAmounts.USD.Organization != 0.98 {
 		t.Errorf("payment %+v", p)
 	}
+	if p.Price != 8.5 || len(p.Fees) != 2 || p.Fees[0] != (FeeLine{Type: FeeLineTypeCustom, Label: "VAT (20%)", Description: "French VAT", AmountUSD: "1.30"}) ||
+		p.Fees[1] != (FeeLine{Type: FeeLineTypeProcessingFee, Label: "Processing fee", AmountUSD: "0.20"}) {
+		t.Errorf("payment price and fees %v %+v", p.Price, p.Fees)
+	}
+	v, _ = modelFixtures["PaymentSessionData"].decode([]byte(modelFixtures["PaymentSessionData"].json))
+	ps := v.(PaymentSessionData)
+	if ps.Amount == nil || *ps.Amount != 4.81 || *ps.Price != 3.99 || len(ps.Fees) != 2 || ps.Fees[1].Type != FeeLineTypeProcessingFee || ps.Fees[0].AmountUSD != "0.75" {
+		t.Errorf("session %+v", ps)
+	}
 	v, _ = modelFixtures["InvitationCreated"].decode([]byte(modelFixtures["InvitationCreated"].json))
 	inv := v.(InvitationCreated)
 	if inv.Invitation.Test != nil || inv.Invitation.TrustLayer != nil || inv.Invitation.Role != RoleAdmin || inv.Link == "" {
@@ -184,5 +199,38 @@ func TestModelValues(t *testing.T) {
 	m, err := decodeJSON[Member]([]byte(`{"organizationFeePercent":2,"acceptedCurrencyIds":[8.0]}`))
 	if err != nil || m.OrganizationFeePercent != 2 || m.AcceptedCurrencyIDs[0] != 8 {
 		t.Errorf("member %+v %v", m, err)
+	}
+}
+
+// TestModelFees decodes the checkout fees on a payment: price and fees (with and without),
+// a line without description, an unknown line type kept, a mistyped amountUsd refused.
+func TestModelFees(t *testing.T) {
+	// A payment recorded before checkout fees existed (or one without any): no fees.
+	old, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","amount":10,"price":10}`))
+	if err != nil || old.Price != 10 || old.Fees != nil {
+		t.Errorf("without fees: %+v %v", old, err)
+	}
+	absent, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","amount":10,"fees":null}`))
+	if err != nil || absent.Price != 0 || len(absent.Fees) != 0 {
+		t.Errorf("price absent, fees null: %+v %v", absent, err)
+	}
+	out, _ := json.Marshal(old)
+	if bytes.Contains(out, []byte(`"fees"`)) || !bytes.Contains(out, []byte(`"price":10`)) {
+		t.Errorf("encoded %s", out)
+	}
+
+	p, err := decodeJSON[Payment]([]byte(`{"amount":12.03,"price":10,"fees":[{"type":"tip","label":"Tip","amountUsd":"2"},` +
+		`{"type":"processingFee","label":"Processing fee","description":null,"amountUsd":"0.03"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Fees[0].Type != "tip" || p.Fees[0].AmountUSD != "2" || p.Fees[1].Description != "" || p.Fees[1].Type != FeeLineTypeProcessingFee {
+		t.Errorf("fees %+v", p.Fees)
+	}
+
+	for _, body := range []string{`{"fees":[{"amountUsd":2}]}`, `{"fees":{"type":"custom"}}`, `{"price":"10"}`, `{"fees":[{"type":1}]}`} {
+		if _, err := decodeJSON[Payment]([]byte(body)); err == nil {
+			t.Errorf("%s: decoded, want an error", body)
+		}
 	}
 }
