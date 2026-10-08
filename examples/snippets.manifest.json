@@ -1,12 +1,13 @@
 {
   "sdk": "go",
-  "catalog": "24c3d761ef71e3b16c7b550b93bdce05d9636c28",
+  "catalog": "f9eecb0441342a2f962621197a55097b965006da",
   "snippets": {
     "client-init": "examples/client/main.go",
     "client-on-behalf-of": "examples/marketplace/main.go",
     "config-from-env": "examples/client/main.go",
     "checkout-create-payment": "examples/checkout/main.go",
     "checkout-create-payment-product": "examples/catalog/main.go",
+    "checkout-create-payment-fees": "examples/checkout/main.go",
     "checkout-create-subscription": "examples/subscriptions/main.go",
     "checkout-status": "examples/checkout/main.go",
     "checkout-expire": "examples/checkout/main.go",

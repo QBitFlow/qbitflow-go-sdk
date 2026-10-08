@@ -90,6 +90,17 @@ but never published; its changes are part of 3.0.0).
     `Client.OnBehalfOf`: a client acting in a member's space, sharing the connections.
 -   `CheckoutSessions`: `CreatePayment`, `CreateSubscription` (with `ExpiresInMinutes` and the
     `{{UUID}}` / `{{TRANSACTION_TYPE}}` redirect placeholders), `GetStatus`, `Expire`.
+-   Checkout fees: `CreatePaymentSessionParams.Fees` (`*CheckoutFees`: up to 10 `FeeItem` lines
+    of your own, `Label`, `Description`, `AmountUSD`, and `ProcessingFee *bool`, which has the
+    customer pay QBitFlow's processing fee, grossed up so you keep the price and your lines;
+    `nil` follows the dashboard's `checkout.customerPaysProcessingFee` setting). The customer
+    pays the price plus every line, then the network fee on top; test mode caps that amount,
+    fees included, at $5. Validated before sending (at most 10 lines; `Label` the name rule, 1
+    to 40; `Description` the text rule, at most 200; `AmountUSD` above 0, at most 1,000,000, at
+    most 2 decimals), errors on `fees.items[i].<field>`. `Payment.Price` and `Payment.Fees`
+    (`Amount` = price + fees, also on `payment.completed`), `PaymentSessionData.Fees` and
+    `Amount` (`checkout.expired`), `FeeLine` (`AmountUSD` a decimal string) and the open enum
+    `FeeLineType` (`FeeLineTypeCustom`, `FeeLineTypeProcessingFee`).
 -   `Payments.List` / `ListCombined` with filters (customer, product, dates, `Refunded`,
     `IncludeMembers` / `UserUUID`, `Source`, `SubscriptionUUID`); `Payments.Get` with
     `ReadParams`. `Failures.List`: the failed payment attempts.
