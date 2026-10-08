@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
 )
 
 const BASE_URL = "/webhooks"

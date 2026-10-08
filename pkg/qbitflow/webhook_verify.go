@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
 )
 
 // DefaultMaxTimestampAge is how far a webhook's timestamp may be from the current clock
@@ -199,7 +199,8 @@ func verifyTimestamp(timestamp string, opts *VerifyOptions) error {
 	age := time.Duration(math.Abs(float64(opts.now().Unix()-ts))) * time.Second
 	if age > opts.maxAge() {
 		return qberrors.NewValidationError(
-			fmt.Sprintf("webhook timestamp expired: age %s exceeds the maximum of %s", age, opts.maxAge()))
+			fmt.Sprintf("webhook timestamp expired: age %s exceeds the maximum of %s", age, opts.maxAge()),
+		)
 	}
 
 	return nil
@@ -260,7 +261,8 @@ func VerifyWebhookRequest(r *http.Request, secret string, opts *VerifyOptions) (
 	headers := ExtractWebhookHeaders(r.Header)
 	if headers.Signature == "" || headers.Timestamp == "" {
 		return nil, qberrors.NewValidationError(
-			fmt.Sprintf("missing webhook headers: %s and %s are both required", HeaderSignature, HeaderTimestamp))
+			fmt.Sprintf("missing webhook headers: %s and %s are both required", HeaderSignature, HeaderTimestamp),
+		)
 	}
 
 	if err := VerifyWebhookSignature(secret, headers.Timestamp, headers.Signature, body, opts); err != nil {

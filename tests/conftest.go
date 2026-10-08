@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 )
 
 func getTestCustomerData() *qbf.CreateCustomer {

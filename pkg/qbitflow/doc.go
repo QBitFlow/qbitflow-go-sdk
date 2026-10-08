@@ -6,7 +6,7 @@
 //
 // # Installation
 //
-//	go get "github.com/QBitFlow/qbitflow-go-sdk/v2
+//	go get "github.com/QBitFlow/qbitflow-go-sdk/v3
 //
 // # Quick Start
 //
@@ -15,8 +15,8 @@
 //	import (
 //	    "fmt"
 //	    "log"
-//	    "github.com/QBitFlow/qbitflow-go-sdk/v2"
-//		"github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+//	    "github.com/QBitFlow/qbitflow-go-sdk/v3"
+//		"github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 //	)
 //
 //	func main() {
@@ -64,7 +64,7 @@
 //
 // Example:
 //
-//	import qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
+//	import qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
 //
 //	payment, err := client.Payments.GetPayment("invalid-uuid")
 //	if err != nil {

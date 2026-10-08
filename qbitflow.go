@@ -1,7 +1,7 @@
 package qbitflow
 
 import (
-	qbf "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/qbitflow"
+	qbf "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/qbitflow"
 )
 
 // QBitFlow is the main SDK client providing access to all API services.

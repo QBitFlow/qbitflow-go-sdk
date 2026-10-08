@@ -7,7 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v2/pkg/errors"
+	qberrors "github.com/QBitFlow/qbitflow-go-sdk/v3/pkg/errors"
 )
 
 // productTextDisallowed mirrors the API's `producttext` validator: characters commonly
@@ -55,17 +55,20 @@ func validateProductText(field, value string, min, max int) error {
 	// Length is counted in runes, matching the server's min/max on multi-byte text.
 	if n := utf8.RuneCountInString(value); n < min || n > max {
 		return qberrors.NewValidationError(
-			fmt.Sprintf("%s must be between %d and %d characters", field, min, max))
+			fmt.Sprintf("%s must be between %d and %d characters", field, min, max),
+		)
 	}
 
 	for _, r := range value {
 		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
 			return qberrors.NewValidationError(
-				fmt.Sprintf("%s must not contain control characters", field))
+				fmt.Sprintf("%s must not contain control characters", field),
+			)
 		}
 		if strings.ContainsRune(productTextDisallowed, r) {
 			return qberrors.NewValidationError(
-				fmt.Sprintf("%s must not contain the character %q", field, r))
+				fmt.Sprintf("%s must not contain the character %q", field, r),
+			)
 		}
 	}
 
@@ -86,7 +89,8 @@ func validateRedirectURL(field, value string) error {
 
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return qberrors.NewValidationError(
-			fmt.Sprintf("%s must be an absolute http:// or https:// URL", field))
+			fmt.Sprintf("%s must be an absolute http:// or https:// URL", field),
+		)
 	}
 
 	if parsed.Host == "" {
