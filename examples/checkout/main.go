@@ -1,5 +1,6 @@
 // Command checkout opens a one-time payment checkout session, reads its status, waits for the
-// customer for a while, and expires it if they did not pay.
+// customer for a while, and expires it if they did not pay. It first opens (and expires) a
+// checkout that adds fees to the price.
 //
 //	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] go run ./examples/checkout
 //
@@ -22,6 +23,8 @@ func main() {
 	client := newClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+
+	checkoutWithFees(ctx, client)
 
 	// docs:start checkout-create-payment
 	// An inline product: no product needed in the catalog. QBitFlow replaces {{UUID}}
@@ -67,6 +70,40 @@ func main() {
 		return
 	}
 	waitThenExpire(ctx, client, sessionUUID)
+}
+
+// checkoutWithFees opens a checkout that adds a shipping line and the processing fee to the
+// price, then expires it: a demo nobody pays.
+func checkoutWithFees(ctx context.Context, client *qbitflow.Client) {
+	// docs:start checkout-create-payment-fees
+	// The customer pays the price plus every line: $3.99 + $0.75 + the processing fee. You
+	// keep the price and your lines. Test mode caps the total, fees included, at $5.
+	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+		ProductName: "T-shirt",
+		Description: "Blue, size M",
+		Price:       3.99,
+		Reference:   "order-1044",
+		SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
+		CancelURL:   "https://shop.example.com/orders/cancel",
+		Fees: &qbitflow.CheckoutFees{
+			Items: []qbitflow.FeeItem{
+				{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75},
+			},
+			// QBitFlow's processing fee, grossed up so you keep the price and your lines.
+			// Left nil, your checkout.customerPaysProcessingFee setting decides.
+			ProcessingFee: new(true),
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Redirect the customer to", session.Link)
+	// docs:end checkout-create-payment-fees
+
+	// A demo: nobody pays it.
+	if _, err := client.CheckoutSessions.Expire(ctx, session.UUID); err != nil {
+		log.Fatal(err)
+	}
 }
 
 // waitThenExpire waits a little for the customer, and expires the session if they did not pay.

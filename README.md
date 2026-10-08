@@ -402,8 +402,62 @@ fmt.Println("Redirect the customer to", session.Link)
   webhook, or on `GetStatus`.
 - **Errors to expect:** `409 merchant_not_ready` (`Details["reason"]`) when the space's wallets
   accept no currency; `409 unique_violation` when another payment or open session holds the
-  `Reference`; `400 validation_failed` above 5 USD in test mode (`Details["max"]`); `404` for an
-  unknown product or customer.
+  `Reference`; `400 validation_failed` above 5 USD in test mode, fees included (`Details["max"]`);
+  `404` for an unknown product or customer.
+
+### Fees
+
+A payment checkout can add amounts to the price (a tax, shipping, a service fee) and have the
+customer pay QBitFlow's processing fee. The customer sees each line on the checkout page and pays
+them with the price:
+
+<!-- docs:snippet checkout-create-payment-fees -->
+```go
+// The customer pays the price plus every line: $3.99 + $0.75 + the processing fee. You
+// keep the price and your lines. Test mode caps the total, fees included, at $5.
+session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
+	ProductName: "T-shirt",
+	Description: "Blue, size M",
+	Price:       3.99,
+	Reference:   "order-1044",
+	SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
+	CancelURL:   "https://shop.example.com/orders/cancel",
+	Fees: &qbitflow.CheckoutFees{
+		Items: []qbitflow.FeeItem{
+			{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75},
+		},
+		// QBitFlow's processing fee, grossed up so you keep the price and your lines.
+		// Left nil, your checkout.customerPaysProcessingFee setting decides.
+		ProcessingFee: new(true),
+	},
+})
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println("Redirect the customer to", session.Link)
+```
+<!-- /docs:snippet -->
+
+- **Your lines** (`Fees.Items`, at most 10, shown in this order): `Label` (one line, 1 to 40
+  characters), `Description` (optional, at most 200) and `AmountUSD` (above 0, at most 1,000,000,
+  at most 2 decimals). The SDK checks them before sending: a bad line fails with a
+  `*qbitflow.ValidationError` on its path (`fees.items[0].amountUsd`), 11 lines on `fees.items`.
+- **The processing fee** (`ProcessingFee: new(true)`) is a last line, "Processing fee", that
+  QBitFlow computes on the price and your lines at your platform fee, grossed up (its own fee is
+  taken on it too) and rounded up to the cent, so you keep at least the price and your lines, as
+  if no fee were taken: $100 + $20 VAT at 1.5 % adds $1.83, the customer pays $121.83 and you
+  keep $120.00.
+  Left `nil`, the space's `checkout.customerPaysProcessingFee` setting decides (off by default;
+  set it in the dashboard, members may set their own); `false` turns it off for this checkout,
+  and product payment links follow the setting.
+- **What is charged** is the price plus every line: the session's and the payment's `Amount`,
+  which the contracts split (QBitFlow's fee, and a marketplace's organization fee, are taken on
+  it). The network fee is paid on top of `Amount`, by the customer's wallet. Test mode caps
+  `Amount`, fees included, at 5 USD (`400 validation_failed` on `fees`).
+- **Afterwards**, the `Payment` has `Price`, `Fees` (the lines as the customer saw them: `Type`
+  `custom` or `processingFee`, `Label`, `Description`, `AmountUSD` as a decimal string) and
+  `Amount`; `checkout.expired` sends the session with `Fees` and `Amount`. Subscription checkouts
+  take no fees.
 
 ### Status
 
@@ -585,6 +639,12 @@ fmt.Println("order-1042 was paid by", byReference.UUID)
 
 A payment carries its transaction (`TxHash`, `ExplorerURL`), what each party got
 (`Metadata.TxAmounts`), and whether it can be refunded (`Refundable`).
+
+- **The amounts:** `Amount` is what the customer paid in USD: `Price` (the product's price at the
+  checkout) plus every line of `Fees` (the [checkout's fees](#fees), each with its
+  `AmountUSD` as a decimal string). It is what the contracts split; the network fee the customer
+  paid on top is not in it (`PaidUSD` includes it). A payment without fees, or recorded before
+  fees existed, has `Price` equal to `Amount` and no `Fees`.
 
 - **Filters** (`PaymentListParams`): `CustomerUUID`, `ProductUUID`, `CreatedAfter` / `CreatedBefore`
   (both excluded), `Refunded`, and, with an organization key acting for itself, `IncludeMembers`
@@ -1389,7 +1449,7 @@ Runnable programs in [`examples/`](examples) (`QBITFLOW_API_KEY=sk_… go run ./
 | Example | Shows | Environment (besides `QBITFLOW_API_KEY`, `QBITFLOW_BASE_URL`) |
 |---|---|---|
 | [`client`](examples/client) | a client from a key and `Me`, a client from the environment | `QBITFLOW_ON_BEHALF_OF` |
-| [`checkout`](examples/checkout) | a payment checkout, its status, `WaitForCompletion`, expiry | |
+| [`checkout`](examples/checkout) | a payment checkout (and one with fees), its status, `WaitForCompletion`, expiry | |
 | [`catalog`](examples/catalog) | a product, the products, a checkout for a product, a page of customers | |
 | [`payments`](examples/payments) | a filtered page of payments, the iterator, exact amounts, a payment by id and by reference | `PAYMENT_UUID` |
 | [`refunds`](examples/refunds) | the active refunds, a partial refund | `PAYMENT_UUID` |

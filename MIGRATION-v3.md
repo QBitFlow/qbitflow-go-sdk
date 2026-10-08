@@ -95,7 +95,7 @@ context cancels the request and any wait between retries.
 
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
-| `Payments.CreateSession(*qbf.CreateSessionOptions)` | `CheckoutSessions.CreatePayment(*CreatePaymentSessionParams)` | plain values instead of pointers; `ProductID` → `ProductUUID`; new `ExpiresInMinutes`; returns `*CheckoutSession` (`UUID`, `Link`, `ExpiresAt`) |
+| `Payments.CreateSession(*qbf.CreateSessionOptions)` | `CheckoutSessions.CreatePayment(*CreatePaymentSessionParams)` | plain values instead of pointers; `ProductID` → `ProductUUID`; new `ExpiresInMinutes` and `Fees`; returns `*CheckoutSession` (`UUID`, `Link`, `ExpiresAt`) |
 | `Subscriptions.CreateSession(*qbf.CreateSubscriptionSessionOptions)` | `CheckoutSessions.CreateSubscription(*CreateSubscriptionSessionParams)` | `Frequency`/`TrialPeriod` are `*Duration`, `MinPeriods` `*uint32`, each optional over a subscription product's terms |
 | `TransactionStatus.GetTransactionStatus(uuid, txType)` | `CheckoutSessions.GetStatus(uuid)` | no type argument; four statuses (§ 9) |
 | `TransactionStatus.GetTransactionStatusWSURL(…)` | removed | the WebSocket is the checkout page's: use webhooks, or poll `GetStatus` |
@@ -252,7 +252,7 @@ Fee rates are **percents** now, everywhere: `FeeBps: 150` → `FeePercent: 1.5`,
 | `LinkResponse` | `CheckoutSession` | + `ExpiresAt` |
 | `TransactionStatus` | `CheckoutSessionStatus` | `Status` is a `CheckoutSessionStatusValue`; + `UUID`, `TxHash`, `Message`, `LastAttempt` |
 | `SessionCheckout` | removed | `PaymentSessionData` / `SubscriptionSessionData` in `checkout.expired` |
-| `Payment` | `Payment` | `TransactionHash` → `TxHash`; `ProductID *uint64` → `ProductUUID string`; `Reference *string` → `string`; `Currency` → `*Currency`; `Metadata *PaymentMetadata` → `PaymentMetadata`; `UserID` → `UserUUID`; `CustomerUUID` kept; + `Chain`, `ExplorerURL`, `CustomerReference`, `Customer`, `Refund`, `Refundable`, `PaidMinUnits`, `PaidUSD`, `ConfirmedAt` |
+| `Payment` | `Payment` | `TransactionHash` → `TxHash`; `ProductID *uint64` → `ProductUUID string`; `Reference *string` → `string`; `Currency` → `*Currency`; `Metadata *PaymentMetadata` → `PaymentMetadata`; `UserID` → `UserUUID`; `CustomerUUID` kept; + `Chain`, `ExplorerURL`, `CustomerReference`, `Customer`, `Refund`, `Refundable`, `PaidMinUnits`, `PaidUSD`, `ConfirmedAt`, `Price`, `Fees` |
 | `CombinedPayment` | `CombinedPayment` | `Source` is a `CombinedPaymentSource` (`subscription_history` → `subscriptionHistory`); `SubscriptionUUID *string` → `string`; + `Currency`, `Refund`, `Reference`, `SubscriptionReference` |
 | `Subscription` | `Subscription` | `SubscriptionStatus` → `Status`; `Stopped bool` → the status `stopped`; `Frequency uint32` (seconds) → `Duration`; `ProductID` → `ProductUUID`; `Reference *string` → `string`; `LastBillingDate *time.Time` → `time.Time`; `NextBillingDate time.Time` → `*time.Time` (nil once cancelled); `Currency` → `*Currency`; + `CurrentPeriodEnd`, `ActionRequired`, `PriceUSD`, `MaxAmountPerPeriod`, `CancelledAt`, `CancellationReason`, `CustomerReference`, `Customer`, `Dunning` |
 | `SubscriptionHistory` | `Bill` | the `Payment` renames; + `PeriodStart`, `PeriodEnd` |
