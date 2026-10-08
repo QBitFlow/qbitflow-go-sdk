@@ -79,30 +79,31 @@
 //
 // # Webhooks
 //
-// Deliveries are verified without a client: [VerifyWebhookRequest] (net/http), [VerifyWebhook]
-// and [ConstructEvent] check the QBitFlow-Signature header over the raw body, accepting either
-// signature during a secret rotation; [ParseEvent] parses the [Event], whose typed accessors
-// decode its data. Deliveries are at least once: deduplicate on Event.ID, and answer 2xx to
-// every event, the ignored ones too.
+// A [WebhookRouter] verifies each delivery (the QBitFlow-Signature header over the raw body,
+// either secret during a rotation), parses the [Event], runs the handler registered for its
+// type with the typed data, and answers QBitFlow: 200, 400 for a bad delivery, 500 when a
+// handler returns an error (QBitFlow retries it). It is an [http.Handler]. Deliveries are at
+// least once: deduplicate on Event.ID.
 //
-//	func handle(w http.ResponseWriter, r *http.Request) {
-//		body, err := qbitflow.VerifyWebhookRequest(r, os.Getenv("QBITFLOW_WEBHOOK_SECRET"))
-//		if err != nil {
-//			http.Error(w, "invalid signature", http.StatusBadRequest)
-//			return
-//		}
-//		event, err := qbitflow.ParseEvent(body)
-//		if err != nil {
-//			http.Error(w, "not a v2 event", http.StatusBadRequest)
-//			return
-//		}
-//		if event.Type == qbitflow.EventTypePaymentCompleted {
-//			if payment, err := event.PaymentCompleted(); err == nil {
-//				log.Println("fulfil", payment.Reference)
-//			}
-//		}
-//		w.WriteHeader(http.StatusOK)
-//	}
+//	router := qbitflow.NewWebhookRouter(os.Getenv("QBITFLOW_WEBHOOK_SECRET")).
+//		OnPaymentCompleted(func(ctx context.Context, p *qbitflow.PaymentCompleted, e *qbitflow.Event) error {
+//			log.Println("fulfil", p.Reference, "once for", e.ID)
+//			return nil
+//		})
+//	http.Handle("POST /webhooks/qbitflow", router)
+//
+// Lower level, without a client: [VerifyWebhookRequest] (net/http), [VerifyWebhook] and
+// [ConstructEvent] check the signature, [ParseEvent] parses a verified body, and the event's
+// typed accessors decode its data. [SignWebhook] signs a body as QBitFlow does, for tests.
+//
+// # Integration helpers
+//
+// [CheckoutSessionsService.WaitForCompletion] polls a checkout until it is final (scripts,
+// tests); [Subscription.HasAccess] says whether a subscription grants access at a time;
+// [FormatAmount], [ParseAmount] and [Currency.FormatAmount] convert token amounts exactly;
+// [AccountingService.ExportJSONRange] and [AccountingService.ExportCSVRange] export any range
+// in windows of 95 days; [NewClientFromEnv] reads the key and base URL from the environment;
+// [PlaceholderUUID] and [PlaceholderTransactionType] are the redirect placeholders.
 //
 // The README (https://github.com/QBitFlow/qbitflow-go-sdk) covers every service, and
 // MIGRATION-v3.md the move from 2.x.

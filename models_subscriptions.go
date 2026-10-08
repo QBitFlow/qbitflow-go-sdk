@@ -71,6 +71,19 @@ type Subscription struct {
 	Dunning *DunningStatus `json:"dunning,omitempty"`
 }
 
+// HasAccess reports whether the subscription grants access at at: CurrentPeriodEnd is set and
+// at is before it, whatever the status (a cancelled subscription keeps access to the end of the
+// period paid for). The zero time means now; a nil subscription has no access.
+func (s *Subscription) HasAccess(at time.Time) bool {
+	if s == nil || s.CurrentPeriodEnd == nil {
+		return false
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return at.Before(*s.CurrentPeriodEnd)
+}
+
 // DunningStatus is a past-due subscription's retries.
 type DunningStatus struct {
 	// FailedAttempts is the bill's failed attempts so far.

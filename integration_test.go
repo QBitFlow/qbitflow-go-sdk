@@ -314,6 +314,12 @@ func TestLiveWritesCheckout(t *testing.T) {
 	if err != nil || expired.Status != qbitflow.CheckoutSessionStatusExpired {
 		t.Fatalf("Expire: %+v %v", expired, err)
 	}
+
+	// H3: an expired session is final, so WaitForCompletion answers at its first poll.
+	waited, err := c.CheckoutSessions.WaitForCompletion(ctx, session.UUID, &qbitflow.WaitOptions{Timeout: 10 * time.Second, Interval: time.Second})
+	if err != nil || waited.Status != qbitflow.CheckoutSessionStatusExpired {
+		t.Fatalf("WaitForCompletion: %+v %v", waited, err)
+	}
 }
 
 func TestLiveWritesWebhookEndpoint(t *testing.T) {
@@ -328,6 +334,23 @@ func TestLiveWritesWebhookEndpoint(t *testing.T) {
 	cleanup(t, "webhook endpoint", func(ctx context.Context) error { return c.Webhooks.Endpoints.Delete(ctx, created.UUID) })
 	if created.Secret == "" {
 		t.Error("no secret on create")
+	}
+
+	// H1/H2: a delivery signed with SignWebhook passes the API's own check (VerifyRemote) and
+	// the router answers it 200 after running its handler. Nothing is written.
+	body := []byte(`{"createdAt":"` + time.Now().UTC().Format(time.RFC3339) + `","data":{"endpointUuid":"` + created.UUID +
+		`","message":"Go SDK router check"},"id":"evt_` + created.UUID + `","test":true,"type":"webhook.test","version":"v2"}`)
+	header := qbitflow.SignWebhook(body, created.Secret, time.Now())
+	if err := c.Webhooks.VerifyRemote(ctx, created.UUID, body, header); err != nil {
+		t.Fatalf("VerifyRemote of a SignWebhook header: %v", err)
+	}
+	handled := false
+	router := qbitflow.NewWebhookRouter(created.Secret).OnWebhookTest(func(_ context.Context, data *qbitflow.WebhookTest, _ *qbitflow.Event) error {
+		handled = data.EndpointUUID == created.UUID
+		return nil
+	})
+	if res := router.Handle(ctx, body, header); res.Status != 200 || !handled {
+		t.Fatalf("router: %+v (handled %v)", res, handled)
 	}
 
 	got, err := c.Webhooks.Endpoints.Get(ctx, created.UUID)
