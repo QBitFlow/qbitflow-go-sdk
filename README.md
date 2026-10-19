@@ -407,9 +407,9 @@ fmt.Println("Redirect the customer to", session.Link)
 
 ### Fees
 
-A payment checkout can add amounts to the price (a tax, shipping, a service fee) and have the
-customer pay QBitFlow's processing fee. The customer sees each line on the checkout page and pays
-them with the price:
+A checkout, a payment's or a subscription's, can add amounts to the price (a tax, shipping, a
+service fee) and have the customer pay QBitFlow's processing fee. The customer sees each line on
+the checkout page and pays them with the price (a subscription: with every bill):
 
 <!-- docs:snippet checkout-create-payment-fees -->
 ```go
@@ -445,8 +445,9 @@ fmt.Println("Redirect the customer to", session.Link)
 - **The processing fee** (`ProcessingFee: new(true)`) is a last line, "Processing fee", that
   QBitFlow computes on the price and your lines at your platform fee, grossed up (its own fee is
   taken on it too) and rounded up to the cent, so you keep at least the price and your lines, as
-  if no fee were taken: $100 + $20 VAT at 1.5 % adds $1.83, the customer pays $121.83 and you
-  keep $120.00.
+  if no fee were taken: $100 + $20 VAT at 0.99 % adds $1.20, the customer pays $121.20 and you
+  keep $120.00. The rate is the checkout's: QBitFlow's fee for your space when the checkout is
+  created (a schedule by volume, unless QBitFlow set you a custom rate).
   Left `nil`, the space's `checkout.customerPaysProcessingFee` setting decides (off by default;
   set it in the dashboard, members may set their own); `false` turns it off for this checkout,
   and product payment links follow the setting.
@@ -456,8 +457,14 @@ fmt.Println("Redirect the customer to", session.Link)
   `Amount`, fees included, at 5 USD (`400 validation_failed` on `fees`).
 - **Afterwards**, the `Payment` has `Price`, `Fees` (the lines as the customer saw them: `Type`
   `custom` or `processingFee`, `Label`, `Description`, `AmountUSD` as a decimal string) and
-  `Amount`; `checkout.expired` sends the session with `Fees` and `Amount`. Subscription checkouts
-  take no fees.
+  `Amount`; `checkout.expired` sends the session with `Fees` and `Amount`.
+- **Subscriptions** take the same `Fees` (`CreateSubscriptionSessionParams.Fees`, the same rules),
+  locked with the price: every bill, the first one and each next one, charges the price plus every
+  line, whatever the product's price or your fee becomes. The `Subscription` keeps them as `Fees`
+  next to `PriceUSD` (which stays the price); a bill's `Amount` and `subscription.upcomingBill`'s
+  `AmountUSD` include them, and the maximum and allowance the subscriber signs are sized on that
+  amount. A trial's upgrade keeps the trial's lines. `checkout.customerPaysProcessingFee` applies
+  to subscription checkouts too.
 
 ### Status
 
@@ -520,7 +527,10 @@ fmt.Println(expired.Status) // expired; checkout.expired follows
 Products are optional (a checkout can name an inline product) and give you a reusable catalog
 with payment links. The reference is generated when `""`. A subscription product carries its
 terms: `Subscription: &qbitflow.SubscriptionTermsParams{Frequency: &qbitflow.Duration{Value: 1,
-Unit: qbitflow.DurationUnitMonths}}`.
+Unit: qbitflow.DurationUnitMonths}}`. A member's key gives a product terms (on `Create` or
+`Update`) only while the organization's `members.subscriptions` policy allows it (`403
+policy_disabled` otherwise); with the policy off, the links of the member's subscription products
+open nothing.
 
 <!-- docs:snippet products-create -->
 ```go
@@ -1003,8 +1013,25 @@ export** and answers 400 beyond. `ExportJSONRange` and `ExportCSVRange` take any
 it into consecutive windows of at most 95 days (`[from, from+95d]`, the next one starting the day
 after, on calendar dates), request them in order and return the events joined (for CSV, the first
 window's header line once, then every window's rows). A range of 95 days or less is one request. Rows are typed `payment`,
-`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`; amounts in a token's smallest
-unit are decimal strings, and the empty fields of a row are left out.
+`subscriptionHistory`, `refund`, `organizationFee` or `referralFee`, and the empty fields of a row
+are left out.
+
+- **Dates** are the transactions' (the day their block was mined, in UTC: `TxTimeUTC`), so
+  consecutive exports never miss nor repeat an event. Rows are ordered by `TxTimeUTC`, `Type`,
+  then `PaymentUUID`.
+- **Amounts** are in the currency's units (`"7.5"` USDC, not `7500000`), as decimal strings, next
+  to `CurrencyDecimals`. `Currency` names what was paid as markets do (`USDC`, or the chain's
+  native currency: `ETH`, `SOL`), and `CurrencyPriceUSD` is the USD price the amounts were
+  converted at. `GrossAmount = PlatformFee + OrganizationFee + NetAmount` exactly; a refund's net
+  is the refunded amount, negative.
+- **Network fees are never part of the net.** `NetworkFeesPaidBy` says whose wallet paid them:
+  `payer` (a payment or a bill: on top of the amount, in its currency), `merchant` (a refund your
+  space sent) or `organization` (a refund of a payment the organization held for its member). Book
+  `NetworkFees` (in `NetworkFeesCurrency`, the chain's native currency on a refund) apart for
+  `merchant` and `organization`.
+- **CSV columns** follow `AccountingEvent`'s field order (what happened, the USD amounts, the
+  same amounts in the currency, the network fees, the rates, the on-chain proof, the ids): read
+  them by header name, not position.
 
 ## Webhooks
 

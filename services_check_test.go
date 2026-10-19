@@ -98,6 +98,10 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 			return drop(c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
 				Fees: &CheckoutFees{Items: []FeeItem{{Label: "Shipping", AmountUSD: 4.999}}}}))
 		}},
+		"CheckoutSessions.CreateSubscription fee label": {"fees.items[0].label", func() error {
+			return drop(c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductUUID: uuidA,
+				Fees: &CheckoutFees{Items: []FeeItem{{Label: "", AmountUSD: 2}}}}))
+		}},
 		"CheckoutSessions.CreatePayment mixed": {"productUuid", func() error {
 			return drop(c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, ProductReference: "pro"}))
 		}},

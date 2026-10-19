@@ -46,12 +46,12 @@ type PaymentSessionData struct {
 	Description string `json:"description,omitempty"`
 	// Price is the product's price in USD.
 	Price *float64 `json:"price,omitempty"`
-	// Fees is what a payment checkout adds to the price, line by line, in the order the checkout
-	// shows them: the merchant's lines, then the processing fee (when the customer pays it).
-	// Empty without any, and always on a subscription session.
+	// Fees is what the checkout adds to the price, line by line, in the order the checkout shows
+	// them: the merchant's lines, then the processing fee (when the customer pays it). A
+	// subscription's are charged with every bill. Empty without any.
 	Fees []FeeLine `json:"fees,omitempty"`
 	// Amount is what the customer pays in USD before the network fee: Price plus every line of
-	// Fees (the payment's Amount). The network fee comes on top. nil on a subscription session.
+	// Fees (the payment's Amount, or each bill's of a subscription). The network fee comes on top.
 	Amount *float64 `json:"amount,omitempty"`
 	// SuccessURL is where the customer goes after paying (placeholders filled).
 	SuccessURL string `json:"successUrl,omitempty"`
@@ -125,15 +125,18 @@ type CreatePaymentSessionParams struct {
 	Fees *CheckoutFees `json:"fees,omitempty"`
 }
 
-// CheckoutFees is what a one-time payment's checkout adds to its price
-// (CreatePaymentSessionParams.Fees). Subscription checkouts take no fees.
+// CheckoutFees is what a checkout adds to its price: a one-time payment's
+// (CreatePaymentSessionParams.Fees), or a subscription's (CreateSubscriptionSessionParams.Fees,
+// each of its bills then charging the price and the same lines).
 type CheckoutFees struct {
 	// ProcessingFee has the customer pay QBitFlow's processing fee on top: a last line
 	// {Type: processingFee, Label: "Processing fee"}, computed by QBitFlow on the price and your
 	// lines at your platform fee p (never below 0.5 %) as base × p / (1 − p), rounded up to the
 	// cent. QBitFlow's fee is also taken on that line, so this gross-up leaves you at least the
-	// price and your lines, as if no fee were taken ($100 + $20 VAT at 1.5 % → a $1.83 fee,
-	// $121.83 charged, $120.00 kept). A marketplace's organization fee is not passed on.
+	// price and your lines, as if no fee were taken ($100 + $20 VAT at 0.99 % → a $1.20 fee,
+	// $121.20 charged, $120.00 kept). p is the checkout's rate: QBitFlow's fee for your space
+	// when the checkout is created (a volume schedule unless QBitFlow set you a custom rate). A
+	// marketplace's organization fee is not passed on.
 	// nil: the space's checkout.customerPaysProcessingFee setting decides (off by default; set
 	// in the dashboard); false turns it off for this checkout.
 	ProcessingFee *bool `json:"processingFee,omitempty"`
@@ -262,9 +265,17 @@ type CreateSubscriptionSessionParams struct {
 	TrialPeriod *Duration `json:"trialPeriod,omitempty"`
 	// MinPeriods is the periods the customer commits to before cancelling, at most 1000 (0: none).
 	MinPeriods *uint32 `json:"minPeriods,omitempty"`
+
+	// Fees adds amounts to the price (a tax, shipping, QBitFlow's processing fee), shown to the
+	// customer line by line and locked with the price: every bill (the first one, at creation,
+	// and each next one) charges the price plus every line; nil for none. The subscription keeps
+	// them as Subscription.Fees, its PriceUSD staying the price. The maximum per period and the
+	// allowance the subscriber signs are sized on that amount, and QBitFlow's fee is taken on it.
+	// The test-mode cap ($5) applies to that amount, fees included (400 validation_failed on fees).
+	Fees *CheckoutFees `json:"fees,omitempty"`
 }
 
-// Validate checks the params: the payment session's rules plus the terms.
+// Validate checks the params: the payment session's rules, the terms, then the fees.
 func (p *CreateSubscriptionSessionParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -279,5 +290,6 @@ func (p *CreateSubscriptionSessionParams) Validate() error {
 	session.validate(&v)
 	terms := SubscriptionTermsParams{Frequency: p.Frequency, TrialPeriod: p.TrialPeriod, MinPeriods: p.MinPeriods}
 	terms.validate(&v, "", false)
+	p.Fees.validate(&v, "fees")
 	return v.err()
 }

@@ -231,6 +231,17 @@ const (
 	AccountingEventTypeReferralFee         AccountingEventType = "referralFee"
 )
 
+// NetworkFeesPayer is whose wallet paid an accounting event's network fees
+// (AccountingEvent.NetworkFeesPaidBy).
+type NetworkFeesPayer string
+
+// Network fees payers.
+const (
+	NetworkFeesPaidByPayer        NetworkFeesPayer = "payer"        // A payment or a bill: the payer, on top of the amount
+	NetworkFeesPaidByMerchant     NetworkFeesPayer = "merchant"     // A refund the space sent from its wallet
+	NetworkFeesPaidByOrganization NetworkFeesPayer = "organization" // A refund of a payment the organization held for its member, sent from the organization's wallet
+)
+
 // InvitationStatus is an invitation's status (computed when read).
 type InvitationStatus string
 

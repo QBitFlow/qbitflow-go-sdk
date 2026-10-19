@@ -66,9 +66,15 @@ func (s *CheckoutSessionsService) CreatePayment(ctx context.Context, params *Cre
 // id and its expiry. It sends an Idempotency-Key and is retried on transient failures.
 //
 // The Subscription exists, with the same id, once the customer signed (a free trial) or paid:
-// act on subscription.created. Terms left unset come from a subscription product. Errors as
-// CreatePayment, plus 400 on frequency / trialPeriod (the frequency minimum is 1 hour live, 5
-// minutes test); a member's key needs the members.subscriptions policy (403 policy_disabled).
+// act on subscription.created. Terms left unset come from a subscription product.
+//
+// Fees (optional) adds lines to the price, as for CreatePayment, locked with it: every bill
+// charges the price plus every line (the session's Amount, the Subscription's PriceUSD plus
+// Fees), and the network fee on top of that.
+//
+// Errors as CreatePayment, plus 400 on frequency / trialPeriod (the frequency minimum is 1 hour
+// live, 5 minutes test); a member's key needs the members.subscriptions policy (403
+// policy_disabled).
 func (s *CheckoutSessionsService) CreateSubscription(ctx context.Context, params *CreateSubscriptionSessionParams, opts ...RequestOption) (*CheckoutSession, error) {
 	if err := params.Validate(); err != nil {
 		return nil, err

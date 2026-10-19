@@ -79,9 +79,10 @@ func TestEventPaymentCompleted(t *testing.T) {
 		t.Errorf("currency %+v", p.Currency)
 	}
 	m := p.Metadata
-	if m.FeePercent != 1.5 || m.TxAmounts.MinUnits.Merchant != "9850000" || m.TxAmounts.MinUnits.NetworkFee != "4200" ||
-		m.TxAmounts.USD.Merchant != 9.85 || m.TxAmounts.USD.Organization != nil || m.TxAmounts.USD.NetworkFee == nil ||
-		m.TxMetadata.BlockData.Timestamp != 1790855998 || m.TxMetadata.NetworkFees.UnitsConsumed != 95000 || m.OrganizationFee != nil {
+	if m.FeePercent != 0.99 || m.TxAmounts.MinUnits.Merchant != "9901000" || m.TxAmounts.MinUnits.NetworkFee != "4200" ||
+		m.TxAmounts.USD.Merchant != 9.901 || m.TxAmounts.USD.Organization != nil || m.TxAmounts.USD.NetworkFee == nil ||
+		m.TxMetadata.BlockData.Timestamp != 1790855998 || m.TxMetadata.NetworkFees.UnitsConsumed != 95000 || m.OrganizationFee != nil ||
+		m.TxMetadata.MainCurrencyPriceUSD == nil || *m.TxMetadata.MainCurrencyPriceUSD != 4512.37 {
 		t.Errorf("metadata %+v", m)
 	}
 	// Webhooks never carry the API-only fields.
@@ -203,7 +204,7 @@ func TestEventMembersAndFunds(t *testing.T) {
 		t.Errorf("released %+v", released)
 	}
 	first := released.Ledgers[0]
-	if first.Type != LedgerEntryTypePayment || first.Metadata == nil || first.OwedMinUnits != "98500000" || first.OwedUSD != 98.5 {
+	if first.Type != LedgerEntryTypePayment || first.Metadata == nil || first.OwedMinUnits != "99010000" || first.OwedUSD != 99.01 {
 		t.Errorf("ledger %+v", first)
 	}
 	for _, l := range released.Ledgers {

@@ -41,8 +41,12 @@ type Subscription struct {
 	// now < CurrentPeriodEnd.
 	CurrentPeriodEnd *time.Time `json:"currentPeriodEnd,omitempty"`
 	// PriceUSD is the price per period the customer subscribed at, in USD (a decimal string;
-	// "0" for old v1 subscriptions).
+	// "0" for old v1 subscriptions). Every bill charges it plus Fees.
 	PriceUSD string `json:"priceUsd"`
+	// Fees is what its checkout added to the price, line by line, as the customer saw them (a
+	// tax, shipping, the processing fee when the customer pays it), locked at signup with the
+	// price: every bill charges PriceUSD plus these lines. Empty without any.
+	Fees []FeeLine `json:"fees,omitempty"`
 	// MaxAmountPerPeriod is the customer's maximum per period, in min units (a decimal string);
 	// "" on trials and old subscriptions.
 	MaxAmountPerPeriod string `json:"maxAmountPerPeriod,omitempty"`
