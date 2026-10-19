@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -323,7 +324,8 @@ func TestLiveWritesCheckout(t *testing.T) {
 }
 
 // TestLiveWritesCheckoutFees opens a payment checkout with fees (the catalog's feesCheckout
-// values: a line and the processing fee), reads its status and expires it. The session's fees
+// values: a line and the processing fee), reads its status and expires it, then a subscription
+// checkout with the same fees. The session's fees
 // and amount are only readable from the checkout page's route (not the SDK's), so the check is
 // the round trip; in test mode it also checks the $5 cap counts the fees.
 func TestLiveWritesCheckoutFees(t *testing.T) {
@@ -382,6 +384,24 @@ func TestLiveWritesCheckoutFees(t *testing.T) {
 		if !errors.As(err, &ve) || ve.StatusCode != 400 {
 			t.Fatalf("over the test-mode cap: %v, want a 400 ValidationError", err)
 		}
+	}
+
+	// A subscription checkout takes the same fees, charged with every bill.
+	sub, err := c.CheckoutSessions.CreateSubscription(ctx, &qbitflow.CreateSubscriptionSessionParams{
+		ProductName: "Pro", Description: "Monthly plan", Price: 3.99, Reference: "sub-1044-" + suffix(),
+		Frequency:  &qbitflow.Duration{Value: 1, Unit: qbitflow.DurationUnitMonths},
+		SuccessURL: params.SuccessURL, CancelURL: params.CancelURL, Fees: params.Fees,
+	})
+	if err != nil {
+		var pe *qbitflow.PermissionDeniedError
+		if errors.As(err, &pe) && pe.Code == "policy_disabled" {
+			t.Skip("subscriptions are off for this member (members.subscriptions)")
+		}
+		t.Fatalf("CreateSubscription with fees: %v", err)
+	}
+	expire(sub.UUID)
+	if !strings.HasPrefix(sub.UUID, "sub@") || sub.Link == "" {
+		t.Errorf("subscription session %+v", sub)
 	}
 }
 

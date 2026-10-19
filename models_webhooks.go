@@ -27,9 +27,11 @@ type WebhookEndpoint struct {
 	RotatedAt *time.Time `json:"rotatedAt,omitempty"`
 	// DisabledAt is when it was disabled; nil while enabled.
 	DisabledAt *time.Time `json:"disabledAt,omitempty"`
-	// DisabledReason is why: failing, owner or closed.
+	// DisabledReason is why: failing (live mode only: a test-mode endpoint is never disabled for
+	// failing), owner or closed.
 	DisabledReason EndpointDisabledReason `json:"disabledReason,omitempty"`
-	// FailingSince is when its deliveries started failing.
+	// FailingSince is when its deliveries started failing (live mode: failing for 3 days, it is
+	// disabled).
 	FailingSince *time.Time `json:"failingSince,omitempty"`
 	// LastDeliveredAt is its last successful delivery.
 	LastDeliveredAt *time.Time `json:"lastDeliveredAt,omitempty"`

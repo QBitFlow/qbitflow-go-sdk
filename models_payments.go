@@ -80,8 +80,9 @@ type Payment struct {
 	CheckoutOpenedAt *time.Time `json:"checkoutOpenedAt,omitempty"`
 }
 
-// FeeLine is an amount a one-time payment's checkout adds to its product's price, shown to the
-// customer and paid with it (Payment.Fees, PaymentSessionData.Fees).
+// FeeLine is an amount a checkout adds to its product's price, shown to the customer and paid
+// with it, a subscription's with every bill (Payment.Fees, PaymentSessionData.Fees,
+// Subscription.Fees).
 type FeeLine struct {
 	// Type is custom (the merchant's line) or processingFee (QBitFlow's fee, which the merchant
 	// has the customer pay).

@@ -181,6 +181,19 @@ func TestRuleFees(t *testing.T) {
 	}
 	// The fees and the session's own fields are reported together.
 	check(t, "fees and product", (&CreatePaymentSessionParams{Fees: &CheckoutFees{Items: lines(11)}}).Validate(), "productUuid", "fees.items")
+
+	// A subscription checkout's fees follow the same rules, reported with the terms.
+	sub := func(fees *CheckoutFees) *CreateSubscriptionSessionParams {
+		return &CreateSubscriptionSessionParams{ProductUUID: memberUUID, Fees: fees}
+	}
+	check(t, "subscription no fees", sub(nil).Validate())
+	check(t, "subscription processing fee only", sub(&CheckoutFees{ProcessingFee: ptr(true)}).Validate())
+	check(t, "subscription 10 lines", sub(&CheckoutFees{ProcessingFee: ptr(false), Items: lines(10)}).Validate())
+	check(t, "subscription 11 lines", sub(&CheckoutFees{Items: lines(11)}).Validate(), "fees.items")
+	check(t, "subscription bad line", sub(&CheckoutFees{Items: []FeeItem{{Label: "a|b", Description: " ", AmountUSD: 0.001}}}).Validate(),
+		"fees.items[0].label", "fees.items[0].description", "fees.items[0].amountUsd")
+	check(t, "subscription fees and terms", (&CreateSubscriptionSessionParams{ProductUUID: memberUUID, Frequency: &Duration{Value: 1},
+		Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: -1}}}}).Validate(), "frequency.unit", "fees.items[0].amountUsd")
 }
 
 func TestRulePercent(t *testing.T) {

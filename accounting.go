@@ -11,8 +11,10 @@ import (
 const maxExportDays = 95
 
 // ExportJSON returns the accounting events between two dates, both YYYY-MM-DD and included
-// (GET /accounting/export?format=json). The API allows at most 95 days (400 beyond); the SDK
-// checks the dates and from <= to before sending.
+// (GET /accounting/export?format=json). The dates are the transactions' (their block's day, in
+// UTC), so consecutive exports never miss nor repeat an event. Events are ordered by TxTimeUTC,
+// then Type, then PaymentUUID. The API allows at most 95 days (400 beyond); the SDK checks the
+// dates and from <= to before sending.
 func (s *AccountingService) ExportJSON(ctx context.Context, from, to string, opts ...RequestOption) ([]AccountingEvent, error) {
 	query, err := accountingQuery(from, to, "json")
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"testing"
+	"time"
 )
 
 // Fixtures with every wire key of each response model (docs/core Go tags), all non-empty.
@@ -56,6 +57,7 @@ var modelFixtures = map[string]struct {
 	"Subscription": {`{"uuid":"sub@1","reference":"r","createdAt":"2026-09-01T12:00:00Z","updatedAt":"2026-10-01T12:00:00Z","from":"0xf","to":"0xt",
 		"productUuid":"p-1","subscriptionHash":"0x2","currencyId":8,"currency":` + fxCurrency + `,"frequency":{"value":1,"unit":"months"},
 		"allowance":"110000000","status":"stopped","actionRequired":"raiseMaximum","currentPeriodEnd":"2026-10-31T12:00:00Z","priceUsd":"9.99",
+		"fees":[{"type":"custom","label":"VAT (20%)","description":"French VAT","amountUsd":"2.00"},{"type":"processingFee","label":"Processing fee","amountUsd":"0.13"}],
 		"maxAmountPerPeriod":"30000000","lastBillingDate":"2026-10-01T12:00:00Z","nextBillingDate":"2026-10-31T12:00:00Z",
 		"cancelledAt":"2026-10-02T12:00:00Z","cancellationReason":"merchant","minimumCancellationDate":"2026-12-01T12:00:00Z","test":false,
 		"userUuid":"m-1","customerUuid":"c-1","customerReference":"crm-1","customer":` + fxSummary + `,
@@ -85,14 +87,14 @@ var modelFixtures = map[string]struct {
 	"InvitationCreated": {`{"invitation":{"uuid":"i-1","test":null,"email":"a@b.co","role":"admin","trustLayer":null,"organizationFeePercent":0,
 		"expiresAt":"2026-10-08T12:00:00Z","acceptedAt":null,"revokedAt":null,"createdAt":"2026-10-01T12:00:00Z","status":"pending"},
 		"link":"https://qbitflow.app/invite?token=x"}`, strict[InvitationCreated]},
-	"AccountingEvent": {`{"paymentUuid":"pay@1","paymentReference":"r","type":"refund","txTimeUtc":"2026-09-13T21:23:26.620071+02:00","receiptUrl":"https://r",
-		"relatedPaymentUuid":"pay@0","relatedPaymentReference":"r0","userUuid":"m-1","productUuid":"p-1","productReference":"pro","productName":"Pro",
-		"productDescription":"d","customerUuid":"c-1","customerReference":"crm-1","chain":"BASE","blockNumberOrSlot":"52468103","txHash":"0xh",
-		"fromAddress":"0xf","toAddress":"0xt","tokenSymbol":"USDC","currencyDecimals":6,"tokenContractOrMint":"0x8335","explorerUrl":"https://e",
-		"grossAmount":"10000000","grossAmountUsd":10,"platformFeePercent":1.5,"platformFeeUsd":0.15,"platformFee":"150000",
-		"organizationFeePercent":0,"organizationFeeUsd":0,"organizationFee":"0","referralFeePercent":20,"referralFeeUsd":0.03,"referralFee":"30000",
-		"networkFeesUsd":0.0042,"networkFees":"4200","netAmountUsd":9.85,"netAmount":"9850000","userName":"Ada","userLastName":"L",
-		"customerName":"Bob","customerLastName":"B"}`, strict[AccountingEvent]},
+	"AccountingEvent": {`{"txTimeUtc":"2026-09-13T19:23:26.620071Z","type":"refund","paymentReference":"r","relatedPaymentReference":"r0",
+		"productName":"Pro","customerReference":"crm-1","grossAmountUsd":-10.0042,"platformFeeUsd":0,"referralFeeUsd":0,"organizationFeeUsd":0,
+		"netAmountUsd":-10.0042,"chain":"BASE","currency":"USDC","currencyDecimals":6,"currencyPriceUsd":1,"grossAmount":"-10.0042","platformFee":"0",
+		"referralFee":"0","organizationFee":"0","netAmount":"-10.0042","networkFeesPaidBy":"merchant","networkFees":"0.0000012","networkFeesCurrency":"ETH",
+		"networkFeesCurrencyDecimals":18,"networkFeesCurrencyPriceUsd":4512.37,"networkFeesUsd":0.00541,"platformFeePercent":0.99,"referralFeePercent":20,
+		"organizationFeePercent":0,"fromAddress":"0xf","toAddress":"0xt","txHash":"0xh","blockNumberOrSlot":"52468103","tokenContractOrMint":"0x8335",
+		"explorerUrl":"https://e","receiptUrl":"https://r","paymentUuid":"refund@1","relatedPaymentUuid":"pay@0","productUuid":"p-1",
+		"productReference":"pro","productDescription":"d","customerUuid":"c-1","userUuid":"m-1"}`, strict[AccountingEvent]},
 	"WebhookEndpointCreated": {`{"uuid":"e-1","test":true,"url":"https://x.io/hook","events":["payment.completed"],"includeMembers":true,
 		"payloadVersion":"v2","description":"d","createdAt":"2026-10-01T12:00:00Z","rotatedAt":"2026-10-01T12:00:00Z","disabledAt":"2026-10-02T12:00:00Z",
 		"disabledReason":"failing","failingSince":"2026-09-29T12:00:00Z","lastDeliveredAt":"2026-09-28T12:00:00Z","secret":"whsec_x"}`, strict[WebhookEndpointCreated]},
@@ -184,6 +186,27 @@ func TestModelValues(t *testing.T) {
 	ps := v.(PaymentSessionData)
 	if ps.Amount == nil || *ps.Amount != 4.81 || *ps.Price != 3.99 || len(ps.Fees) != 2 || ps.Fees[1].Type != FeeLineTypeProcessingFee || ps.Fees[0].AmountUSD != "0.75" {
 		t.Errorf("session %+v", ps)
+	}
+	v, _ = modelFixtures["Subscription"].decode([]byte(modelFixtures["Subscription"].json))
+	sb := v.(Subscription)
+	if sb.PriceUSD != "9.99" || len(sb.Fees) != 2 || sb.Fees[0] != (FeeLine{Type: FeeLineTypeCustom, Label: "VAT (20%)", Description: "French VAT", AmountUSD: "2.00"}) ||
+		sb.Fees[1].Type != FeeLineTypeProcessingFee {
+		t.Errorf("subscription price and fees %v %+v", sb.PriceUSD, sb.Fees)
+	}
+	v, _ = modelFixtures["AccountingEvent"].decode([]byte(modelFixtures["AccountingEvent"].json))
+	ae := v.(AccountingEvent)
+	if ae.Currency != "USDC" || ae.CurrencyPriceUSD == nil || *ae.CurrencyPriceUSD != 1 || ae.NetworkFeesPaidBy != NetworkFeesPaidByMerchant ||
+		ae.NetworkFeesCurrency != "ETH" || ae.NetworkFeesCurrencyDecimals == nil || *ae.NetworkFeesCurrencyDecimals != 18 ||
+		ae.NetworkFeesCurrencyPriceUSD == nil || *ae.NetworkFeesCurrencyPriceUSD != 4512.37 || ae.NetAmount != "-10.0042" || ae.GrossAmount != "-10.0042" ||
+		!ae.TxTimeUTC.Equal(time.Date(2026, 9, 13, 19, 23, 26, 620071000, time.UTC)) {
+		t.Errorf("accounting event %+v", ae)
+	}
+	// A referralFee row: only what the referrer earned; no network fees, no payer.
+	rf, err := decodeJSON[AccountingEvent]([]byte(`{"txTimeUtc":"2026-09-13T19:23:26Z","type":"referralFee","referralFeeUsd":0.02,"chain":"SOL",` +
+		`"currency":"SOL","currencyDecimals":9,"currencyPriceUsd":150.5,"referralFee":"0.000132","referralFeePercent":20,"blockNumberOrSlot":"1","tokenContractOrMint":""}`))
+	if err != nil || rf.Type != AccountingEventTypeReferralFee || rf.NetworkFeesPaidBy != "" || rf.NetworkFeesCurrencyDecimals != nil || rf.NetworkFees != "" ||
+		rf.ReferralFee != "0.000132" || rf.Currency != "SOL" || rf.GrossAmountUSD != nil {
+		t.Errorf("referral fee row %+v %v", rf, err)
 	}
 	v, _ = modelFixtures["InvitationCreated"].decode([]byte(modelFixtures["InvitationCreated"].json))
 	inv := v.(InvitationCreated)

@@ -242,6 +242,22 @@ func routeCases(t *testing.T) []routeCase {
 					Frequency: &Duration{1, DurationUnitWeeks}, TrialPeriod: &Duration{14, DurationUnitDays}, MinPeriods: ptr[uint32](0)}, o...)
 			},
 			reply: fx("CheckoutSession")},
+		{name: "CheckoutSessions.CreateSubscription with fees", method: "POST", path: "/transaction/session-checkout/new/subscription", idempotent: true, status: 201,
+			body: `{"productName":"Pro","price":9.99,"frequency":{"value":1,"unit":"months"},` +
+				`"fees":{"processingFee":true,"items":[{"label":"VAT (20%)","description":"French VAT","amountUsd":2}]}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductName: "Pro", Price: 9.99,
+					Frequency: &Duration{1, DurationUnitMonths}, Fees: &CheckoutFees{ProcessingFee: &yes, Items: []FeeItem{
+						{Label: "VAT (20%)", Description: "French VAT", AmountUSD: 2},
+					}}}, o...)
+			},
+			reply: fx("CheckoutSession")},
+		{name: "CheckoutSessions.CreateSubscription processing fee off", method: "POST", path: "/transaction/session-checkout/new/subscription", idempotent: true, status: 201,
+			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":false}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductUUID: uuidA, Fees: &CheckoutFees{ProcessingFee: &no}}, o...)
+			},
+			reply: fx("CheckoutSession")},
 		{name: "CheckoutSessions.GetStatus", method: "GET", path: "/transaction/session-checkout/" + payID + "/status",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.GetStatus(ctx, payID, o...)

@@ -133,7 +133,8 @@ type SubscriptionUpcomingBill struct {
 
 	// BillingDate is when it is billed (for a trial: when the trial ends).
 	BillingDate time.Time `json:"billingDate"`
-	// AmountUSD is the bill, in USD (a number, unlike SubscriptionBillingFailed's).
+	// AmountUSD is the bill, in USD (a number, unlike SubscriptionBillingFailed's): its PriceUSD
+	// plus its Fees lines.
 	AmountUSD float64 `json:"amountUsd"`
 	// TrialEnding is true when the trial ends then: the customer must confirm it to be billed.
 	TrialEnding bool `json:"trialEnding"`

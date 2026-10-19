@@ -20,7 +20,8 @@ func (s *ProductsService) List(ctx context.Context, params *ProductListParams, o
 //
 // Errors: 400 validation_failed (e.g. price above $5 in test mode, details.max); 409
 // unique_violation on reference (references are unique among the space's live products); a
-// member's key needs the organization's members.products policy (403 policy_disabled).
+// member's key needs the organization's members.products policy, and members.subscriptions to
+// give the product subscription terms (403 policy_disabled, details.policy names it).
 func (s *ProductsService) Create(ctx context.Context, params *CreateProductParams, opts ...RequestOption) (*Product, error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -50,6 +51,10 @@ func (s *ProductsService) GetByReference(ctx context.Context, reference string, 
 // (an empty params is a no-op that returns the product). The reference cannot change. A
 // new price applies to new checkouts and new subscribers only: existing subscriptions and open
 // checkout sessions keep theirs. Not retried.
+//
+// A member's key gives a product subscription terms only with the organization's
+// members.subscriptions policy (403 policy_disabled); RemoveSubscription and other edits
+// never need it.
 func (s *ProductsService) Update(ctx context.Context, uuid string, params *UpdateProductParams, opts ...RequestOption) (*Product, error) {
 	if err := checkPathUUID("uuid", uuid); err != nil {
 		return nil, err
