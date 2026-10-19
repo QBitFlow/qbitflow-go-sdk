@@ -7,7 +7,8 @@ import (
 )
 
 // Refund is a refund of a payment (pay@…) or a subscription bill (sub-hist@…): a customer's
-// request the merchant approves or rejects, or a refund the merchant starts (Refunds.Create).
+// request the merchant approves or rejects, or a refund the merchant sent from the dashboard
+// (recorded once its transfer confirmed: approved, nothing before). Refunds are read only here.
 // It is also the data of the refund.requested, refund.approved and refund.rejected events.
 type Refund struct {
 	// UUID is the refund's id (refund@…).
@@ -17,11 +18,10 @@ type Refund struct {
 	// Reason is why the refund: the customer's reason, or the merchant's when it started the
 	// refund; "" (absent) when it gave none.
 	Reason string `json:"reason,omitempty"`
-	// Status is pending (not answered yet: a request, or a merchant's refund not sent), approved
-	// (its transfer confirmed), rejected or cancelled (a merchant's refund dropped before it was
-	// sent). failed is declared but never set.
+	// Status is pending (a customer's request not answered yet), approved (its transfer
+	// confirmed) or rejected. failed is declared but never set.
 	Status RefundStatus `json:"status"`
-	// CreatedAt is when it was requested (or started by the merchant).
+	// CreatedAt is when it was requested (or prepared by the merchant).
 	CreatedAt time.Time `json:"createdAt"`
 	// MerchantMessage is the merchant's message to the customer (why it rejected the request, or
 	// a note on a refund it started); "" (absent) when none.
@@ -37,7 +37,7 @@ type Refund struct {
 	// TxHash is the refund transfer's transaction, once approved; "" before.
 	TxHash string `json:"txHash,omitempty"`
 	// InitiatedBy is customer (requested by the customer, the merchant answers) or merchant (sent
-	// by the merchant without a request; until it is sent, a draft that blocks nothing).
+	// by the merchant without a request, from the dashboard: recorded once confirmed, approved).
 	InitiatedBy RefundInitiator `json:"initiatedBy"`
 	// Held is true when the refunded payment or bill was paid to the organization's wallet, which
 	// holds the seller's funds: the organization decides the refund and sends it from its wallet.
@@ -71,8 +71,9 @@ type Refund struct {
 	Chain Chain `json:"chain,omitempty"`
 	// ExplorerURL is the refund transfer on the chain's explorer, once sent.
 	ExplorerURL string `json:"explorerUrl,omitempty"`
-	// Approval is where the refund transfer stands while the refund is pending and it was sent:
-	// being confirmed, or its last attempt failed (API reads only, never in webhooks).
+	// Approval is where the refund transfer stands while the request is pending and it was sent
+	// (approved, or answered by the merchant's own refund): being confirmed, or its last attempt
+	// failed (API reads only, never in webhooks).
 	Approval *RefundApproval `json:"approval,omitempty"`
 	// CustomerUUID is the refunded transaction's customer (API reads only).
 	CustomerUUID string `json:"customerUuid,omitempty"`
@@ -82,7 +83,7 @@ type Refund struct {
 	Customer *CustomerSummary `json:"customer,omitempty"`
 }
 
-// RefundApproval is where a pending refund's transfer stands once sent.
+// RefundApproval is where a pending request's refund transfer stands once sent.
 type RefundApproval struct {
 	// Status is waitingConfirmation (sent, being confirmed on-chain) or created (its last attempt
 	// failed: LastAttempt; send it again from the dashboard).
@@ -91,39 +92,6 @@ type RefundApproval struct {
 	TxHash string `json:"txHash,omitempty"`
 	// LastAttempt is why the last attempt failed.
 	LastAttempt *Attempt `json:"lastAttempt,omitempty"`
-}
-
-// CreateRefundParams starts a refund (Refunds.Create): a pending refund the merchant signs in
-// the dashboard.
-type CreateRefundParams struct {
-	// TxUUID is required: the space's payment (pay@…) or bill (sub-hist@…) to refund, or its bare
-	// UUID.
-	TxUUID string `json:"txUuid"`
-	// RefundPercent is the share of what the customer paid to send back, a percent string ("50"):
-	// above 0, at most 100, at most 2 decimals ("" = "100": everything the customer paid, network
-	// fee included).
-	RefundPercent string `json:"refundPercent,omitempty"`
-	// Reason is why the merchant refunds (optional, at most 500 characters).
-	Reason string `json:"reason,omitempty"`
-	// MerchantMessage is a note to the customer (optional, at most 500 characters).
-	MerchantMessage string `json:"merchantMessage,omitempty"`
-}
-
-// Validate checks the params (behaviour §8).
-func (p *CreateRefundParams) Validate() error {
-	if p == nil {
-		return newValidationError("params are required")
-	}
-	var v validator
-	if v.required("txUuid", p.TxUUID) {
-		v.txID("txUuid", p.TxUUID)
-	}
-	if p.RefundPercent != "" {
-		v.percent("refundPercent", p.RefundPercent, 100, true)
-	}
-	v.text("reason", p.Reason, 0, 500)
-	v.text("merchantMessage", p.MerchantMessage, 0, 500)
-	return v.err()
 }
 
 // maxRefundStatuses is the most statuses RefundListParams.Status may name.
@@ -136,7 +104,7 @@ type RefundListParams struct {
 	// Cursor is the previous page's NextCursor, verbatim; "" for the first page.
 	Cursor string
 	// Status keeps only the refunds in one of these statuses (at most 5 of pending, approved,
-	// rejected, cancelled, failed); empty: every status. RefundStatusPending lists the ones
+	// rejected, failed); empty: every status. RefundStatusPending lists the ones
 	// awaiting an answer.
 	Status []RefundStatus
 	// TxUUID keeps only the refund of this transaction (pay@…, sub-hist@…, or the bare UUID).
@@ -168,8 +136,7 @@ func (p *RefundListParams) Validate() error {
 			v.add(field, "is required")
 			continue
 		}
-		oneOf(&v, field, status, RefundStatusPending, RefundStatusApproved, RefundStatusRejected,
-			RefundStatusCancelled, RefundStatusFailed)
+		oneOf(&v, field, status, RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusFailed)
 	}
 	v.txID("txUuid", p.TxUUID)
 	v.uuid("userUuid", p.UserUUID)

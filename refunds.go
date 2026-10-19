@@ -37,22 +37,3 @@ func (s *RefundsService) Get(ctx context.Context, uuid string, opts ...RequestOp
 	}
 	return s.client.callRef[Refund](ctx, endpoint{method: http.MethodGet, path: pathf("/refunds/%s", uuid)}, opts)
 }
-
-// Create starts a refund of a payment (pay@…) or a bill (sub-hist@…) of the space
-// (POST /refunds, 201). It sends an Idempotency-Key and is retried on transient failures. It
-// creates a pending refund, a draft that blocks nothing: no money moves until the merchant signs
-// the transfer in the dashboard, and a new refund of the same transaction replaces it.
-// RefundPercent (default "100") applies to everything the customer paid, network fee included,
-// rounded down.
-//
-// Errors: 404 for a transaction outside the space; 400 validation_failed (refundPercent, or a
-// refund rounding to nothing); 409 refund_already_exists (details.refundUuid: one refund per
-// transaction, whatever it became; only an unsent draft gives way) or held_funds_released (a
-// held payment already released to its member); a member's key needs the members.refunds policy
-// (403 policy_disabled).
-func (s *RefundsService) Create(ctx context.Context, params *CreateRefundParams, opts ...RequestOption) (*Refund, error) {
-	if err := params.Validate(); err != nil {
-		return nil, err
-	}
-	return s.client.callRef[Refund](ctx, endpoint{method: http.MethodPost, path: "/refunds", body: params, idempotent: true}, opts)
-}

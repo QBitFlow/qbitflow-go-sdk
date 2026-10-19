@@ -135,7 +135,6 @@ context cancels the request and any wait between retries.
 | `Refunds.GetAllInactive(limit, cursor)` | `Refunds.List(&RefundListParams{Status: []RefundStatus{RefundStatusApproved, RefundStatusRejected}})`, `Refunds.Iterate` | one list, filtered by `Status` (repeatable, up to 5) |
 | `Refunds.GetByTransactionUUID(txUUID)` | `Refunds.List(&RefundListParams{TxUUID: txUUID})` | or `Payment.Refund` / `Bill.Refund` (a `RefundSummary`) |
 | — | `Refunds.Get(refundUUID)` | new: `GET /refunds/:uuid` |
-| — | `Refunds.Create(*CreateRefundParams)` | new: `POST /refunds`, a pending refund you sign in the dashboard (`RefundPercent` a string, `"50"`) |
 
 ### Customers and products
 
@@ -329,7 +328,7 @@ cancel an order on it.
 | `TransactionTypeExecuteSubscriptionPayment` | `TransactionTypeExecuteSubscription` |
 | `TransactionTypeCreatePAYGSubscription`, `TransactionTypeCancelPAYGSubscription` (`createPAYGSubscription`…) | `TransactionTypeCreatePaygSubscription`, `TransactionTypeCancelPaygSubscription` (`createPaygSubscription`…) |
 | — | `TransactionTypeForceCancelSubscription`, `TransactionTypeReleaseHeldFunds` |
-| `RefundStatus` | `pending`, `approved`, `rejected`, + `cancelled` (your draft dropped before it was sent); `failed` is declared, never set |
+| `RefundStatus` | `pending` (a customer's request), `approved`, `rejected`; `failed` is declared, never set |
 | `CombinedPayment.Source` `"subscription_history"` | `Transaction.Type` `TransactionKindBill` (`bill`) |
 | `AccountingEvent.Type` (a string) | `AccountingEventType` constants (`subscription_history` → `AccountingEventTypeBill`, `bill`) |
 | ledger lines `subscription_history` | `LedgerEntryTypeBill` (`bill`) |
@@ -597,7 +596,7 @@ build, these names changed: `CheckoutSessions.GetStatus` → `Get`; `Payments.Li
 `IterateCombined` → `Transactions.List` / `Iterate` (`CombinedPayment` → `Transaction`,
 `CombinedPaymentListParams` → `TransactionListParams`, `Source` → `Type`, `CombinedPaymentSource`
 → `TransactionKind`); `Subscriptions.ExecuteTestBilling` → `TestBill` (`BillingState` →
-`TestBill`); `Refunds.Initiate` → `Create` (`InitiateRefundParams` → `CreateRefundParams`);
+`TestBill`); `Refunds.Initiate` is removed (refunds are read only: a merchant's refund is sent from the dashboard);
 `Refunds.ListInactive` / `IterateInactive` → `Refunds.List` / `Iterate` with `Status`;
 `Wallets.ListSupportedCurrencies` → `ListAcceptedCurrencies` (`SupportedCurrenciesParams` →
 `AcceptedCurrenciesParams`); `Currencies.ListAvailable` / `ListMain` → `Currencies.List` (`Main`);

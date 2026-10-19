@@ -23,7 +23,6 @@
     "subscriptions-cancel": "examples/subscriptions/main.go",
     "subscriptions-test-bill": "examples/subscriptions/main.go",
     "has-access": "examples/subscriptions/main.go",
-    "refunds-create": "examples/refunds/main.go",
     "refunds-list": "examples/refunds/main.go",
     "members-invite": "examples/marketplace/main.go",
     "members-list": "examples/marketplace/main.go",
@@ -48,5 +47,7 @@
     "subscriptions-update": "examples/subscriptions/main.go",
     "refunds-get": "examples/refunds/main.go"
   },
-  "unsupported": {}
+  "unsupported": {
+    "refunds-create": "API v2 has no refund create for API keys: a merchant's refund is sent from the dashboard (POST /refunds/intent, then POST /refunds, frontend only). Refunds are read only in the SDK."
+  }
 }

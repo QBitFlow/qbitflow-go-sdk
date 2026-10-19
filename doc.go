@@ -81,7 +81,7 @@
 //
 // # Retries
 //
-// Reads and the seven creates are retried on network errors, timeouts, 5xx and 429, three
+// Reads and the six creates are retried on network errors, timeouts, 5xx and 429, three
 // times by default with a 1 s, 2 s, 4 s back-off ([WithMaxRetries]; 0 disables). Each create
 // sends one Idempotency-Key, reused by its retries, so a retry never creates twice. Other
 // writes are never retried.

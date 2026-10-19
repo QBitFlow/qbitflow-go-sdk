@@ -29,7 +29,6 @@ func TestErrorMapping(t *testing.T) {
 		{409, "unique_violation", (*ConflictError)(nil)},
 		{409, "tx_already_sent", (*ConflictError)(nil)},
 		{409, "merchant_not_ready", (*ConflictError)(nil)},
-		{409, "refund_already_exists", (*ConflictError)(nil)},
 		{409, "held_funds_pending", (*ConflictError)(nil)},
 		{409, "idempotency_key_in_use", (*ConflictError)(nil)},
 		{410, "merchant_closed", (*GoneError)(nil)},

@@ -127,7 +127,7 @@ type requestConfig struct {
 	requestID      string
 }
 
-// WithIdempotencyKey sets the Idempotency-Key of one of the 7 idempotent creates (the SDK
+// WithIdempotencyKey sets the Idempotency-Key of one of the 6 idempotent creates (the SDK
 // otherwise generates a UUID v4 per call), e.g. to retry a create across processes: 1 to 255
 // printable ASCII characters without spaces. Other methods ignore it.
 func WithIdempotencyKey(key string) RequestOption {

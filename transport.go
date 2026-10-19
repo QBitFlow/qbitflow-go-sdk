@@ -41,7 +41,7 @@ type endpoint struct {
 	query url.Values
 	// body is encoded as JSON (nil: no body, no Content-Type).
 	body any
-	// idempotent marks the 7 idempotent creates: they send an Idempotency-Key (generated per
+	// idempotent marks the 6 idempotent creates: they send an Idempotency-Key (generated per
 	// call, or WithIdempotencyKey's) and are retried like reads. Other writes never are.
 	idempotent bool
 	// accept overrides the Accept header (default application/json).

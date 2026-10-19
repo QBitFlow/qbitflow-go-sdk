@@ -104,16 +104,15 @@ const (
 )
 
 // RefundStatus is where a refund stands. An approval and a rejection are final: the transaction
-// never gets another refund. A cancelled one never moved money and blocks nothing.
+// never gets another refund.
 type RefundStatus string
 
 // Refund statuses.
 const (
-	RefundStatusPending   RefundStatus = "pending"   // Requested, or started by the merchant and not sent yet
-	RefundStatusApproved  RefundStatus = "approved"  // The refund transfer is confirmed (refund.approved)
-	RefundStatusRejected  RefundStatus = "rejected"  // Rejected by whoever decides it (refund.rejected)
-	RefundStatusCancelled RefundStatus = "cancelled" // A merchant's refund dropped before it was sent (announced by nothing)
-	RefundStatusFailed    RefundStatus = "failed"    // Declared, never set: a failed approval leaves the refund pending
+	RefundStatusPending  RefundStatus = "pending"  // A customer's request not answered yet
+	RefundStatusApproved RefundStatus = "approved" // The refund transfer is confirmed (refund.approved); the merchant's own refund is recorded only then
+	RefundStatusRejected RefundStatus = "rejected" // Rejected by whoever decides it (refund.rejected)
+	RefundStatusFailed   RefundStatus = "failed"   // Declared, never set: a failed approval leaves the request pending
 )
 
 // RefundInitiator says who started a refund.

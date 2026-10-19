@@ -89,7 +89,7 @@ type CustomerSummary struct {
 type RefundSummary struct {
 	// UUID is the refund (refund@…).
 	UUID string `json:"uuid"`
-	// Status is pending, approved, rejected or cancelled.
+	// Status is pending, approved or rejected.
 	Status RefundStatus `json:"status"`
 	// InitiatedBy is customer (a request) or merchant.
 	InitiatedBy RefundInitiator `json:"initiatedBy"`
@@ -104,9 +104,9 @@ type RefundSummary struct {
 	// AmountUSD is the same in USD, at the payment's time (a decimal string); "" (absent) when
 	// unknown.
 	AmountUSD string `json:"amountUsd,omitempty"`
-	// CreatedAt is when it was requested or started.
+	// CreatedAt is when it was requested or prepared.
 	CreatedAt time.Time `json:"createdAt"`
-	// RespondedAt is when it was approved (confirmed), rejected or cancelled; nil while pending.
+	// RespondedAt is when it was approved (confirmed) or rejected; nil while pending.
 	RespondedAt *time.Time `json:"respondedAt,omitempty"`
 }
 
