@@ -18,7 +18,7 @@
 //
 //	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
 //		ProductName: "Premium access",
-//		Price:       4.99,
+//		PriceUSD:    "4.99", // money is a decimal string, never a float
 //		Reference:   "order-1042",
 //		SuccessURL:  "https://shop.example.com/thanks?session={{UUID}}",
 //	})
@@ -28,8 +28,9 @@
 //	fmt.Println(session.Link) // send the customer there; fulfil on the payment.completed webhook
 //
 // The client's fields group the methods by area: Products, Customers, CheckoutSessions,
-// Payments, Failures, Subscriptions, Refunds, Members, Invitations, Wallets, Accounting,
-// Webhooks (with Webhooks.Endpoints and Webhooks.Events) and Currencies.
+// Payments, Transactions (payments and bills together), Failures, Subscriptions, Refunds,
+// Members, Invitations, Wallets, Accounting, Webhooks (with Webhooks.Endpoints and
+// Webhooks.Events) and Currencies.
 //
 // # Requests
 //
@@ -39,20 +40,28 @@
 // sends X-Request-Id. Params are pointers to …Params structs, nil when every field is optional.
 //
 // Ids are strings: UUIDs, and prefixed transaction ids (pay@…, sub@…, sub-hist@…, refund@…)
-// passed back verbatim; only currency ids are numbers. In responses an optional string is ""
-// when absent and any other optional field is a pointer, nil when absent. Exact token amounts
-// are decimal strings, fee rates percents, enums open string types (unknown values are kept).
+// passed back verbatim (the bare UUID works too); only currency ids are numbers. In responses
+// an optional string is "" when absent and any other optional field is a pointer, nil when
+// absent. Money is a decimal string everywhere, inputs included: USD amounts (PriceUSD "4.99",
+// AmountUSD), token amounts in the token's units (Amount "10", next to AmountMinUnits and the
+// Currency object) and fee rates in percent (FeePercent "0.99"). Products, customers, checkouts
+// and subscriptions carry your own Metadata (a map[string]string, merged on updates). Enums are
+// open string types (unknown values are kept).
 //
 // # Lists
 //
-// Paginated lists return a [Page]; each has an Iterate twin (an [iter.Seq2]) that fetches the
-// pages lazily, keeps the filters, and yields an error once before stopping:
+// Paginated lists return a [Page] (Items, HasMore, and the opaque NextCursor to pass back as
+// the params' Cursor); each has an Iterate twin (an [iter.Seq2]) that fetches the pages lazily,
+// keeps the filters, stops after the page whose HasMore is false, and yields an error once
+// before stopping. The short bounded lists (Currencies.List, Wallets.List, Members.ListHeldFunds,
+// Accounting.ExportJSON…) return a slice. GetByReference runs a list's reference filter and
+// answers a [*NotFoundError] when nothing matches.
 //
 //	for p, err := range client.Payments.Iterate(ctx, &qbitflow.PaymentListParams{Limit: 50}) {
 //		if err != nil {
 //			log.Fatal(err)
 //		}
-//		fmt.Println(p.UUID, p.Amount)
+//		fmt.Println(p.UUID, p.AmountUSD)
 //	}
 //
 // # Errors
@@ -64,7 +73,7 @@
 // [*WebhookSignatureError]. Each embeds an [*APIError] carrying the HTTP status, the API's
 // code, its details, the request id and the field errors:
 //
-//	_, err := client.Customers.Create(ctx, &qbitflow.CreateCustomerParams{Name: "Ada", Email: "ada@example.com"})
+//	_, err := client.Customers.Create(ctx, &qbitflow.CreateCustomerParams{FirstName: "Ada", Email: "ada@example.com", Reference: "crm-42"})
 //	var conflict *qbitflow.ConflictError
 //	if errors.As(err, &conflict) && conflict.Code == "unique_violation" {
 //		fmt.Println("already taken:", conflict.Details["field"], "request", conflict.RequestID)
@@ -102,7 +111,7 @@
 // tests); [Subscription.HasAccess] says whether a subscription grants access at a time;
 // [FormatAmount], [ParseAmount] and [Currency.FormatAmount] convert token amounts exactly;
 // [AccountingService.ExportJSONRange] and [AccountingService.ExportCSVRange] export any range
-// in windows of 95 days; [NewClientFromEnv] reads the key and base URL from the environment;
+// in windows of at most 92 days, both ends included; [NewClientFromEnv] reads the key and base URL from the environment;
 // [PlaceholderUUID] and [PlaceholderTransactionType] are the redirect placeholders.
 //
 // The README (https://github.com/QBitFlow/qbitflow-go-sdk) covers every service, and

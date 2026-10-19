@@ -45,7 +45,7 @@ func overview(ctx context.Context, client *qbitflow.Client) {
 		log.Fatal(err)
 	}
 	for _, m := range page.Items {
-		fmt.Printf("%s %s %s, fee %.2f %%, trusted: %v\n", m.UserUUID, m.Name, m.Email, m.OrganizationFeePercent, m.TrustedAt != nil)
+		fmt.Printf("%s %s %s, fee %s %%, trusted: %v\n", m.UserUUID, m.FirstName, m.Email, m.OrganizationFeePercent, m.TrustedAt != nil)
 	}
 	// docs:end members-list
 
@@ -68,34 +68,34 @@ func invite(ctx context.Context, client *qbitflow.Client) {
 	// docs:start members-invite
 	created, err := client.Invitations.Create(ctx, &qbitflow.CreateInvitationParams{
 		Email:                  "seller@example.com",
-		TrustLayer:             true,      // hold their payments until Members.Trust
-		OrganizationFeePercent: new(10.0), // your commission on their payments: 0 to 50 %
+		HoldFunds:              true, // hold their payments until Members.Trust (always sent)
+		OrganizationFeePercent: "10", // your commission on their payments: "0" to "50" %
 		RedirectURL:            "https://shop.example.com/sellers/welcome",
 	})
 	if err != nil {
 		log.Fatal(err) // 409 already_joined for a member
 	}
 	// The link is also emailed. The seller exists once they accepted: wait for member.joined.
-	fmt.Println("invitation", created.Invitation.UUID, "link:", created.Link)
+	fmt.Println("invitation", created.UUID, "link:", created.Link)
 	// docs:end members-invite
 
 	// Then wait for the member.joined webhook (see examples/webhook_handler):
 	//
 	//	joined, _ := event.MemberJoined()
-	//	// joined.InvitationUUID == created.Invitation.UUID; store joined.UserUUID,
+	//	// joined.InvitationUUID == created.UUID; store joined.UserUUID,
 	//	// then run this program with MEMBER_UUID=<joined.UserUUID>.
 
 	if os.Getenv("REVOKE") != "1" {
 		return
 	}
-	invitationUUID := created.Invitation.UUID
+	invitationUUID := created.UUID
 
 	// docs:start invitations-revoke
-	revoked, err := client.Invitations.Revoke(ctx, invitationUUID)
-	if err != nil {
+	// 204: its link stops working.
+	if err := client.Invitations.Revoke(ctx, invitationUUID); err != nil {
 		log.Fatal(err) // 409 once accepted or revoked
 	}
-	fmt.Println("revoked the invitation of", revoked.Email)
+	fmt.Println("revoked", invitationUUID)
 	// docs:end invitations-revoke
 }
 
@@ -106,8 +106,11 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("%s %s <%s>, fee %.2f %%, trusted: %v\n",
-		member.Name, member.LastName, member.Email, member.OrganizationFeePercent, member.TrustedAt != nil)
+	fmt.Printf("%s %s <%s>, fee %s %%, trusted: %v\n",
+		member.FirstName, member.LastName, member.Email, member.OrganizationFeePercent, member.TrustedAt != nil)
+	for _, c := range member.AcceptedCurrencies {
+		fmt.Println("  accepts", c.Code)
+	}
 	// docs:end members-get
 
 	// docs:start members-wallets
@@ -116,7 +119,7 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 		log.Fatal(err)
 	}
 	for _, w := range wallets {
-		fmt.Println(w.Currency.Symbol, w.PublicKey)
+		fmt.Println(w.Currency.Chain, w.Address)
 	}
 	// docs:end members-wallets
 
@@ -128,11 +131,11 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(len(products), "products in the seller's space")
+	fmt.Println(len(products.Items), "products on the first page of the seller's space")
 	// docs:end client-on-behalf-of
 
 	// Is the seller ready to be paid? Their checkouts need a wallet accepting a currency.
-	currencies, err := client.Wallets.ListSupportedCurrencies(ctx, &qbitflow.SupportedCurrenciesParams{UserUUID: memberUUID})
+	currencies, err := client.Wallets.ListAcceptedCurrencies(ctx, &qbitflow.AcceptedCurrenciesParams{UserUUID: memberUUID})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -140,7 +143,7 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 		fmt.Println("the seller has no wallet yet: their checkouts would answer 409 merchant_not_ready")
 	} else {
 		product, err := seller.Products.Create(ctx, &qbitflow.CreateProductParams{
-			Name: "Handmade mug", Price: 4.5, Reference: fmt.Sprintf("mug-%d", time.Now().Unix()),
+			Name: "Handmade mug", PriceUSD: "4.50", Reference: fmt.Sprintf("mug-%d", time.Now().Unix()),
 		})
 		if err != nil {
 			log.Fatalf("product: %v", err) // 403 policy_disabled if members.products is off
@@ -157,19 +160,20 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 
 	// docs:start members-held-funds
 	// What the organization holds for its members (their payments while untrusted).
-	summaries, err := client.Members.ListHeldFunds(ctx)
+	// The longest held first.
+	all, err := client.Members.ListHeldFunds(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, s := range summaries {
-		fmt.Printf("%s: %.2f USD over %d lines\n", s.UserUUID, s.TotalAmount, s.Count)
+	for _, s := range all {
+		fmt.Printf("%s: %s USD over %d lines\n", s.UserUUID, s.TotalUSD, s.Count)
 	}
 
 	held, err := client.Members.GetHeldFunds(ctx, memberUUID)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("owed to %s: %.2f USD over %d lines\n", memberUUID, held.TotalAmount, len(held.Ledgers))
+	fmt.Printf("owed to %s: %s USD over %d lines\n", memberUUID, held.TotalUSD, len(held.Ledgers))
 	// docs:end members-held-funds
 
 	// docs:start members-own-held-funds
@@ -178,7 +182,7 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("held for me: %.2f USD over %d lines\n", own.TotalAmount, len(own.Ledgers))
+	fmt.Printf("held for me: %s USD over %d lines\n", own.TotalUSD, len(own.Ledgers))
 	// docs:end members-own-held-funds
 }
 
@@ -186,10 +190,10 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 func manage(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 	if os.Getenv("FEE") == "1" {
 		// docs:start members-update
-		// The organization's commission on their payments, in percent (a checkout already
-		// created keeps its fee).
+		// The organization's commission on their payments, a percent string ("0" to "50"; a
+		// checkout already created keeps its fee).
 		member, err := client.Members.Update(ctx, memberUUID, &qbitflow.UpdateMemberParams{
-			OrganizationFeePercent: 10,
+			OrganizationFeePercent: "10",
 		})
 		if err != nil {
 			log.Fatal(err)

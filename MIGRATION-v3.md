@@ -2,12 +2,13 @@
 
 3.0.0 is the Go SDK for **QBitFlow API v2**. API v2 reorganises the platform around spaces
 (an organization's, and one per member), invites people instead of provisioning them, names every
-resource by a UUID and signs webhooks with a new scheme. The SDK follows: new module path, one
-package, a new client, and new names for most methods.
+resource by a UUID, uses REST routes, writes money as decimal strings and signs webhooks with a new
+scheme. The SDK follows: new module path, one package, a new client, and new names for most
+methods.
 
-API v1 keeps running next to v2, **against the same data**, for some weeks after v2 ships: your
-2.x integration keeps working meanwhile, so you can move one part at a time. 2.x talks to `/v1`
-only; 3.0.0 talks to `/v2` only.
+2.x talks to `/v1` only; 3.0.0 talks to `/v2` only, and **`/v1` is gone**: the v2 launch
+migrated v1's data (people, products, payments, subscriptions, customers, wallets, webhook URLs) to
+v2's shape, so move your integration to 3.0.0 as a whole.
 
 This guide maps everything 2.1.0 exposed (the last 2.x release) to 3.0.0. The
 [README](README.md) documents 3.0.0 in full; [CHANGELOG.md](CHANGELOG.md) lists every change.
@@ -15,17 +16,17 @@ This guide maps everything 2.1.0 exposed (the last 2.x release) to 3.0.0. The
 ## Checklist
 
 1. [Module path and imports](#1-module-path-and-imports): `.../v3`, one package, Go 1.27.
-2. [Base URL and API keys](#2-base-url-and-api-keys): `/v2`; rotate pre-v2 keys.
+2. [Base URL and API keys](#2-base-url-and-api-keys): `/v2`; pre-v2 keys are refused: create new ones.
 3. [The client](#3-the-client): `NewClient(key, opts...)`, options instead of `Config` and setters.
 4. [`context.Context` and request options](#4-contextcontext-and-request-options) on every call.
 5. [Method map](#5-method-map): every 2.x method and its replacement.
 6. [Ids are UUID strings](#6-ids-are-uuid-strings): products, members, `On-Behalf-Of`.
 7. [Users and claims become invitations, members and the trust layer](#7-users-and-claims-become-invitations-members-and-the-trust-layer).
-8. [Models](#8-models): renamed types and fields, fees as percents.
+8. [Models](#8-models): renamed types and fields, money and fee rates as decimal strings.
 9. [Enum values and statuses](#9-enum-values-and-statuses): subscription and checkout statuses.
 10. [Errors](#10-errors): one typed error per status, `errors.As`, field errors that work.
 11. [Webhooks](#11-webhooks): `QBitFlow-Signature` over the raw body, typed events, v2 endpoints.
-12. [Pagination](#12-pagination): params structs and iterators.
+12. [Pagination](#12-pagination): params structs, `Page{Items, HasMore, NextCursor}` and iterators.
 13. [Before and after](#13-before-and-after-five-common-tasks): five common tasks.
 
 ## 1. Module path and imports
@@ -46,8 +47,9 @@ methods) and still has no dependencies.
 ## 2. Base URL and API keys
 
 - The default base URL is `https://api.qbitflow.app/v2`. If you set one, it must point at v2.
-- API v2 issues keys shaped `sk_<uuid>_<test|live>_<secret>`. **Keys issued before** (`sk_<digits>_…`)
-  **still authenticate**: rotate them in the dashboard when you move to v2. Treat a key as opaque.
+- API v2 issues keys shaped `sk_<uuid>_<test|live>_<secret>`. **Keys issued before**
+  (`sk_<digits>_…`) **are refused by API v2** (`401`): create a new key in the dashboard. Treat a key
+  as opaque (the SDK only checks the `sk_` prefix).
 - `NewClient` refuses a blank key, or one not starting with `sk_`, with a `*ValidationError`
   (2.x sent it and got a 401). It sends nothing: call `client.Me(ctx)` to check the key online,
   and assert its mode (`me.Space.Test`) at start-up.
@@ -80,7 +82,7 @@ payment, err := client.Payments.Get(ctx, "pay@0192f1c2-2222-7c4d-9e5f-6a7b8c9d0e
 if err != nil {
 	log.Fatal(err)
 }
-fmt.Println(payment.Amount)
+fmt.Println(payment.AmountUSD)
 ```
 
 `WithIdempotencyKey(key)` sets the `Idempotency-Key` of a create (see the README). Cancelling the
@@ -95,11 +97,11 @@ context cancels the request and any wait between retries.
 
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
-| `Payments.CreateSession(*qbf.CreateSessionOptions)` | `CheckoutSessions.CreatePayment(*CreatePaymentSessionParams)` | plain values instead of pointers; `ProductID` → `ProductUUID`; new `ExpiresInMinutes` and `Fees`; returns `*CheckoutSession` (`UUID`, `Link`, `ExpiresAt`) |
-| `Subscriptions.CreateSession(*qbf.CreateSubscriptionSessionOptions)` | `CheckoutSessions.CreateSubscription(*CreateSubscriptionSessionParams)` | `Frequency`/`TrialPeriod` are `*Duration`, `MinPeriods` `*uint32`, each optional over a subscription product's terms |
-| `TransactionStatus.GetTransactionStatus(uuid, txType)` | `CheckoutSessions.GetStatus(uuid)` | no type argument; four statuses (§ 9) |
-| `TransactionStatus.GetTransactionStatusWSURL(…)` | removed | the WebSocket is the checkout page's: use webhooks, or poll `GetStatus` |
-| `Payments.GetSession(uuid)`, `Subscriptions.GetSession(uuid)` | removed | `GetStatus` for the state; the session's data comes with `checkout.expired` |
+| `Payments.CreateSession(*qbf.CreateSessionOptions)` | `CheckoutSessions.CreatePayment(*CreatePaymentSessionParams)` | `POST /checkout-sessions/payment`; plain values instead of pointers; `ProductID` → `ProductUUID`; `Price` → `PriceUSD` (a string: `"4.99"`); new `ExpiresInMinutes`, `Metadata` and `Fees`; returns `*CreatedCheckoutSession` (`Link`, `UUID`, `ExpiresAt`) |
+| `Subscriptions.CreateSession(*qbf.CreateSubscriptionSessionOptions)` | `CheckoutSessions.CreateSubscription(*CreateSubscriptionSessionParams)` | `POST /checkout-sessions/subscription`; `Frequency`/`TrialPeriod` are `*Duration`, `MinPeriods` `*uint32`, each optional over a subscription product's terms |
+| `TransactionStatus.GetTransactionStatus(uuid, txType)` | `CheckoutSessions.Get(uuid)` | `GET /checkout-sessions/:uuid`; no type argument; four statuses (§ 9) |
+| `TransactionStatus.GetTransactionStatusWSURL(…)` | removed | the WebSocket is the checkout page's: use webhooks, or poll `Get` (`WaitForCompletion`) |
+| `Payments.GetSession(uuid)`, `Subscriptions.GetSession(uuid)` | removed | `Get` for the state; the session's data comes with `checkout.expired` |
 | — | `CheckoutSessions.Expire(uuid)` | new: end an unpaid session |
 
 ### Payments
@@ -107,9 +109,9 @@ context cancels the request and any wait between retries.
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
 | `Payments.GetPayment(uuid)` | `Payments.Get(uuid, *ReadParams)` | `pay@…` or the bare UUID |
-| `Payments.GetPaymentByReference(ref)` | `Payments.GetByReference(ref)` | |
-| `Payments.GetAllPayments(limit, cursor)` | `Payments.List(*PaymentListParams)`, `Payments.Iterate` | filters: customer, product, dates, `Refunded`, `IncludeMembers` / `UserUUID` |
-| `Payments.GetAllCombinedPayments(limit, cursor)` | `Payments.ListCombined(*CombinedPaymentListParams)`, `Payments.IterateCombined` | + `Source`, `SubscriptionUUID` |
+| `Payments.GetPaymentByReference(ref)` | `Payments.GetByReference(ref)` | runs `GET /payments?reference=`; a `*NotFoundError` when none |
+| `Payments.GetAllPayments(limit, cursor)` | `Payments.List(*PaymentListParams)`, `Payments.Iterate` | filters: customer, product, dates, `Reference`, `Refunded`, `IncludeMembers` / `UserUUID` |
+| `Payments.GetAllCombinedPayments(limit, cursor)` | `Transactions.List(*TransactionListParams)`, `Transactions.Iterate` | `GET /transactions`; `CombinedPayment` → `Transaction`; `Source` → `Type` (`TransactionKindPayment`, `TransactionKindBill`); + `SubscriptionUUID` |
 | `Payments.GetCustomerForTransaction(txUUID)` | removed | `Payment.Customer` (a summary), or `Customers.Get(payment.CustomerUUID)` |
 | — | `Failures.List`, `Failures.Iterate` | new: the failed payment attempts |
 
@@ -118,36 +120,39 @@ context cancels the request and any wait between retries.
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
 | `Subscriptions.GetSubscription(uuid)` | `Subscriptions.Get(uuid, *ReadParams)` | cancelled subscriptions are returned too: a 404 no longer means "cancelled" |
-| `Subscriptions.GetSubscriptionByReference(ref)` | `Subscriptions.GetByReference(ref)` | |
-| `Subscriptions.GetPaymentHistory(uuid)` | `Subscriptions.ListBills(uuid, *BillListParams)` / `IterateBills`, or `GetPublicHistory(uuid)` | `ListBills` pages every full bill; `GetPublicHistory` is the public route (10 latest, merchant-only fields empty) |
-| `Subscriptions.ForceCancel(uuid)` | `Subscriptions.Cancel(uuid, *CancelSubscriptionParams)` | a POST now, never retried; returns `*SubscriptionCancellation{Subscription, Pending}` (`Pending`: HTTP 202, still confirming on-chain); `Immediate: new(false)` cancels at the end of the paid period |
-| `Subscriptions.ExecuteTestBillingCycle(uuid)` | `Subscriptions.ExecuteTestBilling(uuid)` | a POST; returns the bill's `*BillingState`; `409 payment_not_due` before `NextBillingDate` |
-| — | `Subscriptions.List`, `Iterate`, `GetBill` | new |
+| `Subscriptions.GetSubscriptionByReference(ref)` | `Subscriptions.GetByReference(ref)` | runs `GET /subscriptions?reference=`; a `*NotFoundError` when none |
+| `Subscriptions.GetPaymentHistory(uuid)` | `Subscriptions.ListBills(uuid, *BillListParams)` / `IterateBills` | `GET /subscriptions/:uuid/bills`: every full bill, page by page (the customer's public 10-bill history is not part of the SDK) |
+| `Subscriptions.ForceCancel(uuid)` | `Subscriptions.Cancel(uuid, *CancelSubscriptionParams)` | `POST /subscriptions/:uuid/cancel`, never retried; returns `*SubscriptionCancellation{Subscription, Pending}` (`Pending`: HTTP 202, still confirming on-chain); `Immediate: new(false)` cancels at the end of the paid period |
+| `Subscriptions.ExecuteTestBillingCycle(uuid)` | `Subscriptions.TestBill(uuid)` | `POST /subscriptions/:uuid/test-bill`; returns a `*TestBill` (`BillUUID` `sub-hist@…`, `Stage`, `Outcome`); `409 payment_not_due` before `NextBillingAt`, `400 test_mode_only` for a live one |
+| — | `Subscriptions.List`, `Iterate`, `Update` (metadata, merged), `GetBill` (`GET /bills/:uuid`) | new |
 | `PayAsYouGo.*` (`GetSession`, `GetSubscription`, `GetSubscriptionByReference`, `GetPaymentHistory`, `ForceCancel`, `ExecuteTestBillingCycle`) | removed | the API has no pay-as-you-go routes |
 
 ### Refunds
 
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
-| `Refunds.GetAll()` | `Refunds.List(*RefundListParams)` | the refunds awaiting an answer; from the organization's space the members' are included by default (`IncludeMembers: new(false)` leaves them out) |
-| `Refunds.GetAllInactive(limit, cursor)` | `Refunds.ListInactive(*RefundListParams)`, `Refunds.IterateInactive` | |
-| `Refunds.GetByTransactionUUID(txUUID)` | removed | `Payment.Refund` / `Bill.Refund` (a `RefundSummary`), or the lists |
-| — | `Refunds.Initiate(*InitiateRefundParams)` | new: a pending refund you sign in the dashboard |
+| `Refunds.GetAll()` | `Refunds.List(&RefundListParams{Status: []RefundStatus{RefundStatusPending}})`, `Refunds.Iterate` | `GET /refunds`, paginated; from the organization's space the members' are included by default (`IncludeMembers: new(false)` leaves them out) |
+| `Refunds.GetAllInactive(limit, cursor)` | `Refunds.List(&RefundListParams{Status: []RefundStatus{RefundStatusApproved, RefundStatusRejected}})`, `Refunds.Iterate` | one list, filtered by `Status` (repeatable, up to 5) |
+| `Refunds.GetByTransactionUUID(txUUID)` | `Refunds.List(&RefundListParams{TxUUID: txUUID})` | or `Payment.Refund` / `Bill.Refund` (a `RefundSummary`) |
+| — | `Refunds.Get(refundUUID)` | new: `GET /refunds/:uuid` |
+| — | `Refunds.Create(*CreateRefundParams)` | new: `POST /refunds`, a pending refund you sign in the dashboard (`RefundPercent` a string, `"50"`) |
 
 ### Customers and products
 
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
-| `Customers.Create(*qbf.CreateCustomer)` | `Customers.Create(*CreateCustomerParams)` | optional fields are plain strings (`""` = absent) |
-| `Customers.Get`, `GetByEmail`, `GetByReference`, `Delete` | same names | `ctx` first |
-| `Customers.Update(uuid, *qbf.UpdateCustomer)` | `Customers.Update(uuid, *UpdateCustomerParams)` | `Name`, `LastName`, `Email` are strings (`""` = unchanged); `PhoneNumber`, `Address` stay `*string`, and `new("")` now **clears** them |
-| `Customers.GetAll(limit, cursor)` | `Customers.List(*CustomerListParams)`, `Customers.Iterate` | filters `Email`, `Verified` |
-| `Products.Create(*qbf.CreateProduct)` | `Products.Create(*CreateProductParams)` | `Description` optional; `Reference` a string; `Subscription` terms make a subscription product |
-| `Products.Get(id uint64)` | `Products.Get(uuid string)` | |
-| `Products.GetAll()` | `Products.List(*ProductListParams)` | `IncludeHidden`, `Subscription` |
-| `Products.GetByReference(ref)` | `Products.GetByReference(ref)` | |
-| `Products.Update(id, *qbf.UpdateProduct)` | `Products.Update(uuid, *UpdateProductParams)` | `Name` a string (`""` = unchanged); `Description`, `Price`, `IsActive` pointers; `Subscription`, `RemoveSubscription` |
-| `Products.Delete(id)` | `Products.Delete(uuid)` | |
+| `Customers.Create(*qbf.CreateCustomer)` | `Customers.Create(*CreateCustomerParams)` | `POST /customers`; `Name` → `FirstName`; optional fields are plain strings (`""` = absent); + `Metadata` |
+| `Customers.Get`, `Delete` | same names | `ctx` first; `Delete` answers `204` |
+| `Customers.GetByReference(ref)` | `Customers.GetByReference(ref)` | runs `GET /customers?reference=`; a `*NotFoundError` when none |
+| `Customers.GetByEmail(email)` | `Customers.List(&CustomerListParams{Email: email})` | removed: an email may match several customers |
+| `Customers.Update(uuid, *qbf.UpdateCustomer)` | `Customers.Update(uuid, *UpdateCustomerParams)` | `PATCH`; `FirstName`, `Email` are strings (`""` = unchanged); `LastName`, `PhoneNumber`, `Address` are `*string`, and `new("")` **clears** them; `Metadata` is merged |
+| `Customers.GetAll(limit, cursor)` | `Customers.List(*CustomerListParams)`, `Customers.Iterate` | filters `Email`, `Reference`, `Verified` |
+| `Products.Create(*qbf.CreateProduct)` | `Products.Create(*CreateProductParams)` | `POST /products`; `Price` → `PriceUSD` (a string); `Description` optional; `Reference` a string; `Subscription` terms make a subscription product; + `Metadata` |
+| `Products.Get(id uint64)` | `Products.Get(uuid string)` | `GET /products/:uuid` |
+| `Products.GetAll()` | `Products.List(*ProductListParams)`, `Products.Iterate` | paginated now; `IncludeHidden`, `Subscription`, `Reference` |
+| `Products.GetByReference(ref)` | `Products.GetByReference(ref)` | runs `GET /products?reference=` (hidden ones included); a `*NotFoundError` when none |
+| `Products.Update(id, *qbf.UpdateProduct)` | `Products.Update(uuid, *UpdateProductParams)` | `PATCH`; `Name`, `PriceUSD` strings (`""` = unchanged); `Description`, `IsActive` pointers; `Subscription`, `RemoveSubscription`, `Metadata` (merged) |
+| `Products.Delete(id)` | `Products.Delete(uuid)` | `204` |
 | `CreateProduct.Validate()`, `UpdateProduct.Validate()` | `CreateProductParams.Validate()`, … | every params type has `Validate`, run before each request |
 
 ### Users, claims and API keys (→ § 7)
@@ -158,25 +163,25 @@ context cancels the request and any wait between retries.
 | `Users.GetAll()` | `Members.List(*MemberListParams)`, `Members.Iterate` | |
 | `Users.GetByID(id)` | `Members.Get(userUUID)` | |
 | `Users.GetByEmail(email)` | removed | iterate `Members` and match `Member.Email` |
-| `Users.Update(id, *qbf.UpdateUser)` | `Members.Update(userUUID, *UpdateMemberParams)` | only the organization fee: names and emails are the person's own |
-| `Users.Delete(id)` | `Members.Remove(userUUID)` | ends the membership (`409 held_funds_pending` while you hold their funds) |
+| `Users.Update(id, *qbf.UpdateUser)` | `Members.Update(userUUID, *UpdateMemberParams)` | `PATCH`; only the organization fee (`OrganizationFeePercent`, a required string): names and emails are the person's own |
+| `Users.Delete(id)` | `Members.Remove(userUUID)` | ends the membership (`204`; `409 held_funds_pending` while you hold their funds) |
 | `Users.Get()` | `client.Me()` | what the key is: its role, space and mode |
 | `Claims.CreateClaimRequest(userID)`, `Claims.GetClaimRequestByUserID(userID)` | `Invitations.Create`, `Invitations.List` | the invitation link replaces the claim link |
-| `Claims.GetClaimFunds()` | `Members.ListHeldFunds()`, `Members.GetHeldFunds(userUUID)`, `Members.GetOwnHeldFunds()` | |
+| `Claims.GetClaimFunds()` | `Members.ListHeldFunds()` (a `[]MemberHeldFunds`), `Members.GetHeldFunds(userUUID)`, `Members.GetOwnHeldFunds()` (`GET /held-funds`) | |
 | `Claims.TriggerTestClaimFunds(userID)` | removed | release held funds in the dashboard; `Members.Trust(userUUID)` pays new payments directly |
 | `ApiKeys.GetAll()`, `ApiKeys.GetForUser(userID)` | removed | keys are managed in the dashboard; `client.Me()` describes the current one |
-| — | `Invitations.Revoke`, `Invitations.Iterate`, `Members.Trust` | new |
+| — | `Invitations.Revoke` (`204`: returns only an error), `Invitations.Iterate`, `Members.Trust` | new |
 
 ### Wallets, accounting, currencies
 
 | 2.x | 3.0.0 | Notes |
 |---|---|---|
-| — | `Wallets.List(*WalletListParams)`, `Wallets.ListForMember(userUUID)`, `Wallets.ListSupportedCurrencies(*SupportedCurrenciesParams)` | new |
-| `Accounting.Export(qbf.AccountingExportParams{From, To})` | `Accounting.ExportJSON(from, to)` | dates `YYYY-MM-DD`; the API allows 95 days at most |
-| — | `Accounting.ExportCSV(from, to)` | the same export as CSV text |
-| `Currencies.GetAllAvailable(test)` | `Currencies.ListAvailable(&CurrencyListParams{Test: test})` | |
-| `Currencies.GetAllMain(test)` | `Currencies.ListMain(&CurrencyListParams{Test: test})` | |
-| — | `Currencies.Get(id)` | new |
+| — | `Wallets.List(*WalletListParams)`, `Wallets.ListForMember(userUUID)` (`GET /members/:userUuid/wallets`), `Wallets.ListAcceptedCurrencies(*AcceptedCurrenciesParams)` (`GET /wallets/accepted-currencies`) | new; each returns a slice |
+| `Accounting.Export(qbf.AccountingExportParams{From, To})` | `Accounting.ExportJSON(from, to)` | dates `YYYY-MM-DD`; the API allows 92 days at most, both included (`ExportJSONRange` for more) |
+| — | `Accounting.ExportCSV(from, to)`, `ExportJSONRange`, `ExportCSVRange` | the same export as CSV text; any range in 92-day windows |
+| `Currencies.GetAllAvailable(test)` | `Currencies.List(&CurrencyListParams{Test: test})` | `GET /currencies`, a slice |
+| `Currencies.GetAllMain(test)` | `Currencies.List(&CurrencyListParams{Test: test, Main: true})` | |
+| — | `Currencies.Get(id)` | new: `GET /currencies/:id` |
 
 ### Webhooks (→ § 11)
 
@@ -192,7 +197,7 @@ context cancels the request and any wait between retries.
 | `TEST_WEBHOOK_ID` | `qbitflow.EventTypeWebhookTest` | |
 | `qbf.VerifyOptions{MaxTimestampAge, Now, SkipTimestampCheck}`, `DefaultMaxTimestampAge` | `qbitflow.WithTolerance(d)`, `qbitflow.WithClock(f)`, `DefaultWebhookTolerance` | the timestamp check can no longer be skipped |
 | `qbmodels.SessionWebhookResponse`, `qbmodels.SubscriptionStatusTransitionWebhook` | `*qbitflow.Event` and its accessors | § 11 |
-| — | `Webhooks.Endpoints.*`, `Webhooks.Events.*` | new: endpoints and the event log |
+| — | `Webhooks.Endpoints.*` (`List` / `Iterate` paginated, `Create`, `Get`, `Update` (PATCH), `Delete`), `Webhooks.Events.*` (`List`, `Iterate`, `Get`) | new: endpoints and the event log |
 
 ### Errors and helpers (→ § 10)
 
@@ -214,13 +219,14 @@ Every id but a currency's is a UUID string now, and no resource names its organi
   `OnBehalfOf(123)` becomes `OnBehalfOf("0192f1c2-…")`; a numeric value is refused. `UserID` →
   `UserUUID` everywhere (`""` for the organization's own rows).
 - **`OrganizationID` is gone** from every model; `Me().Space.OrganizationUUID` names the organization.
-- **Transactions** keep their prefixed ids (`pay@…`, `sub@…`, `sub-hist@…`, `refund@…`), as opaque
-  strings. `TxID` → `TxUUID`, `TransactionHash` → `TxHash`.
+- **Transactions** keep their prefixed ids (`pay@…`, `sub@…`, `sub-hist@…`, `refund@…`,
+  `transfer@…`, `release@…`), as opaque strings; every route also takes the bare UUID. `TxID` →
+  `TxUUID`, `TransactionHash` → `TxHash`.
 - **JSON keys** are lowerCamelCase with acronyms as words (`customerUuid`, `subscriptionUuid`,
   `txHash`); only matters if you stored raw responses.
 
-**Map the numeric ids you stored** before v1 is turned off: list your products
-(`Products.List(ctx, &qbitflow.ProductListParams{IncludeHidden: true})`, in each space you act in)
+**Map the numeric ids you stored**: walk your products
+(`Products.Iterate(ctx, &qbitflow.ProductListParams{IncludeHidden: true})`, in each space you act in)
 and match them on `Reference`, which did not change, and your members (`Members.Iterate`, in each
 mode) on `Email`; store the UUIDs next to your old ids. The SDK does not expose the API's
 temporary `legacyId` field.
@@ -231,12 +237,12 @@ v1 provisioned sellers (`Users.Create`) and could sell for them at once, the sel
 account and its funds later. **v2 creates no accounts: a seller sells only once they accepted an
 invitation.**
 
-1. `Invitations.Create(ctx, &qbitflow.CreateInvitationParams{Email, TrustLayer, OrganizationFeePercent, RedirectURL})`
-   returns the invitation and its link (also emailed).
+1. `Invitations.Create(ctx, &qbitflow.CreateInvitationParams{Email, HoldFunds, OrganizationFeePercent, RedirectURL})`
+   returns a `*CreatedInvitation`: the invitation's fields and its `Link` (also emailed).
 2. Wait for the `member.joined` webhook and store its `UserUUID` (match `InvitationUUID`).
 3. Sell with `client.OnBehalfOf(userUUID)`.
 
-`TrustLayer: true` (the v1 "claim" model) holds the seller's payments in your wallet until you
+`HoldFunds: true` (the v1 "claim" model; always sent) holds the seller's payments in your wallet until you
 trust them: `Members.GetHeldFunds` shows what you owe, `Members.Trust` makes new payments go to
 the seller directly, and the release of what is held is signed in the dashboard. Sellers v1
 provisioned are already members; those who never claimed are members whose funds you hold
@@ -244,35 +250,49 @@ provisioned are already members; those who never claimed are members whose funds
 
 ## 8. Models
 
-Fee rates are **percents** now, everywhere: `FeeBps: 150` → `FeePercent: 1.5`,
-`OrganizationFeeBps: 250` → `OrganizationFeePercent: 2.5`, `ReferralFee.FeeBps` → `FeePercent`.
+**Money is a decimal string, never a float**, in requests and in responses: USD amounts
+(`PriceUSD: "4.99"`, `AmountUSD`, `PaidUSD`, `TotalUSD`), token amounts in the token's units
+(`Amount: "10"` for 10 USDC, next to `AmountMinUnits: "10000000"` and the `Currency` object) and
+fee rates in **percent** (`FeeBps: 150` → `FeePercent: "1.5"`, `OrganizationFeeBps: 250` →
+`OrganizationFeePercent: "2.5"`, `RefundPercent: "50"`). Inputs are validated before sending (at
+most 2 decimals, no sign or exponent); a JSON number would be refused by the API. Use a decimal
+library, or `FormatAmount` / `ParseAmount`, to compute with them.
 
 | 2.x (`qbmodels`) | 3.0.0 (`qbitflow`) | What changed |
 |---|---|---|
-| `LinkResponse` | `CheckoutSession` | + `ExpiresAt` |
-| `TransactionStatus` | `CheckoutSessionStatus` | `Status` is a `CheckoutSessionStatusValue`; + `UUID`, `TxHash`, `Message`, `LastAttempt` |
-| `SessionCheckout` | removed | `PaymentSessionData` / `SubscriptionSessionData` in `checkout.expired` |
-| `Payment` | `Payment` | `TransactionHash` → `TxHash`; `ProductID *uint64` → `ProductUUID string`; `Reference *string` → `string`; `Currency` → `*Currency`; `Metadata *PaymentMetadata` → `PaymentMetadata`; `UserID` → `UserUUID`; `CustomerUUID` kept; + `Chain`, `ExplorerURL`, `CustomerReference`, `Customer`, `Refund`, `Refundable`, `PaidMinUnits`, `PaidUSD`, `ConfirmedAt`, `Price`, `Fees` |
-| `CombinedPayment` | `CombinedPayment` | `Source` is a `CombinedPaymentSource` (`subscription_history` → `subscriptionHistory`); `SubscriptionUUID *string` → `string`; + `Currency`, `Refund`, `Reference`, `SubscriptionReference` |
-| `Subscription` | `Subscription` | `SubscriptionStatus` → `Status`; `Stopped bool` → the status `stopped`; `Frequency uint32` (seconds) → `Duration`; `ProductID` → `ProductUUID`; `Reference *string` → `string`; `LastBillingDate *time.Time` → `time.Time`; `NextBillingDate time.Time` → `*time.Time` (nil once cancelled); `Currency` → `*Currency`; + `CurrentPeriodEnd`, `ActionRequired`, `PriceUSD`, `MaxAmountPerPeriod`, `CancelledAt`, `CancellationReason`, `CustomerReference`, `Customer`, `Dunning` |
-| `SubscriptionHistory` | `Bill` | the `Payment` renames; + `PeriodStart`, `PeriodEnd` |
-| `RefundEntry` | `Refund` | `TxID` → `TxUUID`; + `InitiatedBy`, `RefundPercent`, `PaidMinUnits`, `PaidUSD`, `AmountUSD`, `CurrencyID`, `Held`, `Chain`, `ExplorerURL`, `Customer` |
-| `Customer` | `Customer` | `PhoneNumber`, `Address`, `Reference`: `*string` → `string`; + `Verified` |
-| `Product` | `Product` | `ID uint64` → `UUID string`; + `Subscription`, `PaymentLink` |
-| `User` | `Member` (or `Me`) | `ID` → `UserUUID`; `OrganizationFeeBps` → `OrganizationFeePercent`; `ClaimedAt` → `TrustedAt`; + `JoinedAt`, `AcceptedCurrencyIDs`, `SpaceUUID` |
+| `LinkResponse` | `CreatedCheckoutSession` | `Link`, `UUID`, `ExpiresAt` (always set) |
+| `TransactionStatus` | `CheckoutSessionStatus` | `Status` is a `CheckoutSessionStatusValue`; + `UUID`, `TxHash`, `Message`, `LastAttempt`, `ExpiresAt` |
+| `SessionCheckout` | removed | `PaymentSessionData` / `SubscriptionSessionData` in `checkout.expired` (`PriceUSD`, `Fees`, `AmountUSD`, `AvailableCurrencies`, `Metadata`) |
+| `Payment` | `Payment` | `Amount` is now the **token amount** (a string), its USD value `AmountUSD`; `TransactionHash` → `TxHash`; `Name` / `Description` → `ProductName` / `ProductDescription`; `ProductID *uint64` → `ProductUUID string`; `Reference *string` → `string`; `CurrencyID` → the `Currency` object (a value); `Metadata` (the fee split) → `Settlement`, and `Metadata` is now your checkout's `map[string]string`; `UserID` → `UserUUID`; + `PriceUSD`, `Fees`, `Chain`, `ExplorerURL`, `CustomerReference`, `Customer`, `Refund`, `Refundable`, `Paid`, `PaidMinUnits`, `PaidUSD`, `ConfirmedAt` |
+| `CombinedPayment` | `Transaction` (`Transactions.List`) | `Source` → `Type` (`TransactionKind`: `payment`, `bill`); the `Payment` renames; + `PriceUSD`, `Fees`, `PeriodStart`, `PeriodEnd`, `Settlement`, `Paid*`, `Metadata` |
+| `Subscription` | `Subscription` | `SubscriptionStatus` → `Status`; `Stopped bool` → the status `stopped`; `Frequency uint32` (seconds) → `Duration`; `ProductID` → `ProductUUID`; `Reference *string` → `string`; `LastBillingDate` → `LastBilledAt`, `NextBillingDate` → `NextBillingAt`, `MinimumCancellationDate` → `CancellableAt` (all `*time.Time`, nil when absent); `Allowance` (min units) and `MaxAmountPerPeriod` → `Allowance *Allowance` (`Amount`, `AmountMinUnits`, `AmountUSD`, `RemainingPeriods`, `MaxPerPeriod`, `MaxPerPeriodMinUnits`); `CurrencyID` → `Currency`; + `CurrentPeriodEnd`, `ActionRequired`, `PriceUSD`, `Fees`, `CancelledAt`, `CancellationReason`, `Metadata`, `ManagementPageLink`, `CustomerReference`, `Customer`, `Dunning` |
+| `SubscriptionHistory` | `Bill` | the `Payment` renames (no `Metadata`, no `PriceUSD`: read the subscription's); + `Settlement`, `PeriodStart`, `PeriodEnd` |
+| `RefundEntry` | `Refund` | `TxID` → `TxUUID`; amounts as strings; `Metadata` → `Settlement` (a `TransferSettlement`, once approved); `CurrencyID` → `Currency`; + `InitiatedBy`, `RefundPercent`, `Paid`, `PaidMinUnits`, `PaidUSD`, `Amount`, `AmountMinUnits`, `AmountUSD`, `Held`, `Chain`, `ExplorerURL`, `Approval`, `Customer` |
+| `Customer` | `Customer` | `Name` → `FirstName`; `PhoneNumber`, `Address`, `Reference`: `*string` → `string`; + `Verified`, `Metadata` |
+| `Product` | `Product` | `ID uint64` → `UUID string`; `Price` (a float) → `PriceUSD` (a string); + `Subscription`, `PaymentLink`, `Metadata` |
+| `User` | `Member` (or `Me`) | `ID` → `UserUUID`; `Name` → `FirstName`; `OrganizationFeeBps` → `OrganizationFeePercent` (a string); `ClaimedAt` → `TrustedAt`; + `JoinedAt`, `AcceptedCurrencies` (`[]Currency`), `SpaceUUID` |
+| — | `HeldFunds`, `LedgerEntry`, `MemberHeldFunds` | `TotalUSD`; each line's `AmountUSD`, `Settlement`, `Currency`, `Owed`, `OwedMinUnits`, `OwedUSD` |
+| — | `Invitation`, `CreatedInvitation` | `HoldFunds`, `OrganizationFeePercent` (a string); `CreatedInvitation` is flat: the invitation's fields and `Link` |
+| — | `Wallet`, `TokenWallet`, `Balance` | `Wallet.Address`, `Wallet.Currency`; `TokenWallet.Currency`; `Balance` = the `Currency` + `Amount`, `AmountMinUnits`, `AmountUSD` |
 | `UserRole` (`RoleAdmin`, `RoleUser`) | `Role` (+ `RoleOwner`, `RoleHandle`) | |
-| `AccountingEvent` | `AccountingEvent` | `PaymentID` → `PaymentUUID`; `RelatedPaymentID` → `RelatedPaymentUUID`; `ProductID uint64` → `ProductUUID string`; `TokenSymbol` → `Currency` (always set, a native currency's too); amounts (`GrossAmount`, `PlatformFee`, `OrganizationFee`, `NetAmount`, `NetworkFees`) are in the currency's units, not its min units (`"7.5"`, not `"7500000"`); network fees are never part of `NetAmount` (a refund's net is the refunded amount); `Type` and `Chain` are typed; optional USD amounts and percents are pointers; fields in the CSV's column order; + `UserUUID`, `ReferralFee*`, `CurrencyPriceUSD`, `NetworkFeesPaidBy` (`NetworkFeesPayer`), `NetworkFeesCurrency`, `NetworkFeesCurrencyDecimals`, `NetworkFeesCurrencyPriceUSD` |
-| `PaymentMetadata` | `PaymentMetadata` | `FeeBps` → `FeePercent`; `TxAmounts TxAmountsFull` → `TxAmounts TxAmounts` (`Usd` → `USD`); optional USD amounts are pointers; + network fees |
-| `OrganizationFee{OrganizationID, Organization, FeeBps}` | `OrganizationFee{Organization, FeePercent}` | |
-| `ReferralFee{ReferralID, Referrer, FeeBps, Deadline}` | `ReferralFee{Referrer, FeePercent, Deadline}` | |
-| `Currency` | `Currency` | `Decimals int` → `uint8` |
+| `AccountingEvent` | `AccountingEvent` | `PaymentID` → `TxUUID`; `RelatedPaymentID` → `RelatedTxUUID`; `PaymentReference` / `RelatedPaymentReference` → `Reference` / `RelatedReference`; `ProductID uint64` → `ProductUUID string`; `TokenSymbol` → `Currency` (always set, a native currency's too); every amount, USD amount and rate is a decimal string, the amounts in the currency's units (`"7.5"`, not `"7500000"`) with a `…MinUnits` twin; a fee that doesn't apply is `""` (absent), never `"0"`; network fees are never part of `NetAmount`; `Type` and `Chain` are typed; fields in the CSV's column order; + `UserUUID`, `ReferralFee*`, `CurrencyPriceUSD`, `NetworkFeesPaidBy` (`NetworkFeesPayer`), `NetworkFeesCurrency`, `NetworkFeesCurrencyDecimals`, `NetworkFeesCurrencyPriceUSD` |
+| `PaymentMetadata` | `Settlement` | `FeeBps` → `FeePercent` (a string); `TxAmounts` → `Split` (`Platform`, `Organization`, `Referral`, `Merchant`, `NetworkFee`, each a `TokenAmount`: `Amount`, `AmountMinUnits`, `AmountUSD`; `Platform` no longer includes the referrer's share); the transaction's block and fees → `Transaction` (`SettlementTransaction`: `BlockNumber`, `BlockTime`, `GasUsed`, `Fee`, `L1Fee`, `NativePriceUSD`) |
+| `OrganizationFee{OrganizationID, Organization, FeeBps}` | `OrganizationFee{Address, FeePercent}` | |
+| `ReferralFee{ReferralID, Referrer, FeeBps, Deadline}` | `ReferralFee{Address, FeePercent, Deadline}` | |
+| `Currency` | `Currency` | `Decimals int` → `uint8`; + `Code` (`BASE:USDC`), `Chain`; `Address` absent on a native coin; no nested `MainCurrency` |
 | `Duration{Value int, Unit}` | `Duration{Value uint32, Unit}` | `Value: 0` means none |
-| `CursorData[T]` | `Page[T]` | same `Items`, `NextCursor`, `HasMore()` |
+| `CursorData[T]` | `Page[T]` | `Items`, `HasMore` (a field), `NextCursor` (a `string`, `""` on the last page) |
 | `ApiKey`, `Organization`, `CreateClaimRequestResponse`, `ClaimFund`, `StatusResponse`, `SuccessResponse`, `ErrorResponse`, `SubscriptionType`, `TransactionShortType` | removed | |
 
 **Typing rule.** An optional string is `""` when absent; any other optional field is a pointer
-(`nil` when absent); a field the API always sends is a value. Request params follow the same
-rule: set a pointer inline with `new(value)`, e.g. `RefundPercent: new(50.0)`.
+(`nil` when absent); a field the API always sends is a value; lists are slices and `Metadata` a
+`map[string]string`. Request params follow the same rule: set a pointer inline with
+`new(value)`, e.g. `Immediate: new(false)`.
+
+**Metadata** is new: your own `map[string]string` on products, customers, checkouts (copied onto
+the payment or subscription and into the webhooks) and subscriptions (`Subscriptions.Update`). At
+most 50 keys of 1 to 40 characters among `A-Z a-z 0-9 _ - . :`, values of at most 500 characters;
+an update merges it (`""` deletes a key).
 
 ## 9. Enum values and statuses
 
@@ -289,7 +309,7 @@ Enum values are lowerCamelCase on the wire, and every enum keeps unknown values 
 | `SubscriptionStatusCancelled` (`cancelled`) | `SubscriptionStatusCancelled` |
 | `SubscriptionStatusLowOnFunds` (`low_on_funds`) | no status: `ActionRequired == ActionRequiredTopUpAllowance` |
 | `SubscriptionStatusPending` (`pending`) | no status: `ActionRequired == ActionRequiredRaiseMaximum` |
-| `Subscription.Stopped == true` | `SubscriptionStatusStopped` (`stopped`): cancelled at `NextBillingDate` |
+| `Subscription.Stopped == true` | `SubscriptionStatusStopped` (`stopped`): cancelled at `NextBillingAt` |
 | — | `SubscriptionStatusPaused` (`paused`): paused by the customer |
 
 **Grant access while `now < CurrentPeriodEnd`**, whatever the status: a check like
@@ -309,9 +329,10 @@ cancel an order on it.
 | `TransactionTypeExecuteSubscriptionPayment` | `TransactionTypeExecuteSubscription` |
 | `TransactionTypeCreatePAYGSubscription`, `TransactionTypeCancelPAYGSubscription` (`createPAYGSubscription`…) | `TransactionTypeCreatePaygSubscription`, `TransactionTypeCancelPaygSubscription` (`createPaygSubscription`…) |
 | — | `TransactionTypeForceCancelSubscription`, `TransactionTypeReleaseHeldFunds` |
-| `RefundStatusFailed` | removed (`pending`, `approved`, `rejected` remain) |
-| `CombinedPayment.Source` `"subscription_history"` | `CombinedPaymentSourceSubscriptionHistory` (`subscriptionHistory`) |
-| `AccountingEvent.Type` (a string) | `AccountingEventType` constants |
+| `RefundStatus` | `pending`, `approved`, `rejected`, + `cancelled` (your draft dropped before it was sent); `failed` is declared, never set |
+| `CombinedPayment.Source` `"subscription_history"` | `Transaction.Type` `TransactionKindBill` (`bill`) |
+| `AccountingEvent.Type` (a string) | `AccountingEventType` constants (`subscription_history` → `AccountingEventTypeBill`, `bill`) |
+| ledger lines `subscription_history` | `LedgerEntryTypeBill` (`bill`) |
 
 ## 10. Errors
 
@@ -341,6 +362,8 @@ not a type switch:
   (`frequency.unit`).
 - **Branch on `Code`**, never on `Message`: `unique_violation` (`Details["field"]`),
   `merchant_not_ready`, `tx_already_sent`, `policy_disabled`…
+- **`GetByReference`** runs the list's `?reference=` filter: no match is a `*NotFoundError`
+  (status 404, code `not_found`), like an unknown UUID.
 - Every error carries the request's `RequestID`: log it, and quote it to support.
 
 ## 11. Webhooks
@@ -357,15 +380,16 @@ The webhook scheme is new; 2.x verification code does not carry over.
 
 - **Read the raw body and never re-serialize it** before verifying: `VerifyWebhookRequest` does it
   for `net/http`.
-- **Endpoints must be on payload version v2.** v1 webhook URLs were migrated as endpoints with
-  `PayloadVersion` `v1`, which still receive v1's bodies; 3.0.0 does not parse them (`ParseEvent`
-  returns a `*ValidationError`). Move each endpoint to v2 in the dashboard, or with
-  `client.Webhooks.Endpoints.Update(ctx, uuid, &qbitflow.UpdateWebhookEndpointParams{PayloadVersion: qbitflow.WebhookPayloadVersionV2})`,
-  when your receiver runs 3.0.0. Moving keeps the endpoint's secret.
+- **v2 only.** Every endpoint receives the v2 envelope (v1 is retired and every endpoint was moved
+  to v2); a body of another version is a `*ValidationError` from `ParseEvent`.
 - **Event types** replace the two 2.x payloads: v1's transaction webhook becomes
   `payment.completed` / `subscription.created`, its subscription webhook `subscription.billed` /
-  `subscription.statusChanged`, plus 11 new types (`checkout.expired`, `refund.*`,
-  `member.joined`, …). Decode each with its accessor (`event.PaymentCompleted()`, …).
+  `subscription.statusChanged`, plus 11 new types (`checkout.expired`, `refund.requested`,
+  `refund.approved`, `refund.rejected`, `member.joined`, …). Decode each with its accessor
+  (`event.PaymentCompleted()`, …), or register a typed handler on a `WebhookRouter`.
+- `subscription.billed`'s data is `{Bill, Subscription}` (the bill paid and the subscription as it
+  leaves it); `subscription.created`'s is the `*Subscription`. Money in event data is decimal
+  strings, as in the API's answers.
 - Deliveries are at least once: deduplicate on `Event.ID`, and answer 2xx to the types you ignore.
 - Endpoints are created per space with `Webhooks.Endpoints.Create`, whose answer carries the
   `whsec_…` secret once.
@@ -373,8 +397,11 @@ The webhook scheme is new; 2.x verification code does not carry over.
 ## 12. Pagination
 
 `GetAll…(limit *uint16, cursor *string)` becomes `List(ctx, &…ListParams{Limit, Cursor, filters…})`,
-returning a `*Page[T]` (`Items`, `NextCursor`, `HasMore()`). Pass `*page.NextCursor` back as
-`Cursor`, verbatim. Every paginated list also has an iterator that walks every page lazily:
+returning a `*Page[T]` (`Items`, `HasMore`, `NextCursor`). While `page.HasMore`, pass
+`page.NextCursor` back as `Cursor`, verbatim (it is opaque). Every paginated list also has an
+iterator that walks every page lazily, and stops after the page whose `HasMore` is false. The short
+bounded lists (`Currencies.List`, `Wallets.*`, `Members.ListHeldFunds`, `Accounting.ExportJSON`)
+return a slice:
 
 ```go
 for sub, err := range client.Subscriptions.Iterate(ctx, &qbitflow.SubscriptionListParams{Limit: 100}) {
@@ -436,7 +463,7 @@ session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePayme
 if err != nil {
 	log.Fatal(err)
 }
-status, err := client.CheckoutSessions.GetStatus(ctx, session.UUID)
+status, err := client.CheckoutSessions.Get(ctx, session.UUID)
 if err != nil {
 	log.Fatal(err)
 }
@@ -466,7 +493,7 @@ for p, err := range seller.Payments.Iterate(ctx, &qbitflow.PaymentListParams{Lim
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(p.UUID, p.Amount)
+	fmt.Println(p.UUID, p.AmountUSD, "USD") // a decimal string
 }
 ```
 
@@ -505,30 +532,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ```
 
 ```go
-func handler(secret string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := qbitflow.VerifyWebhookRequest(r, secret)
-		if err != nil {
-			http.Error(w, "invalid signature", http.StatusBadRequest)
-			return
-		}
-		event, err := qbitflow.ParseEvent(body)
-		if err != nil {
-			http.Error(w, "not a v2 event", http.StatusBadRequest)
-			return
-		}
-		if event.Type == qbitflow.EventTypePaymentCompleted { // deduplicate on event.ID first
-			payment, err := event.PaymentCompleted()
-			if err != nil {
-				http.Error(w, "bad event", http.StatusBadRequest)
-				return
-			}
-			log.Println("fulfil", payment.Reference)
-		}
-		w.WriteHeader(http.StatusOK) // to every type, the ignored ones too
-	}
-}
+router := qbitflow.NewWebhookRouter(secret).
+	OnPaymentCompleted(func(ctx context.Context, payment *qbitflow.PaymentCompleted, event *qbitflow.Event) error {
+		log.Println("fulfil", payment.Reference, "once for", event.ID) // deduplicate on event.ID
+		return nil // an error answers 500: QBitFlow delivers it again
+	})
+http.Handle("POST /webhooks/qbitflow", router) // verifies, parses, answers 200 / 400 / 500
 ```
+
+Or, lower level, `qbitflow.VerifyWebhookRequest(r, secret)` then `qbitflow.ParseEvent(body)` and
+`event.PaymentCompleted()`.
 
 ### Handle an error
 
@@ -576,3 +589,21 @@ in 2.5.0); `Accounting.ExportCSV(params)` → `ExportCSV(ctx, from, to)`; `qberr
 → a fixed 1 MiB limit; `SubscriptionWebhook` and its `StatusTransition()` / `Billing()` → the
 `subscription.*` events; `RefundStatusRefused` → `RefundStatusRejected` (`rejected`, the value the
 API sends).
+
+## Names from the 3.0.0 previews
+
+3.0.0 was rebuilt against API v2's final contract before its release; if you tried a preview
+build, these names changed: `CheckoutSessions.GetStatus` → `Get`; `Payments.ListCombined` /
+`IterateCombined` → `Transactions.List` / `Iterate` (`CombinedPayment` → `Transaction`,
+`CombinedPaymentListParams` → `TransactionListParams`, `Source` → `Type`, `CombinedPaymentSource`
+→ `TransactionKind`); `Subscriptions.ExecuteTestBilling` → `TestBill` (`BillingState` →
+`TestBill`); `Refunds.Initiate` → `Create` (`InitiateRefundParams` → `CreateRefundParams`);
+`Refunds.ListInactive` / `IterateInactive` → `Refunds.List` / `Iterate` with `Status`;
+`Wallets.ListSupportedCurrencies` → `ListAcceptedCurrencies` (`SupportedCurrenciesParams` →
+`AcceptedCurrenciesParams`); `Currencies.ListAvailable` / `ListMain` → `Currencies.List` (`Main`);
+`CheckoutSession` → `CreatedCheckoutSession`; `InvitationCreated` → `CreatedInvitation` (flat);
+`MemberHeldFundsSummary` → `MemberHeldFunds`; `PaymentMetadata` & co. → `Settlement`; `Page.HasMore()`
+→ the `HasMore` field; `EventTypeRefundCompleted` / `RefundDenied` → `EventTypeRefundApproved` /
+`RefundRejected` (and the accessors and router methods); `Customers.GetByEmail` and
+`Subscriptions.GetPublicHistory` are removed; `Invitations.Revoke` returns only an error; money,
+percents and fee amounts are strings.

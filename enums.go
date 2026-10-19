@@ -52,7 +52,7 @@ const (
 	BillingFailureReasonOther               BillingFailureReason = "other"
 )
 
-// BillingStage is where a billing run is (BillingState.Stage).
+// BillingStage is where a bill stands (TestBill.Stage).
 type BillingStage string
 
 // Billing stages.
@@ -63,7 +63,7 @@ const (
 	BillingStageDone    BillingStage = "done"
 )
 
-// BillingOutcome is how a finished billing run ended (BillingState.Outcome).
+// BillingOutcome is how a bill ended (TestBill.Outcome).
 type BillingOutcome string
 
 // Billing outcomes.
@@ -71,7 +71,7 @@ const (
 	BillingOutcomePaid      BillingOutcome = "paid"
 	BillingOutcomeNotDue    BillingOutcome = "notDue"    // Nothing to bill: paid already, cancelled, or gone
 	BillingOutcomeSkipped   BillingOutcome = "skipped"   // Below the minimum amount: the period moved on without a charge
-	BillingOutcomeCancelled BillingOutcome = "cancelled" // The subscription was cancelled
+	BillingOutcomeCancelled BillingOutcome = "cancelled" // The subscription was cancelled (stopped, its trial over, its merchant closed, inactive on-chain, or its last attempt failed)
 	BillingOutcomePaused    BillingOutcome = "paused"    // Its customer paused the subscription: not charged
 )
 
@@ -83,7 +83,7 @@ const (
 	CheckoutSessionStatusCreated             CheckoutSessionStatusValue = "created"             // Waiting for the customer: nothing sent yet, or the last attempt failed (lastAttempt)
 	CheckoutSessionStatusWaitingConfirmation CheckoutSessionStatusValue = "waitingConfirmation" // A transaction was sent: waiting for the network and its record
 	CheckoutSessionStatusCompleted           CheckoutSessionStatusValue = "completed"           // Confirmed and recorded. Final
-	CheckoutSessionStatusExpired             CheckoutSessionStatusValue = "expired"             // Expired unpaid. Final
+	CheckoutSessionStatusExpired             CheckoutSessionStatusValue = "expired"             // Expired unpaid (at its expiresAt, or expired by its merchant). Final
 )
 
 // FeeLineType tells who added a line to a checkout's price (FeeLine.Type).
@@ -103,14 +103,17 @@ const (
 	AttemptStatusFailed AttemptStatus = "failed" // Not sent, not confirmed, or failed on the network: nothing was paid
 )
 
-// RefundStatus is a refund's status.
+// RefundStatus is where a refund stands. An approval and a rejection are final: the transaction
+// never gets another refund. A cancelled one never moved money and blocks nothing.
 type RefundStatus string
 
 // Refund statuses.
 const (
-	RefundStatusPending  RefundStatus = "pending"
-	RefundStatusApproved RefundStatus = "approved"
-	RefundStatusRejected RefundStatus = "rejected"
+	RefundStatusPending   RefundStatus = "pending"   // Requested, or started by the merchant and not sent yet
+	RefundStatusApproved  RefundStatus = "approved"  // The refund transfer is confirmed (refund.approved)
+	RefundStatusRejected  RefundStatus = "rejected"  // Rejected by whoever decides it (refund.rejected)
+	RefundStatusCancelled RefundStatus = "cancelled" // A merchant's refund dropped before it was sent (announced by nothing)
+	RefundStatusFailed    RefundStatus = "failed"    // Declared, never set: a failed approval leaves the refund pending
 )
 
 // RefundInitiator says who started a refund.
@@ -131,13 +134,14 @@ const (
 	NotRefundableReasonHeldFundsReleased NotRefundableReason = "heldFundsReleased"
 )
 
-// CombinedPaymentSource says what a combined feed row is.
-type CombinedPaymentSource string
+// TransactionKind says what a row of the transactions feed is (Transaction.Type). Not
+// TransactionType, which is a checkout's txType.
+type TransactionKind string
 
-// Combined feed sources.
+// Transactions feed row kinds.
 const (
-	CombinedPaymentSourcePayment             CombinedPaymentSource = "payment"             // A one-time payment (pay@…)
-	CombinedPaymentSourceSubscriptionHistory CombinedPaymentSource = "subscriptionHistory" // A subscription's bill (sub-hist@…)
+	TransactionKindPayment TransactionKind = "payment" // A one-time payment (pay@…): Payments.Get
+	TransactionKindBill    TransactionKind = "bill"    // A subscription's bill (sub-hist@…): Subscriptions.GetBill
 )
 
 // FailureKind says what a failed attempt was paying.
@@ -165,7 +169,7 @@ const (
 	FailureCategoryOther               FailureCategory = "other"
 )
 
-// Chain is a blockchain (the testnet's in test mode).
+// Chain is a blockchain, by its native coin's symbol (Currency.Chain; the testnet's in test mode).
 type Chain string
 
 // Chains.
@@ -198,7 +202,7 @@ const (
 	TransactionTypeReleaseHeldFunds        TransactionType = "releaseHeldFunds"
 )
 
-// TransferType is a transfer's kind (heldFunds.released).
+// TransferType is a transfer's kind (HeldFundsReleased.Type: heldFundsRelease).
 type TransferType string
 
 // Transfer types.
@@ -214,9 +218,9 @@ type LedgerEntryType string
 
 // Ledger entry types.
 const (
-	LedgerEntryTypePayment             LedgerEntryType = "payment"
-	LedgerEntryTypeSubscriptionHistory LedgerEntryType = "subscriptionHistory"
-	LedgerEntryTypeRefund              LedgerEntryType = "refund"
+	LedgerEntryTypePayment LedgerEntryType = "payment" // A payment made to the member while the organization held their funds
+	LedgerEntryTypeBill    LedgerEntryType = "bill"    // A subscription bill paid to the member while held
+	LedgerEntryTypeRefund  LedgerEntryType = "refund"  // A refund the organization sent of one of them
 )
 
 // AccountingEventType is an accounting export row's kind.
@@ -224,11 +228,11 @@ type AccountingEventType string
 
 // Accounting event types.
 const (
-	AccountingEventTypePayment             AccountingEventType = "payment"
-	AccountingEventTypeSubscriptionHistory AccountingEventType = "subscriptionHistory"
-	AccountingEventTypeRefund              AccountingEventType = "refund"
-	AccountingEventTypeOrganizationFee     AccountingEventType = "organizationFee"
-	AccountingEventTypeReferralFee         AccountingEventType = "referralFee"
+	AccountingEventTypePayment         AccountingEventType = "payment"         // A one-time payment (pay@…)
+	AccountingEventTypeBill            AccountingEventType = "bill"            // A subscription's bill (sub-hist@…)
+	AccountingEventTypeRefund          AccountingEventType = "refund"          // A refund the space sent (refund@…)
+	AccountingEventTypeOrganizationFee AccountingEventType = "organizationFee" // The fee the organization earned on a member's payment or bill
+	AccountingEventTypeReferralFee     AccountingEventType = "referralFee"     // The referrer's share earned on a referred organization's payment or bill
 )
 
 // NetworkFeesPayer is whose wallet paid an accounting event's network fees
@@ -266,21 +270,21 @@ const (
 	EventTypeSubscriptionBillingFailed         EventType = "subscription.billingFailed"
 	EventTypeSubscriptionUpcomingBill          EventType = "subscription.upcomingBill"
 	EventTypeRefundRequested                   EventType = "refund.requested"
-	EventTypeRefundCompleted                   EventType = "refund.completed"
-	EventTypeRefundDenied                      EventType = "refund.denied"
+	EventTypeRefundApproved                    EventType = "refund.approved" // Was refund.completed
+	EventTypeRefundRejected                    EventType = "refund.rejected" // Was refund.denied
 	EventTypeMemberJoined                      EventType = "member.joined"
 	EventTypeMemberRemoved                     EventType = "member.removed"
 	EventTypeHeldFundsReleased                 EventType = "heldFunds.released"
 	EventTypeCheckoutExpired                   EventType = "checkout.expired"
-	EventTypeWebhookTest                       EventType = "webhook.test"
+	EventTypeWebhookTest                       EventType = "webhook.test" // Sent only by an endpoint's test (the dashboard); no endpoint subscribes to it
 )
 
-// knownEventTypes lists every EventType constant (filter checks).
+// knownEventTypes lists every EventType constant (the router's known types).
 var knownEventTypes = []EventType{
 	EventTypePaymentCompleted, EventTypeSubscriptionCreated, EventTypeSubscriptionBilled,
 	EventTypeSubscriptionStatusChanged, EventTypeSubscriptionActionRequiredChanged,
 	EventTypeSubscriptionBillingFailed, EventTypeSubscriptionUpcomingBill, EventTypeRefundRequested,
-	EventTypeRefundCompleted, EventTypeRefundDenied, EventTypeMemberJoined, EventTypeMemberRemoved,
+	EventTypeRefundApproved, EventTypeRefundRejected, EventTypeMemberJoined, EventTypeMemberRemoved,
 	EventTypeHeldFundsReleased, EventTypeCheckoutExpired, EventTypeWebhookTest,
 }
 
@@ -289,8 +293,7 @@ type WebhookPayloadVersion string
 
 // Webhook payload versions.
 const (
-	WebhookPayloadVersionV1 WebhookPayloadVersion = "v1" // v1's bodies (endpoints migrated from v1; not parsed by this SDK)
-	WebhookPayloadVersionV2 WebhookPayloadVersion = "v2" // The event envelope
+	WebhookPayloadVersionV2 WebhookPayloadVersion = "v2" // The event envelope {id, type, version, createdAt, test, userUuid, data}: the only version
 )
 
 // EndpointDisabledReason says why a webhook endpoint is disabled.

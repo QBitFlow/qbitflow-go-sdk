@@ -107,7 +107,7 @@ func TestHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := c.call[map[string]any](context.Background(),
-		endpoint{method: http.MethodPost, path: "/product", body: map[string]any{"name": "x"}, idempotent: true},
+		endpoint{method: http.MethodPost, path: "/products", body: map[string]any{"name": "x"}, idempotent: true},
 		[]RequestOption{WithRequestID("req-1.a:b_c")})
 	if err != nil {
 		t.Fatal(err)
@@ -254,15 +254,20 @@ func TestMe(t *testing.T) {
 		"credential": "apiKey",
 		"apiKeyUuid": "019cadfd-8900-7b00-8000-0000000000f1",
 		"role": "user",
-		"onBehalfOf": "019eca82-5680-7b00-8000-0000000000b1",
+		"onBehalfOfUserUuid": "019eca82-5680-7b00-8000-0000000000b1",
 		"space": {
 			"uuid": "019eca82-5680-7c00-8000-0000000000b2",
 			"organizationUuid": "019cadfd-8900-7a00-8000-0000000000a1",
 			"organizationName": "Example Shop",
 			"userUuid": "019eca82-5680-7b00-8000-0000000000b1",
-			"member": {"userUuid": "019eca82-5680-7b00-8000-0000000000b1", "name": "Ada", "lastName": "Lovelace", "email": "ada@example.com"},
-			"test": true
+			"member": {"userUuid": "019eca82-5680-7b00-8000-0000000000b1", "firstName": "Ada", "lastName": "Lovelace", "email": "ada@example.com"},
+			"test": true,
+			"role": "owner",
+			"organizationFeePercent": "7.5",
+			"trustedAt": "2026-10-02T12:00:00Z",
+			"createdAt": "2026-10-01T12:00:00Z"
 		},
+		"spaces": [],
 		"user": {"ignored": true}
 	}`))
 	c, _ := newTestClient(t, ts)
@@ -270,10 +275,11 @@ func TestMe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if me.Credential != CredentialAPIKey || me.Role != RoleUser || me.OnBehalfOf != memberUUID || me.UserUUID != "" {
+	if me.Credential != CredentialAPIKey || me.Role != RoleUser || me.OnBehalfOfUserUUID != memberUUID || me.UserUUID != "" {
 		t.Errorf("me = %+v", me)
 	}
-	if me.Space == nil || !me.Space.Test || me.Space.OrganizationName != "Example Shop" || me.Space.Member == nil || me.Space.Member.Name != "Ada" {
+	if me.Space == nil || !me.Space.Test || me.Space.OrganizationName != "Example Shop" || me.Space.Member == nil || me.Space.Member.FirstName != "Ada" ||
+		me.Space.Role != RoleOwner || me.Space.OrganizationFeePercent != "7.5" || me.Space.TrustedAt == nil || me.Space.CreatedAt.IsZero() {
 		t.Errorf("space = %+v", me.Space)
 	}
 }

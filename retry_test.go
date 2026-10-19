@@ -28,7 +28,7 @@ var (
 	keyInUse409 = reply(409, `{"error":"in use","code":"idempotency_key_in_use"}`)
 )
 
-var idempotentCreate = endpoint{method: http.MethodPost, path: "/product", body: map[string]any{"name": "Pro"}, idempotent: true}
+var idempotentCreate = endpoint{method: http.MethodPost, path: "/products", body: map[string]any{"name": "Pro"}, idempotent: true}
 
 func TestRetryMatrix(t *testing.T) {
 	cases := []struct {
@@ -51,8 +51,8 @@ func TestRetryMatrix(t *testing.T) {
 		{"GET 409 in_use not retried (not a create)", get("/x"), [][2]any{keyInUse409}, 1, nil, new(*ConflictError), nil},
 		{"POST action 500 not retried", endpoint{method: http.MethodPost, path: "/expire"}, [][2]any{err500}, 1, nil, new(*ServerError), nil},
 		{"POST action 503 not retried", endpoint{method: http.MethodPost, path: "/cancel"}, [][2]any{err503}, 1, nil, new(*ServerError), nil},
-		{"PUT 500 not retried", endpoint{method: http.MethodPut, path: "/product/x", body: map[string]any{}}, [][2]any{err500}, 1, nil, new(*ServerError), nil},
-		{"DELETE 503 not retried", endpoint{method: http.MethodDelete, path: "/product/x"}, [][2]any{err503}, 1, nil, new(*ServerError), nil},
+		{"PATCH 500 not retried", endpoint{method: http.MethodPatch, path: "/products/x", body: map[string]any{}}, [][2]any{err500}, 1, nil, new(*ServerError), nil},
+		{"DELETE 503 not retried", endpoint{method: http.MethodDelete, path: "/products/x"}, [][2]any{err503}, 1, nil, new(*ServerError), nil},
 		{"POST action 429 not retried", endpoint{method: http.MethodPost, path: "/trust"}, [][2]any{reply(429, `{"error":"slow","code":"rate_limit_exceeded"}`)}, 1, nil, new(*RateLimitError), nil},
 		{"create 500, 500, 201", idempotentCreate, [][2]any{err500, err500, reply(201, `{}`)}, 3, []time.Duration{time.Second, 2 * time.Second}, nil, nil},
 		{"create 409 in_use then 201", idempotentCreate, [][2]any{keyInUse409, reply(201, `{}`)}, 2, []time.Duration{time.Second}, nil, nil},

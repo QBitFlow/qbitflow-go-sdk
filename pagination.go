@@ -2,24 +2,27 @@ package qbitflow
 
 import "iter"
 
-// Page is one page of a cursor-paginated list.
+// Page is one page of a cursor-paginated list, newest first (members by when they joined).
+// Bounded lists (currencies, wallets, members' held funds, the accounting export) answer the
+// same envelope in one page; their methods return its Items.
 type Page[T any] struct {
-	// Items are the page's rows.
+	// Items are the page's rows; empty when there are none.
 	Items []T `json:"items"`
-	// NextCursor is the cursor of the next page (pass it back as the params' Cursor, verbatim);
-	// nil on the last page.
-	NextCursor *string `json:"nextCursor"`
-}
-
-// HasMore reports whether another page follows.
-func (p *Page[T]) HasMore() bool {
-	return p != nil && p.NextCursor != nil
+	// HasMore reports whether another page follows: pass NextCursor as the params' Cursor to
+	// read it. A full last page answers false: there is never an extra empty page.
+	HasMore bool `json:"hasMore"`
+	// NextCursor is the next page's cursor, opaque: pass it back verbatim, never build or parse
+	// it. "" (absent) when HasMore is false.
+	NextCursor string `json:"nextCursor,omitempty"`
 }
 
 // iteratePages walks a cursor-paginated list lazily, one request per page, from cursor ("" =
 // the first page). fetch requests one page with the given cursor, keeping the caller's filters
-// and limit. The sequence stops when the caller stops, on the last page (nextCursor null),
-// on an empty page, or on an error, which it yields as (zero, err) before stopping.
+// and limit. The sequence stops when the caller stops, on the last page (HasMore false), or on
+// an error, which it yields as (zero, err) before stopping. Defensively, it also stops on a page
+// claiming more without a NextCursor, on one whose NextCursor is the cursor just requested (which
+// would loop on the same page forever), and on an empty page that claims more (the API never
+// answers one: a server fault, which could otherwise cycle between cursors).
 //
 // The Iterate methods are built on it:
 //
@@ -47,12 +50,10 @@ func iteratePages[T any](cursor string, fetch func(cursor string) (*Page[T], err
 					return
 				}
 			}
-			// The last page, an empty page, or a cursor that does not move (which would loop
-			// on the same page forever) ends the walk.
-			if page.NextCursor == nil || len(page.Items) == 0 || *page.NextCursor == cursor {
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor || len(page.Items) == 0 {
 				return
 			}
-			cursor = *page.NextCursor
+			cursor = page.NextCursor
 		}
 	}
 }

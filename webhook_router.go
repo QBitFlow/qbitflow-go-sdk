@@ -136,12 +136,13 @@ func (r *WebhookRouter) OnPaymentCompleted(fn func(ctx context.Context, data *Pa
 	return onType(r, EventTypePaymentCompleted, (*Event).PaymentCompleted, fn)
 }
 
-// OnSubscriptionCreated handles subscription.created.
-func (r *WebhookRouter) OnSubscriptionCreated(fn func(ctx context.Context, data *SubscriptionCreated, e *Event) error) *WebhookRouter {
+// OnSubscriptionCreated handles subscription.created (status active, or trial): grant access
+// until CurrentPeriodEnd.
+func (r *WebhookRouter) OnSubscriptionCreated(fn func(ctx context.Context, data *Subscription, e *Event) error) *WebhookRouter {
 	return onType(r, EventTypeSubscriptionCreated, (*Event).SubscriptionCreated, fn)
 }
 
-// OnSubscriptionBilled handles subscription.billed.
+// OnSubscriptionBilled handles subscription.billed (data.Bill, data.Subscription).
 func (r *WebhookRouter) OnSubscriptionBilled(fn func(ctx context.Context, data *SubscriptionBilled, e *Event) error) *WebhookRouter {
 	return onType(r, EventTypeSubscriptionBilled, (*Event).SubscriptionBilled, fn)
 }
@@ -171,14 +172,15 @@ func (r *WebhookRouter) OnRefundRequested(fn func(ctx context.Context, data *Ref
 	return onType(r, EventTypeRefundRequested, (*Event).RefundRequested, fn)
 }
 
-// OnRefundCompleted handles refund.completed.
-func (r *WebhookRouter) OnRefundCompleted(fn func(ctx context.Context, data *Refund, e *Event) error) *WebhookRouter {
-	return onType(r, EventTypeRefundCompleted, (*Event).RefundCompleted, fn)
+// OnRefundApproved handles refund.approved (was refund.completed): reverse the order, in full
+// or in part (RefundPercent below 100).
+func (r *WebhookRouter) OnRefundApproved(fn func(ctx context.Context, data *Refund, e *Event) error) *WebhookRouter {
+	return onType(r, EventTypeRefundApproved, (*Event).RefundApproved, fn)
 }
 
-// OnRefundDenied handles refund.denied.
-func (r *WebhookRouter) OnRefundDenied(fn func(ctx context.Context, data *Refund, e *Event) error) *WebhookRouter {
-	return onType(r, EventTypeRefundDenied, (*Event).RefundDenied, fn)
+// OnRefundRejected handles refund.rejected (was refund.denied).
+func (r *WebhookRouter) OnRefundRejected(fn func(ctx context.Context, data *Refund, e *Event) error) *WebhookRouter {
+	return onType(r, EventTypeRefundRejected, (*Event).RefundRejected, fn)
 }
 
 // OnMemberJoined handles member.joined.

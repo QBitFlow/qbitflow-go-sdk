@@ -3,13 +3,13 @@ package qbitflow
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"testing"
 )
 
-// pagedServer serves /customer/all in pages of 2 over 5 customers (c0…c4), keyed by cursor.
+// pagedServer serves /customers in pages of 2 over 5 customers (c0…c4), keyed by an opaque
+// cursor; the last page answers hasMore false (a full last page never adds an empty one).
 func pagedServer(t *testing.T, failOn string) *testServer {
 	return newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 		cursor := r.URL.Query().Get("cursor")
@@ -18,15 +18,15 @@ func pagedServer(t *testing.T, failOn string) *testServer {
 			return
 		}
 		pages := map[string]string{
-			"":   `{"items":[{"uuid":"c0"},{"uuid":"c1"}],"nextCursor":"c1"}`,
-			"c1": `{"items":[{"uuid":"c2"},{"uuid":"c3"}],"nextCursor":"c3"}`,
-			"c3": `{"items":[{"uuid":"c4"}],"nextCursor":null}`,
+			"":        `{"items":[{"uuid":"c0"},{"uuid":"c1"}],"hasMore":true,"nextCursor":"djF8YzE"}`,
+			"djF8YzE": `{"items":[{"uuid":"c2"},{"uuid":"c3"}],"hasMore":true,"nextCursor":"djF8YzM"}`,
+			"djF8YzM": `{"items":[{"uuid":"c4"}],"hasMore":false}`,
 		}
 		jsonReply(w, 200, pages[cursor])
 	})
 }
 
-// iterateCustomers walks /customer/all with Customers.Iterate.
+// iterateCustomers walks /customers with Customers.Iterate.
 func iterateCustomers(c *Client, ctx context.Context, params *CustomerListParams) func(func(Customer, error) bool) {
 	return c.Customers.Iterate(ctx, params)
 }
@@ -49,7 +49,7 @@ func TestIterateAllPages(t *testing.T) {
 	if len(reqs) != 3 {
 		t.Fatalf("requests %d", len(reqs))
 	}
-	for i, wantQuery := range []string{"email=a%40b.co&limit=2", "cursor=c1&email=a%40b.co&limit=2", "cursor=c3&email=a%40b.co&limit=2"} {
+	for i, wantQuery := range []string{"email=a%40b.co&limit=2", "cursor=djF8YzE&email=a%40b.co&limit=2", "cursor=djF8YzM&email=a%40b.co&limit=2"} {
 		if reqs[i].query != wantQuery {
 			t.Errorf("page %d query %q, want %q (filters and limit kept)", i, reqs[i].query, wantQuery)
 		}
@@ -60,14 +60,14 @@ func TestIterateFromCursorAndNil(t *testing.T) {
 	ts := pagedServer(t, "")
 	c, _ := newTestClient(t, ts)
 	var got []string
-	for cust, err := range iterateCustomers(c, context.Background(), &CustomerListParams{Cursor: "c3"}) {
+	for cust, err := range iterateCustomers(c, context.Background(), &CustomerListParams{Cursor: "djF8YzM"}) {
 		if err != nil {
 			t.Fatal(err)
 		}
 		got = append(got, cust.UUID)
 	}
 	if !slices.Equal(got, []string{"c4"}) || len(ts.recorded()) != 1 {
-		t.Errorf("from cursor c3: %v, %d requests", got, len(ts.recorded()))
+		t.Errorf("from the last cursor: %v, %d requests", got, len(ts.recorded()))
 	}
 
 	n := 0
@@ -104,7 +104,7 @@ func TestIterateEarlyBreak(t *testing.T) {
 }
 
 func TestIterateErrorPropagation(t *testing.T) {
-	ts := pagedServer(t, "c3")
+	ts := pagedServer(t, "djF8YzM")
 	c, _ := newTestClient(t, ts)
 	var got []string
 	var errs []error
@@ -127,15 +127,23 @@ func TestIterateErrorPropagation(t *testing.T) {
 	}
 }
 
-func TestIterateStopsOnEmptyOrStuckPage(t *testing.T) {
+// The walk stops on hasMore false; the defensive guards also stop a page claiming more without a
+// cursor, with the cursor just requested, or with no rows (the API never answers an empty page
+// that has more: a server fault that could otherwise cycle between cursors forever).
+func TestIterateStopRules(t *testing.T) {
 	calls := 0
 	seq := iteratePages("", func(cursor string) (*Page[int], error) {
 		calls++
-		next := fmt.Sprint("n", calls)
-		if calls == 2 {
-			return &Page[int]{Items: nil, NextCursor: &next}, nil // empty page with a cursor
+		switch calls {
+		case 1:
+			return &Page[int]{Items: []int{1}, HasMore: true, NextCursor: "a"}, nil
+		case 2:
+			return &Page[int]{Items: []int{2}, HasMore: true, NextCursor: "b"}, nil
+		case 3:
+			return &Page[int]{Items: []int{3}, HasMore: false}, nil
 		}
-		return &Page[int]{Items: []int{calls}, NextCursor: &next}, nil
+		t.Fatal("requested a page past hasMore false")
+		return nil, nil
 	})
 	var got []int
 	for v, err := range seq {
@@ -144,15 +152,48 @@ func TestIterateStopsOnEmptyOrStuckPage(t *testing.T) {
 		}
 		got = append(got, v)
 	}
-	if !slices.Equal(got, []int{1}) || calls != 2 {
-		t.Errorf("empty page: %v after %d calls", got, calls)
+	if !slices.Equal(got, []int{1, 2, 3}) || calls != 3 {
+		t.Errorf("walk: %v after %d calls", got, calls)
 	}
 
-	stuck := "same"
+	// hasMore false stops even with a cursor present (the API never sends one then).
+	calls = 0
+	for range iteratePages("", func(string) (*Page[int], error) {
+		calls++
+		return &Page[int]{Items: []int{1}, HasMore: false, NextCursor: "x"}, nil
+	}) {
+	}
+	if calls != 1 {
+		t.Errorf("hasMore false must stop the walk (%d calls)", calls)
+	}
+
+	// hasMore true without a nextCursor: defensive stop.
+	calls = 0
+	for range iteratePages("", func(string) (*Page[int], error) {
+		calls++
+		return &Page[int]{Items: []int{1}, HasMore: true}, nil
+	}) {
+	}
+	if calls != 1 {
+		t.Errorf("hasMore without a cursor must stop the walk (%d calls)", calls)
+	}
+
+	// An empty page that claims more, with cursors that keep changing (a <-> b): defensive stop.
+	calls = 0
+	for range iteratePages("", func(string) (*Page[int], error) {
+		calls++
+		return &Page[int]{HasMore: true, NextCursor: []string{"a", "b"}[calls%2]}, nil
+	}) {
+	}
+	if calls != 1 {
+		t.Errorf("an empty page that has more must stop the walk (%d calls)", calls)
+	}
+
+	// A cursor that does not move: defensive stop.
 	calls = 0
 	for range iteratePages("same", func(string) (*Page[int], error) {
 		calls++
-		return &Page[int]{Items: []int{1}, NextCursor: &stuck}, nil
+		return &Page[int]{Items: []int{1}, HasMore: true, NextCursor: "same"}, nil
 	}) {
 	}
 	if calls != 1 {
@@ -160,13 +201,40 @@ func TestIterateStopsOnEmptyOrStuckPage(t *testing.T) {
 	}
 }
 
-func TestPageHasMore(t *testing.T) {
-	next := "x"
-	if !(&Page[int]{NextCursor: &next}).HasMore() || (&Page[int]{}).HasMore() || (*Page[int])(nil).HasMore() {
-		t.Error("HasMore")
+func TestPageDecoding(t *testing.T) {
+	p, err := decodeResponse[Page[Customer]](&response{status: 200, body: []byte(`{"items":[{"uuid":"c0"}],"hasMore":true,"nextCursor":"djF8eA"}`)})
+	if err != nil || !p.HasMore || p.NextCursor != "djF8eA" || len(p.Items) != 1 {
+		t.Errorf("page: %+v %v", p, err)
 	}
-	p, err := decodeResponse[Page[Customer]](&response{status: 200, body: []byte(`{"items":null,"nextCursor":null}`)})
-	if err != nil || p.Items != nil || p.HasMore() {
+	p, err = decodeResponse[Page[Customer]](&response{status: 200, body: []byte(`{"items":[],"hasMore":false}`)})
+	if err != nil || p.HasMore || p.NextCursor != "" || p.Items == nil || len(p.Items) != 0 {
+		t.Errorf("last page: %+v %v", p, err)
+	}
+	// Lenient on absence and null: zero values.
+	p, err = decodeResponse[Page[Customer]](&response{status: 200, body: []byte(`{"items":null}`)})
+	if err != nil || p.Items != nil || p.HasMore {
 		t.Errorf("null page: %+v %v", p, err)
+	}
+	// Strict on type.
+	for _, body := range []string{`{"items":[],"hasMore":"true"}`, `{"items":{},"hasMore":false}`, `{"items":[],"nextCursor":5}`, `[]`} {
+		if _, err := decodeResponse[Page[Customer]](&response{status: 200, body: []byte(body)}); !errors.As(err, new(*ServerError)) {
+			t.Errorf("%s: want *ServerError, got %v", body, err)
+		}
+	}
+}
+
+// Bounded lists (one page, hasMore false) are returned as their items.
+func TestBoundedListsUnwrapItems(t *testing.T) {
+	ts := newTestServer(t, staticReply(200, `{"items":[{"id":8,"code":"BASE:USDC"},{"id":1,"code":"ETH"}],"hasMore":false}`))
+	c, _ := newTestClient(t, ts)
+	list, err := c.Currencies.List(context.Background(), &CurrencyListParams{Main: true})
+	if err != nil || len(list) != 2 || list[1].Code != "ETH" {
+		t.Fatalf("currencies %+v %v", list, err)
+	}
+	empty := newTestServer(t, staticReply(200, `{"items":[],"hasMore":false}`))
+	c2, _ := newTestClient(t, empty)
+	wallets, err := c2.Wallets.List(context.Background(), nil)
+	if err != nil || wallets == nil || len(wallets) != 0 {
+		t.Errorf("empty bounded list: %#v %v", wallets, err)
 	}
 }

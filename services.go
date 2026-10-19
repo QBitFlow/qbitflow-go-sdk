@@ -14,17 +14,21 @@ type CustomersService struct{ client *Client }
 // reads their status and expires them.
 type CheckoutSessionsService struct{ client *Client }
 
-// PaymentsService reads the one-time payments and the combined feed of payments and bills.
+// PaymentsService reads the one-time payments.
 type PaymentsService struct{ client *Client }
+
+// TransactionsService reads the transactions feed: the one-time payments and the subscriptions'
+// bills together.
+type TransactionsService struct{ client *Client }
 
 // FailuresService reads the failed payment attempts.
 type FailuresService struct{ client *Client }
 
-// SubscriptionsService reads subscriptions and their bills, cancels them, and runs a test
-// billing.
+// SubscriptionsService reads subscriptions and their bills, updates their metadata, cancels
+// them, and runs a test bill.
 type SubscriptionsService struct{ client *Client }
 
-// RefundsService lists and initiates refunds.
+// RefundsService lists, reads and creates refunds.
 type RefundsService struct{ client *Client }
 
 // MembersService manages the organization's members, their trust and their held funds

@@ -7,24 +7,29 @@ import (
 	"time"
 )
 
-// maxExportDays is the longest window one export request covers: to - from <= 95 days.
-const maxExportDays = 95
+// maxExportDays is the most days one export request covers, both ends included: to <= from +
+// (maxExportDays - 1) days.
+const maxExportDays = 92
 
 // ExportJSON returns the accounting events between two dates, both YYYY-MM-DD and included
-// (GET /accounting/export?format=json). The dates are the transactions' (their block's day, in
-// UTC), so consecutive exports never miss nor repeat an event. Events are ordered by TxTimeUTC,
-// then Type, then PaymentUUID. The API allows at most 95 days (400 beyond); the SDK checks the
-// dates and from <= to before sending.
+// (GET /accounting/export?format=json; a bounded list). The dates are the transactions' (their
+// block's day, in UTC), so consecutive exports never miss nor repeat an event. Events are
+// ordered by TxTimeUTC, then Type, then TxUUID. The API allows at most 92 days, both included
+// (400 validation_failed on to beyond, details.max 92: ExportJSONRange splits longer ranges);
+// the SDK checks the dates and from <= to before sending.
 func (s *AccountingService) ExportJSON(ctx context.Context, from, to string, opts ...RequestOption) ([]AccountingEvent, error) {
 	query, err := accountingQuery(from, to, "json")
 	if err != nil {
 		return nil, err
 	}
-	return s.client.call[[]AccountingEvent](ctx, endpoint{method: http.MethodGet, path: "/accounting/export", query: query}, opts)
+	return s.client.callItems[AccountingEvent](ctx, endpoint{method: http.MethodGet, path: "/accounting/export", query: query}, opts)
 }
 
 // ExportCSV returns the same export as ExportJSON as CSV text
-// (GET /accounting/export?format=csv). Errors are still JSON, and typed as usual.
+// (GET /accounting/export?format=csv): the header row (AccountingEvent's JSON keys, in its field
+// order), then one row per event; nothing in range gives the header only. Amounts are plain
+// numbers; an absent value is an empty cell; a cell starting with = + - @, a tab or a CR gets a
+// leading '. Read the columns by header name. Errors are still JSON, and typed as usual.
 func (s *AccountingService) ExportCSV(ctx context.Context, from, to string, opts ...RequestOption) (string, error) {
 	query, err := accountingQuery(from, to, "csv")
 	if err != nil {
@@ -33,10 +38,12 @@ func (s *AccountingService) ExportCSV(ctx context.Context, from, to string, opts
 	return s.client.callText(ctx, endpoint{method: http.MethodGet, path: "/accounting/export", query: query}, opts)
 }
 
-// ExportJSONRange is ExportJSON over any range: it checks the dates like ExportJSON, splits
-// the range into consecutive windows of at most 95 days ([from, from+95d], the next one
-// starting the day after), requests them in order and returns every window's events, in
-// order. A range of 95 days or less is one request. The first error stops it.
+// ExportJSONRange is ExportJSON over any range: it checks the dates like ExportJSON, splits the
+// range into consecutive windows of at most 92 days, both ends included ([from, from+91d], the
+// next one starting the day after; on calendar dates, UTC), requests them in order and returns
+// every window's events, in order. A range of 92 days or less is one request. 2026-01-01 to
+// 2026-12-31 is four: [01-01, 04-02] [04-03, 07-03] [07-04, 10-03] [10-04, 12-31]. The first
+// error stops it.
 func (s *AccountingService) ExportJSONRange(ctx context.Context, from, to string, opts ...RequestOption) ([]AccountingEvent, error) {
 	windows, err := exportWindows(from, to)
 	if err != nil {
@@ -96,8 +103,8 @@ func appendCSVWindow(out *strings.Builder, csv string) {
 	out.WriteString(rows)
 }
 
-// exportWindows checks an export range and splits it into windows of at most 95 days, on
-// calendar dates.
+// exportWindows checks an export range and splits it into windows of at most 92 days, both ends
+// included, on calendar dates.
 func exportWindows(from, to string) ([][2]string, error) {
 	if _, err := accountingQuery(from, to, "json"); err != nil {
 		return nil, err
@@ -106,7 +113,7 @@ func exportWindows(from, to string) ([][2]string, error) {
 	end, _ := time.Parse(time.DateOnly, to)
 	var windows [][2]string
 	for !start.After(end) {
-		windowEnd := start.AddDate(0, 0, maxExportDays)
+		windowEnd := start.AddDate(0, 0, maxExportDays-1)
 		if windowEnd.After(end) {
 			windowEnd = end
 		}

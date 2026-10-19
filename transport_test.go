@@ -12,14 +12,14 @@ import (
 
 func TestPathEscaping(t *testing.T) {
 	cases := map[string]string{
-		pathf("/product/reference/%s", "a/b c"):                                     "/product/reference/a%2Fb%20c",
-		pathf("/transaction/payment/%s", "pay@019c-1"):                              "/transaction/payment/pay@019c-1",
-		pathf("/customer/email/%s", "a+b@example.com"):                              "/customer/email/a+b@example.com",
-		pathf("/product/reference/%s", ".."):                                        "/product/reference/%2E%2E",
-		pathf("/product/reference/%s", "."):                                         "/product/reference/%2E",
-		pathf("/product/reference/%s", "v1..2"):                                     "/product/reference/v1..2",
-		pathf("/x/%s/y/%s", "?q=1#f", "%41"):                                        "/x/%3Fq=1%23f/y/%2541",
-		pathf("/transaction/subscription/reference/%s/%s", "subscription", "ord:1"): "/transaction/subscription/reference/subscription/ord:1",
+		pathf("/webhooks/events/%s", "evt_a/b c"):          "/webhooks/events/evt_a%2Fb%20c",
+		pathf("/payments/%s", "pay@019c-1"):                "/payments/pay@019c-1",
+		pathf("/webhooks/events/%s", "a+b@example.com"):    "/webhooks/events/a+b@example.com",
+		pathf("/webhooks/events/%s", ".."):                 "/webhooks/events/%2E%2E",
+		pathf("/webhooks/events/%s", "."):                  "/webhooks/events/%2E",
+		pathf("/webhooks/events/%s", "v1..2"):              "/webhooks/events/v1..2",
+		pathf("/x/%s/y/%s", "?q=1#f", "%41"):               "/x/%3Fq=1%23f/y/%2541",
+		pathf("/subscriptions/%s/%s", "sub@019c", "bills"): "/subscriptions/sub@019c/bills",
 	}
 	for got, want := range cases {
 		if got != want {
@@ -27,13 +27,13 @@ func TestPathEscaping(t *testing.T) {
 		}
 	}
 
-	// The escaped path reaches the server as is (a / in a reference is never a separator).
+	// The escaped path reaches the server as is (a / in an id is never a separator).
 	ts := newTestServer(t, staticReply(200, `{}`))
 	c, _ := newTestClient(t, ts)
-	if _, err := c.send(context.Background(), get(pathf("/product/reference/%s", "a/b")), nil); err != nil {
+	if _, err := c.send(context.Background(), get(pathf("/webhooks/events/%s", "a/b")), nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := ts.recorded()[0].path; got != "/product/reference/a%2Fb" {
+	if got := ts.recorded()[0].path; got != "/webhooks/events/a%2Fb" {
 		t.Errorf("server saw %q", got)
 	}
 }
@@ -42,8 +42,8 @@ func TestQueryEncoding(t *testing.T) {
 	after := time.Date(2026, 10, 4, 12, 0, 0, 0, time.FixedZone("CEST", 2*3600))
 	before := time.Date(2026, 10, 5, 0, 0, 0, 500, time.UTC)
 	p := &PaymentListParams{
-		Limit: 25, Cursor: "019c-cursor", CustomerUUID: memberUUID, CreatedAfter: &after,
-		CreatedBefore: &before, IncludeMembers: true, Refunded: ptr(false),
+		Limit: 25, Cursor: "djF8Y3Vyc29y", CustomerUUID: memberUUID, CreatedAfter: &after,
+		CreatedBefore: &before, IncludeMembers: true, Refunded: ptr(false), Reference: "order-1042",
 	}
 	q := p.values()
 	if got := q.Get("createdAfter"); got != "2026-10-04T12:00:00+02:00" {
@@ -53,8 +53,8 @@ func TestQueryEncoding(t *testing.T) {
 		t.Errorf("createdBefore = %q", got)
 	}
 	encoded := q.Encode()
-	want := "createdAfter=2026-10-04T12%3A00%3A00%2B02%3A00&createdBefore=2026-10-05T00%3A00%3A00.0000005Z&cursor=019c-cursor&customerUuid=" +
-		memberUUID + "&includeMembers=true&limit=25&refunded=false"
+	want := "createdAfter=2026-10-04T12%3A00%3A00%2B02%3A00&createdBefore=2026-10-05T00%3A00%3A00.0000005Z&cursor=djF8Y3Vyc29y&customerUuid=" +
+		memberUUID + "&includeMembers=true&limit=25&reference=order-1042&refunded=false"
 	if encoded != want {
 		t.Errorf("query =\n%s\nwant\n%s", encoded, want)
 	}
@@ -68,9 +68,9 @@ func TestQueryEncoding(t *testing.T) {
 	}
 
 	// Sent on the wire with the + escaped.
-	ts := newTestServer(t, staticReply(200, `{"items":[],"nextCursor":null}`))
+	ts := newTestServer(t, staticReply(200, `{"items":[],"hasMore":false}`))
 	c, _ := newTestClient(t, ts)
-	if _, err := c.call[Page[Payment]](context.Background(), endpoint{method: http.MethodGet, path: "/transaction/payments", query: q}, nil); err != nil {
+	if _, err := c.call[Page[Payment]](context.Background(), endpoint{method: http.MethodGet, path: "/payments", query: q}, nil); err != nil {
 		t.Fatal(err)
 	}
 	raw := ts.recorded()[0].query
@@ -86,23 +86,28 @@ func TestQueryEncodersPerParams(t *testing.T) {
 		want string
 	}{
 		{(&ProductListParams{IncludeHidden: true, Subscription: ptr(true)}).values(), "includeHidden=true&subscription=true"},
+		{(&ProductListParams{Limit: 50, Cursor: "c", Reference: "pro"}).values(), "cursor=c&limit=50&reference=pro"},
 		{(&ProductListParams{}).values(), ""},
 		{(&CustomerListParams{Limit: 5, Email: "a+b@x.io", Verified: ptr(false)}).values(), "email=a%2Bb%40x.io&limit=5&verified=false"},
-		{(&CombinedPaymentListParams{Source: CombinedPaymentSourceSubscriptionHistory, SubscriptionUUID: "sub@x"}).values(), "source=subscriptionHistory&subscriptionUuid=sub%40x"},
+		{(&CustomerListParams{Reference: "crm:1"}).values(), "reference=crm%3A1"},
+		{(&TransactionListParams{Type: TransactionKindBill, SubscriptionUUID: "sub@x", Refunded: ptr(true)}).values(), "refunded=true&subscriptionUuid=sub%40x&type=bill"},
 		{(&FailureListParams{Kind: FailureKindBill, Category: FailureCategoryOther, UserUUID: memberUUID}).values(), "category=other&kind=bill&userUuid=" + memberUUID},
 		{(&SubscriptionListParams{Status: SubscriptionStatusPastDue, Reference: "r-1", Cursor: "c"}).values(), "cursor=c&reference=r-1&status=pastDue"},
 		{(&BillListParams{Limit: 100}).values(), "limit=100"},
-		{(&RefundListParams{Limit: 3, Cursor: "c", IncludeMembers: ptr(false), Held: ptr(true)}).values(false), "held=true&includeMembers=false"},
-		{(&RefundListParams{Limit: 3, Cursor: "c", UserUUID: memberUUID}).values(true), "cursor=c&limit=3&userUuid=" + memberUUID},
+		{(&RefundListParams{IncludeMembers: ptr(false), Held: ptr(true)}).values(), "held=true&includeMembers=false"},
+		{(&RefundListParams{Limit: 3, Cursor: "c", UserUUID: memberUUID}).values(), "cursor=c&limit=3&userUuid=" + memberUUID},
+		{(&RefundListParams{Status: []RefundStatus{RefundStatusApproved, RefundStatusRejected}, TxUUID: "pay@x"}).values(), "status=approved&status=rejected&txUuid=pay%40x"},
 		{(&MemberListParams{Limit: -1}).values(), "limit=-1"},
 		{(&InvitationListParams{Status: InvitationStatusPending}).values(), "status=pending"},
-		{(&EventListParams{Cursor: "evt_1", Type: EventTypePaymentCompleted, IncludeMembers: true}).values(), "cursor=evt_1&includeMembers=true&type=payment.completed"},
+		{(&EventListParams{Cursor: "djF8ZXZ0", Type: EventTypePaymentCompleted, IncludeMembers: true}).values(), "cursor=djF8ZXZ0&includeMembers=true&type=payment.completed"},
+		{(&EndpointListParams{Limit: 10, Cursor: "c"}).values(), "cursor=c&limit=10"},
 		{(&ReadParams{IncludeMembers: true}).values(), "includeMembers=true"},
 		{(&CancelSubscriptionParams{Immediate: ptr(false)}).values(), "immediate=false"},
 		{(&CancelSubscriptionParams{}).values(), ""},
 		{(&WalletListParams{WithBalances: true}).values(), "withBalances=true"},
-		{(&SupportedCurrenciesParams{UserUUID: memberUUID}).values(), "userUuid=" + memberUUID},
+		{(&AcceptedCurrenciesParams{UserUUID: memberUUID}).values(), "userUuid=" + memberUUID},
 		{(&CurrencyListParams{Test: true}).values(), "test=true"},
+		{(&CurrencyListParams{Main: true}).values(), "main=true"},
 	}
 	for i, tc := range cases {
 		if got := tc.got.Encode(); got != tc.want {
@@ -128,9 +133,10 @@ func TestBodyEncodingFailures(t *testing.T) {
 		body  any
 		field string
 	}{
-		{CreateProductParams{Name: "Pro", Price: math.NaN()}, ""},
+		{map[string]any{"priceUsd": math.NaN()}, ""},
 		{map[string]any{"price": math.Inf(1)}, ""},
-		{CreateCustomerParams{Name: "Ad\xffa", Email: "a@b.co"}, "name"},
+		{CreateCustomerParams{FirstName: "Ad\xffa", Email: "a@b.co"}, "firstName"},
+		{CreateProductParams{Name: "Pro", PriceUSD: "1", Metadata: map[string]string{"k": "v\xff"}}, "metadata.k"},
 		{UpdateCustomerParams{Address: ptr("bad \xfe")}, "address"},
 		{CreateSubscriptionSessionParams{ProductUUID: memberUUID, Frequency: &Duration{1, "mon\xffths"}}, "frequency.unit"},
 		{map[string]any{"bad\xffkey": 1}, ""},
@@ -191,7 +197,7 @@ func TestDecodingPolicy(t *testing.T) {
 		{"int into float", `{"f":3}`, func(v decodeTarget) bool { return v.F == 3 }},
 		{"integral float into int", `{"n":2.0,"u":1e3,"f":1.5}`, func(v decodeTarget) bool { return v.N == 2 && v.U == 1000 && v.F == 1.5 }},
 		{"decimal strings stay strings", `{"dec":"-10004200.000001"}`, func(v decodeTarget) bool { return v.Dec == "-10004200.000001" }},
-		{"local offsets and microseconds", `{"t":"2026-09-13T21:23:26.620071+02:00"}`, func(v decodeTarget) bool {
+		{"any RFC 3339 offset and precision (the API sends Z, ms)", `{"t":"2026-09-13T21:23:26.620071+02:00"}`, func(v decodeTarget) bool {
 			return v.T.Equal(time.Date(2026, 9, 13, 19, 23, 26, 620071000, time.UTC))
 		}},
 	}
@@ -216,6 +222,7 @@ func TestDecodingPolicy(t *testing.T) {
 		"negative into uint":  `{"u":-1}`,
 		"array for object":    `[1]`,
 		"truncated":           `{"s":"x"`,
+		"null body":           `null`,
 	}
 	for name, body := range bad {
 		_, err := decodeResponse[decodeTarget](&response{status: 201, header: http.Header{"X-Request-Id": {"rid"}}, body: []byte(body)})
@@ -236,15 +243,15 @@ func TestStatusTextAndVoid(t *testing.T) {
 			jsonReply(w, 202, `{"uuid":"sub@1","status":"active"}`)
 		case "/csv":
 			w.Header().Set("Content-Type", "text/csv")
-			_, _ = w.Write([]byte("paymentUuid,type\npay@1,payment\n"))
+			_, _ = w.Write([]byte("txTimeUtc,type,txUuid\n2026-10-01T12:00:00Z,payment,pay@1\n"))
 		case "/delete":
-			jsonReply(w, 200, `{"message":"deleted"}`)
+			w.WriteHeader(204)
 		case "/nocontent":
 			w.WriteHeader(204)
 		case "/empty":
 			w.WriteHeader(200)
 		case "/csv-error":
-			jsonReply(w, 400, `{"error":"'to' date cannot be more than 3 months after 'from' date","code":"bad_request"}`)
+			jsonReply(w, 400, `{"error":"validation failed","code":"validation_failed","details":{"max":92,"errors":[{"field":"to","message":"to must be at most 92 days after from, both included"}]}}`)
 		}
 	})
 	c, _ := newTestClient(t, ts)
@@ -256,13 +263,14 @@ func TestStatusTextAndVoid(t *testing.T) {
 	}
 
 	text, err := c.callText(ctx, get("/csv"), nil)
-	if err != nil || text != "paymentUuid,type\npay@1,payment\n" {
+	if err != nil || text != "txTimeUtc,type,txUuid\n2026-10-01T12:00:00Z,payment,pay@1\n" {
 		t.Errorf("callText: %q %v", text, err)
 	}
 	if got := ts.recorded()[1].header.Get("Accept"); got != "text/csv, application/json" {
 		t.Errorf("CSV Accept = %q", got)
 	}
-	if _, err := c.callText(ctx, get("/csv-error"), nil); !errors.As(err, new(*BadRequestError)) {
+	var ve *ValidationError
+	if _, err := c.callText(ctx, get("/csv-error"), nil); !errors.As(err, &ve) || ve.FieldErrors[0].Field != "to" || ve.Details["max"] != float64(92) {
 		t.Errorf("CSV error not parsed as JSON: %v", err)
 	}
 

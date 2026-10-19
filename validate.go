@@ -2,9 +2,9 @@ package qbitflow
 
 import (
 	"fmt"
-	"math"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,8 +16,8 @@ import (
 // They mirror the API's binding rules so a bad input fails before the round trip, with a
 // *ValidationError naming each failing input by its wire name. Lengths count code points.
 // Rules that depend on the key's mode or on server state (test-mode price cap, https-only
-// URLs in live mode, the frequency minimum, the 95-day export window, uniqueness) are left to
-// the API.
+// URLs in live mode, the live subscription price minimum, the frequency minimum, the 92-day
+// export window, the merged metadata key count, uniqueness, refund rounding) are left to the API.
 
 // validator collects the field errors of one params value.
 type validator struct {
@@ -177,39 +177,115 @@ func (v *validator) url(field, value string) {
 	}
 }
 
-// price checks a price in USD: finite and above 0.
-func (v *validator) price(field string, value float64) {
-	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
-		v.add(field, "must be a number above 0")
+// maxUSD is the largest USD amount an input takes (usd=1000000: prices and fee lines).
+const maxUSD = 1_000_000
+
+// decimalPattern is the grammar of the usd and percent inputs: digits and an optional fraction
+// of 1 or 2 digits (no sign, exponent, leading "." or grouping; trailing zeros are fine).
+var decimalPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]{1,2})?$`)
+
+// compareDecimal compares a value matching decimalPattern with the integer limit, exactly (no
+// float): -1, 0 or +1.
+func compareDecimal(value string, limit int) int {
+	whole, frac, _ := strings.Cut(value, ".")
+	whole = strings.TrimLeft(whole, "0")
+	lim := strconv.Itoa(limit)
+	if limit == 0 {
+		lim = ""
+	}
+	switch {
+	case len(whole) != len(lim):
+		if len(whole) < len(lim) {
+			return -1
+		}
+		return 1
+	case whole != lim:
+		return strings.Compare(whole, lim)
+	case strings.Trim(frac, "0") != "":
+		return 1
+	}
+	return 0
+}
+
+// isZeroDecimal reports whether a value matching decimalPattern is zero ("0", "0.00").
+func isZeroDecimal(value string) bool {
+	return strings.Trim(value, "0.") == ""
+}
+
+// usd checks an amount in USD sent as a decimal string: digits with at most 2 decimals, above 0,
+// at most maxValue, compared exactly.
+func (v *validator) usd(field, value string, maxValue int) {
+	if !decimalPattern.MatchString(value) || isZeroDecimal(value) || compareDecimal(value, maxValue) > 0 {
+		v.add(field, "must be an amount in USD as a decimal string (e.g. \"12.50\"): above 0, at most %d, with at most 2 decimals", maxValue)
 	}
 }
 
-// percent checks a rate in percent: finite, from 0 (above 0 when positive) to maxPercent,
-// with at most 2 decimals (1 bps).
-func (v *validator) percent(field string, value, maxPercent float64, positive bool) {
+// percent checks a rate in percent sent as a decimal string: digits with at most 2 decimals, at
+// most 16 characters, from 0 (above 0 when positive) to maxValue, compared exactly.
+func (v *validator) percent(field, value string, maxValue int, positive bool) {
 	low := "0"
 	if positive {
 		low = "above 0"
 	}
-	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || (positive && value == 0) || value > maxPercent || !hasAtMostTwoDecimals(value) {
-		v.add(field, "must be a percentage from %s to %s, with at most 2 decimals", low, strconv.FormatFloat(maxPercent, 'f', -1, 64))
+	if len(value) > 16 || !decimalPattern.MatchString(value) || (positive && isZeroDecimal(value)) || compareDecimal(value, maxValue) > 0 {
+		v.add(field, "must be a percentage as a decimal string (e.g. \"7.5\"): from %s to %d, with at most 2 decimals", low, maxValue)
 	}
 }
 
-// usd checks an amount in USD: finite, above 0, at most maxUSD, with at most 2 decimals (the
-// cent) in its shortest decimal form.
-func (v *validator) usd(field string, value, maxUSD float64) {
-	if math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || value > maxUSD || !hasAtMostTwoDecimals(value) {
-		v.add(field, "must be an amount in USD above 0 and at most %s, with at most 2 decimals", strconv.FormatFloat(maxUSD, 'f', -1, 64))
+// Metadata limits (types.Metadata).
+const (
+	maxMetadataKeys     = 50
+	maxMetadataKeyLen   = 40
+	maxMetadataValueLen = 500
+)
+
+var metadataKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]+$`)
+
+// metadata checks a metadata map when set: at most 50 keys (error on field); each key 1 to 40 of
+// A-Z a-z 0-9 _ - . : (error on field, the key not echoed); each value at most 500 code points,
+// without control (a tab included) or bidirectional characters (error on field.<key>). On an
+// update only the map sent is checked: the 50-key cap on the merged result is the API's.
+func (v *validator) metadata(field string, m map[string]string) {
+	if len(m) == 0 {
+		return
+	}
+	if len(m) > maxMetadataKeys {
+		v.add(field, "must have at most %d keys", maxMetadataKeys)
+	}
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	badKey := false
+	for _, key := range keys {
+		if n := utf8.RuneCountInString(key); n < 1 || n > maxMetadataKeyLen || !metadataKeyPattern.MatchString(key) {
+			badKey = true
+			continue
+		}
+		value := m[key]
+		if utf8.RuneCountInString(value) > maxMetadataValueLen {
+			v.add(field+"."+key, "must be at most %d characters", maxMetadataValueLen)
+			continue
+		}
+		if strings.ContainsFunc(value, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(bidiControls, r) }) {
+			v.add(field+"."+key, "must not contain control or bidirectional characters")
+		}
+	}
+	if badKey {
+		v.add(field, "keys must be 1 to %d characters among A-Z a-z 0-9 _ - . :", maxMetadataKeyLen)
 	}
 }
 
-// hasAtMostTwoDecimals reports whether value's shortest decimal form has at most 2 decimals
-// (the form encoding/json sends).
-func hasAtMostTwoDecimals(value float64) bool {
-	s := strconv.FormatFloat(value, 'f', -1, 64)
-	_, frac, found := strings.Cut(s, ".")
-	return !found || len(frac) <= 2
+// maxCursorLen is the longest cursor a paginated list takes (the API's max=200).
+const maxCursorLen = 200
+
+// cursor checks a list's cursor when set: at most 200 characters. It is opaque otherwise: pass
+// back a page's NextCursor verbatim.
+func (v *validator) cursor(value string) {
+	if value != "" {
+		v.length("cursor", value, 0, maxCursorLen)
+	}
 }
 
 // unitSeconds is each DurationUnit's length (months = 30 days, years = 365 days).
@@ -268,8 +344,8 @@ func (v *validator) uuid(field, value string) {
 	}
 }
 
-// txPrefixes are the prefixes of the API's transaction ids (pay@…, sub-hist@…).
-var txPrefixes = []string{"pay", "sub", "payg", "sub-hist", "refund", "transfer"}
+// txPrefixes are the prefixes of the API's transaction ids (pay@…, sub-hist@…, release@…).
+var txPrefixes = []string{"pay", "sub", "payg", "sub-hist", "refund", "transfer", "release"}
 
 // isTxID reports whether value is a transaction id: <prefix>@<uuid>, or a bare UUID.
 func isTxID(value string) bool {
@@ -306,7 +382,7 @@ func (v *validator) date(field, value string) (time.Time, bool) {
 }
 
 // dateRange checks an export window: two YYYY-MM-DD dates, from <= to. The API enforces the
-// window's maximum (95 days).
+// window's maximum (92 days, both included).
 func (v *validator) dateRange(fromField, from, toField, to string) {
 	f, okFrom := v.date(fromField, from)
 	t, okTo := v.date(toField, to)
@@ -383,7 +459,7 @@ func isRequestID(id string) bool {
 }
 
 // checkPathUUID validates a UUID path parameter (members, invitations, endpoints, customers,
-// products): an empty one would address another route.
+// products): an empty one would address another route. The nil UUID passes (the API answers 404).
 func checkPathUUID(field, value string) error {
 	if value == "" {
 		return newFieldError(field, "is required")
@@ -395,7 +471,7 @@ func checkPathUUID(field, value string) error {
 }
 
 // checkPathTxID validates a transaction id path parameter (payments, subscriptions, bills,
-// sessions).
+// sessions, refunds).
 func checkPathTxID(field, value string) error {
 	if value == "" {
 		return newFieldError(field, "is required")
@@ -406,8 +482,8 @@ func checkPathTxID(field, value string) error {
 	return nil
 }
 
-// checkPathRequired validates a free-form path parameter (a reference, an email, an event id):
-// only its presence, the API judges the rest.
+// checkPathRequired validates a free-form path parameter (an event id): only its presence, the
+// API judges the rest.
 func checkPathRequired(field, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return newFieldError(field, "is required")

@@ -36,16 +36,33 @@ func (s *WebhooksService) VerifyRemote(ctx context.Context, endpointUUID string,
 	return asWebhookSignatureError(err)
 }
 
-// List returns the space's webhook endpoints (GET /webhooks/endpoints; at most 10, not
-// paginated). A member's key needs the organization's members.webhooks policy (403
-// policy_disabled), as every Endpoints and Events method.
-func (s *WebhookEndpointsService) List(ctx context.Context, opts ...RequestOption) ([]WebhookEndpoint, error) {
-	return s.client.call[[]WebhookEndpoint](ctx, endpoint{method: http.MethodGet, path: "/webhooks/endpoints"}, opts)
+// List returns one page of the space's webhook endpoints (GET /webhooks/endpoints; newest
+// first, page size 20 by default, at most 100; a space has at most 10 per mode). params may be
+// nil. A member's key needs the organization's members.webhooks policy (403 policy_disabled),
+// as every Endpoints and Events method.
+func (s *WebhookEndpointsService) List(ctx context.Context, params *EndpointListParams, opts ...RequestOption) (*Page[WebhookEndpoint], error) {
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+	return s.client.callRef[Page[WebhookEndpoint]](ctx, endpoint{method: http.MethodGet, path: "/webhooks/endpoints", query: params.values()}, opts)
+}
+
+// Iterate walks every endpoint List returns, fetching the pages lazily and keeping the page
+// size. An error ends the sequence.
+func (s *WebhookEndpointsService) Iterate(ctx context.Context, params *EndpointListParams, opts ...RequestOption) iter.Seq2[WebhookEndpoint, error] {
+	p := derefOrZero(params)
+	return iteratePages(p.Cursor, func(cursor string) (*Page[WebhookEndpoint], error) {
+		p.Cursor = cursor
+		return s.List(ctx, &p, opts...)
+	})
 }
 
 // Create adds a webhook endpoint to the space (POST /webhooks/endpoints, 201). The answer
 // carries the endpoint's Secret (whsec_…), shown only this once: store it to verify the
-// deliveries. It sends an Idempotency-Key and is retried on transient failures.
+// deliveries. It sends an Idempotency-Key and is retried on transient failures (a replay of the
+// same key within 24 h returns the same endpoint and secret). params.IncludeMembers nil: true
+// for an organization endpoint (a marketplace receives every seller's events), false for a
+// member's.
 //
 // Errors: 400 validation_failed (live mode needs https and a public host); 409 conflict beyond
 // 10 endpoints per space and mode.
@@ -65,9 +82,10 @@ func (s *WebhookEndpointsService) Get(ctx context.Context, uuid string, opts ...
 	return s.client.callRef[WebhookEndpoint](ctx, endpoint{method: http.MethodGet, path: pathf("/webhooks/endpoints/%s", uuid)}, opts)
 }
 
-// Update changes a webhook endpoint (PUT /webhooks/endpoints/:uuid): only the fields set in
-// params change. Enabled false pauses it, true enables it again; PayloadVersion v2 moves an
-// endpoint migrated from v1 to the event envelope. Not retried.
+// Update changes a webhook endpoint (PATCH /webhooks/endpoints/:uuid): only the fields set in
+// params change; a pointer to "" clears the description; an empty non-nil Events receives every
+// type. Enabled false pauses it, true enables it again (also after it was disabled for
+// failing). Not retried.
 func (s *WebhookEndpointsService) Update(ctx context.Context, uuid string, params *UpdateWebhookEndpointParams, opts ...RequestOption) (*WebhookEndpoint, error) {
 	if err := checkPathUUID("uuid", uuid); err != nil {
 		return nil, err
@@ -75,11 +93,11 @@ func (s *WebhookEndpointsService) Update(ctx context.Context, uuid string, param
 	if err := params.Validate(); err != nil {
 		return nil, err
 	}
-	return s.client.callRef[WebhookEndpoint](ctx, endpoint{method: http.MethodPut, path: pathf("/webhooks/endpoints/%s", uuid), body: params}, opts)
+	return s.client.callRef[WebhookEndpoint](ctx, endpoint{method: http.MethodPatch, path: pathf("/webhooks/endpoints/%s", uuid), body: params}, opts)
 }
 
-// Delete deletes a webhook endpoint (DELETE /webhooks/endpoints/:uuid): it receives nothing
-// more. Not retried.
+// Delete deletes a webhook endpoint (DELETE /webhooks/endpoints/:uuid, 204): it receives
+// nothing more. Not retried.
 func (s *WebhookEndpointsService) Delete(ctx context.Context, uuid string, opts ...RequestOption) error {
 	if err := checkPathUUID("uuid", uuid); err != nil {
 		return err
@@ -88,9 +106,10 @@ func (s *WebhookEndpointsService) Delete(ctx context.Context, uuid string, opts 
 }
 
 // List returns one page of the space's event log (GET /webhooks/events; newest first, page
-// size 20 by default, at most 100), optionally filtered by Type; IncludeMembers adds the
-// members' events (organization key). The cursor is an event id (evt_…). Decode each event's
-// data with its typed accessor. params may be nil.
+// size 20 by default, at most 100; events are kept at least 90 days), each event exactly as it
+// was delivered, optionally filtered by Type; IncludeMembers adds the members' events
+// (organization key). The cursor is opaque. Decode each event's data with its typed accessor.
+// params may be nil.
 func (s *WebhookEventsService) List(ctx context.Context, params *EventListParams, opts ...RequestOption) (*Page[Event], error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -109,7 +128,7 @@ func (s *WebhookEventsService) Iterate(ctx context.Context, params *EventListPar
 }
 
 // Get returns an event of the log with its deliveries to the space's endpoints
-// (GET /webhooks/events/:id; id is evt_…).
+// (GET /webhooks/events/:id; id is evt_…, at most 64 characters).
 func (s *WebhookEventsService) Get(ctx context.Context, id string, opts ...RequestOption) (*EventDetail, error) {
 	if err := checkPathRequired("id", id); err != nil {
 		return nil, err

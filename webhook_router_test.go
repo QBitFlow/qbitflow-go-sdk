@@ -74,7 +74,7 @@ func TestWebhookRouterStatusMatrix(t *testing.T) {
 	payment := readEventFixture(t, EventTypePaymentCompleted)
 	unknown := []byte(`{"id":"evt_1","type":"invoice.paid","version":"v2","createdAt":"2026-10-01T12:00:00Z","test":true,"data":{"x":1}}`)
 	v1 := []byte(`{"id":"evt_1","type":"payment.completed","version":"v1","createdAt":"2026-10-01T12:00:00Z","data":{}}`)
-	badData := []byte(`{"id":"evt_2","type":"payment.completed","version":"v2","createdAt":"2026-10-01T12:00:00Z","data":{"amount":"not a number"}}`)
+	badData := []byte(`{"id":"evt_2","type":"payment.completed","version":"v2","createdAt":"2026-10-01T12:00:00Z","data":{"amount":10}}`) // money is a decimal string: a number does not fit
 	sig := func(body []byte) string { return SignWebhook(body, routerSecret, routerNow) }
 
 	cases := []struct {
@@ -228,15 +228,15 @@ func TestWebhookRouterTypedRegistrations(t *testing.T) {
 			})
 		},
 		EventTypeSubscriptionCreated: func(f func()) {
-			r.OnSubscriptionCreated(func(_ context.Context, d *SubscriptionCreated, _ *Event) error {
-				decoded(t, d.UUID != "")
+			r.OnSubscriptionCreated(func(_ context.Context, d *Subscription, _ *Event) error {
+				decoded(t, d.UUID != "" && d.ManagementPageLink != "")
 				f()
 				return nil
 			})
 		},
 		EventTypeSubscriptionBilled: func(f func()) {
 			r.OnSubscriptionBilled(func(_ context.Context, d *SubscriptionBilled, _ *Event) error {
-				decoded(t, d.UUID != "")
+				decoded(t, d.Bill.UUID != "" && d.Subscription.UUID == d.Bill.SubscriptionUUID)
 				f()
 				return nil
 			})
@@ -264,7 +264,7 @@ func TestWebhookRouterTypedRegistrations(t *testing.T) {
 		},
 		EventTypeSubscriptionUpcomingBill: func(f func()) {
 			r.OnSubscriptionUpcomingBill(func(_ context.Context, d *SubscriptionUpcomingBill, _ *Event) error {
-				decoded(t, !d.BillingDate.IsZero())
+				decoded(t, !d.BillingAt.IsZero() && d.AmountUSD != "")
 				f()
 				return nil
 			})
@@ -272,11 +272,19 @@ func TestWebhookRouterTypedRegistrations(t *testing.T) {
 		EventTypeRefundRequested: func(f func()) {
 			r.OnRefundRequested(func(_ context.Context, d *Refund, _ *Event) error { decoded(t, d.UUID != ""); f(); return nil })
 		},
-		EventTypeRefundCompleted: func(f func()) {
-			r.OnRefundCompleted(func(_ context.Context, d *Refund, _ *Event) error { decoded(t, d.UUID != ""); f(); return nil })
+		EventTypeRefundApproved: func(f func()) {
+			r.OnRefundApproved(func(_ context.Context, d *Refund, _ *Event) error {
+				decoded(t, d.Status == RefundStatusApproved)
+				f()
+				return nil
+			})
 		},
-		EventTypeRefundDenied: func(f func()) {
-			r.OnRefundDenied(func(_ context.Context, d *Refund, _ *Event) error { decoded(t, d.UUID != ""); f(); return nil })
+		EventTypeRefundRejected: func(f func()) {
+			r.OnRefundRejected(func(_ context.Context, d *Refund, _ *Event) error {
+				decoded(t, d.Status == RefundStatusRejected)
+				f()
+				return nil
+			})
 		},
 		EventTypeMemberJoined: func(f func()) {
 			r.OnMemberJoined(func(_ context.Context, d *MemberJoined, _ *Event) error {

@@ -65,8 +65,8 @@ func TestWaitForCompletion(t *testing.T) {
 		if !slices.Equal(*sleeps, []time.Duration{3 * time.Second, 3 * time.Second, 3 * time.Second}) {
 			t.Errorf("sleeps %v", *sleeps)
 		}
-		if p := ts.recorded()[0].path; p != "/transaction/session-checkout/pay@01a0f755-f200-7000-8000-000000000001/status" {
-			t.Errorf("path %s", p)
+		if r := ts.recorded()[0]; r.method != http.MethodGet || r.path != "/checkout-sessions/pay@01a0f755-f200-7000-8000-000000000001" {
+			t.Errorf("poll %s %s", r.method, r.path)
 		}
 	})
 	t.Run("expires", func(t *testing.T) {
@@ -202,9 +202,9 @@ func TestSubscriptionHasAccess(t *testing.T) {
 		t.Error("zero time is not now")
 	}
 	// Promoted to the events' data.
-	created := &SubscriptionCreated{Subscription: *s}
-	if !created.HasAccess(end.Add(-time.Hour)) {
-		t.Error("SubscriptionCreated.HasAccess")
+	changed := &SubscriptionStatusChanged{Subscription: *s}
+	if !changed.HasAccess(end.Add(-time.Hour)) {
+		t.Error("SubscriptionStatusChanged.HasAccess")
 	}
 }
 
@@ -308,18 +308,33 @@ func TestExportWindows(t *testing.T) {
 		from, to string
 		want     [][2]string
 	}{
+		// helpers.md H6's yearly example: windows of 92 days, both ends included.
 		{"2026-01-01", "2026-12-31", [][2]string{
-			{"2026-01-01", "2026-04-06"}, {"2026-04-07", "2026-07-11"}, {"2026-07-12", "2026-10-15"}, {"2026-10-16", "2026-12-31"},
+			{"2026-01-01", "2026-04-02"}, {"2026-04-03", "2026-07-03"}, {"2026-07-04", "2026-10-03"}, {"2026-10-04", "2026-12-31"},
 		}},
-		{"2026-01-01", "2026-04-06", [][2]string{{"2026-01-01", "2026-04-06"}}},                               // 95 days
-		{"2026-01-01", "2026-04-07", [][2]string{{"2026-01-01", "2026-04-06"}, {"2026-04-07", "2026-04-07"}}}, // 96 days
+		{"2026-01-01", "2026-04-02", [][2]string{{"2026-01-01", "2026-04-02"}}},                               // 92 days, counted inclusively
+		{"2026-01-01", "2026-04-03", [][2]string{{"2026-01-01", "2026-04-02"}, {"2026-04-03", "2026-04-03"}}}, // 93 days
 		{"2026-03-03", "2026-03-03", [][2]string{{"2026-03-03", "2026-03-03"}}},
-		{"2024-02-01", "2024-06-30", [][2]string{{"2024-02-01", "2024-05-06"}, {"2024-05-07", "2024-06-30"}}}, // leap year
+		{"2024-02-01", "2024-06-30", [][2]string{{"2024-02-01", "2024-05-02"}, {"2024-05-03", "2024-06-30"}}}, // leap year
 	}
 	for _, tc := range cases {
 		got, err := exportWindows(tc.from, tc.to)
 		if err != nil || !slices.Equal(got, tc.want) {
 			t.Errorf("%s → %s: %v %v", tc.from, tc.to, got, err)
+		}
+		// Every window covers at most 92 days, both ends included, with no gap or overlap.
+		for i, w := range got {
+			from, _ := time.Parse(time.DateOnly, w[0])
+			to, _ := time.Parse(time.DateOnly, w[1])
+			if days := int(to.Sub(from).Hours()/24) + 1; days > 92 || days < 1 {
+				t.Errorf("%v: %d days", w, days)
+			}
+			if i > 0 {
+				prev, _ := time.Parse(time.DateOnly, got[i-1][1])
+				if !prev.AddDate(0, 0, 1).Equal(from) {
+					t.Errorf("gap or overlap before %v", w)
+				}
+			}
 		}
 	}
 }
@@ -336,7 +351,7 @@ func TestExportRange(t *testing.T) {
 
 	t.Run("JSON yearly", func(t *testing.T) {
 		ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, n int) {
-			jsonReply(w, 200, fmt.Sprintf(`[{"type":"payment","paymentUuid":"pay@%d"}]`, n))
+			jsonReply(w, 200, fmt.Sprintf(`{"items":[{"type":"payment","txUuid":"pay@%d","grossAmountUsd":"10"}],"hasMore":false}`, n))
 		})
 		c, _ := newTestClient(t, ts)
 		events, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-12-31")
@@ -344,28 +359,28 @@ func TestExportRange(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := []string{
-			"2026-01-01..2026-04-06:json", "2026-04-07..2026-07-11:json", "2026-07-12..2026-10-15:json", "2026-10-16..2026-12-31:json",
+			"2026-01-01..2026-04-02:json", "2026-04-03..2026-07-03:json", "2026-07-04..2026-10-03:json", "2026-10-04..2026-12-31:json",
 		}
 		if got := queries(ts); !slices.Equal(got, want) {
 			t.Errorf("requests %v", got)
 		}
-		if len(events) != 4 || events[0].PaymentUUID != "pay@0" || events[3].PaymentUUID != "pay@3" {
+		if len(events) != 4 || events[0].TxUUID != "pay@0" || events[3].TxUUID != "pay@3" || events[0].GrossAmountUSD != "10" {
 			t.Errorf("events %+v", events)
 		}
 	})
-	t.Run("95 days is one request, 96 two", func(t *testing.T) {
-		ts := newTestServer(t, staticReply(200, `[]`))
+	t.Run("92 days is one request, 93 two", func(t *testing.T) {
+		ts := newTestServer(t, staticReply(200, `{"items":[],"hasMore":false}`))
 		c, _ := newTestClient(t, ts)
-		events, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-04-06")
+		events, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-04-02")
 		if err != nil || events == nil || len(events) != 0 || len(ts.recorded()) != 1 {
 			t.Fatalf("%v %v (%d requests)", events, err, len(ts.recorded()))
 		}
-		if _, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-04-07"); err != nil || len(ts.recorded()) != 3 {
+		if _, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-04-03"); err != nil || len(ts.recorded()) != 3 {
 			t.Fatalf("%v (%d requests)", err, len(ts.recorded()))
 		}
 	})
 	t.Run("validation before sending", func(t *testing.T) {
-		ts := newTestServer(t, staticReply(200, `[]`))
+		ts := newTestServer(t, staticReply(200, `{"items":[],"hasMore":false}`))
 		c, _ := newTestClient(t, ts)
 		for _, r := range [][2]string{{"2026-02-01", "2026-01-01"}, {"2026-13-01", "2026-12-01"}, {"", "2026-01-01"}} {
 			if _, err := c.Accounting.ExportJSONRange(context.Background(), r[0], r[1]); !errors.As(err, new(*ValidationError)) {
@@ -382,13 +397,13 @@ func TestExportRange(t *testing.T) {
 	t.Run("an error stops it", func(t *testing.T) {
 		ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request, n int) {
 			if n == 1 {
-				jsonReply(w, 400, `{"error":{"code":"bad_request","message":"too long"}}`)
+				jsonReply(w, 400, `{"error":"validation failed","code":"validation_failed","details":{"max":92,"errors":[{"field":"to","message":"too long"}]}}`)
 				return
 			}
-			jsonReply(w, 200, `[]`)
+			jsonReply(w, 200, `{"items":[],"hasMore":false}`)
 		})
 		c, _ := newTestClient(t, ts)
-		if _, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-12-31"); !errors.As(err, new(*BadRequestError)) || len(ts.recorded()) != 2 {
+		if _, err := c.Accounting.ExportJSONRange(context.Background(), "2026-01-01", "2026-12-31"); !errors.As(err, new(*ValidationError)) || len(ts.recorded()) != 2 {
 			t.Fatalf("%v (%d requests)", err, len(ts.recorded()))
 		}
 	})
@@ -496,7 +511,7 @@ func TestPlaceholders(t *testing.T) {
 	ts := newTestServer(t, staticReply(201, `{"uuid":"pay@x","link":"https://pay.example.com","expiresAt":"2026-10-01T12:00:00Z"}`))
 	c, _ := newTestClient(t, ts)
 	_, err := c.CheckoutSessions.CreatePayment(context.Background(), &CreatePaymentSessionParams{
-		ProductName: "Pro plan", Price: 1,
+		ProductName: "Pro plan", PriceUSD: "1",
 		SuccessURL: "https://shop.example.com/thanks?session=" + PlaceholderUUID + "&type=" + PlaceholderTransactionType,
 	})
 	if err != nil {

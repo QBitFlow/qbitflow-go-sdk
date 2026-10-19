@@ -35,7 +35,7 @@ func main() {
 			if _, done := fulfilled.LoadOrStore(event.ID, true); done {
 				return nil // a retry of an event already handled
 			}
-			log.Printf("fulfil order %q: %.2f USD (%s)", payment.Reference, payment.Amount, payment.UUID)
+			log.Printf("fulfil order %q: %s USD (%s, %v)", payment.Reference, payment.AmountUSD, payment.UUID, payment.Metadata)
 			return nil // an error answers 500, and QBitFlow delivers the event again
 		}).
 		OnCheckoutExpired(func(ctx context.Context, expired *qbitflow.CheckoutExpired, event *qbitflow.Event) error {
@@ -52,12 +52,14 @@ func main() {
 
 	// More handlers, registered before serving.
 	router.
-		OnSubscriptionCreated(func(_ context.Context, sub *qbitflow.SubscriptionCreated, _ *qbitflow.Event) error {
+		OnSubscriptionCreated(func(_ context.Context, sub *qbitflow.Subscription, _ *qbitflow.Event) error {
 			log.Printf("subscription %s created (%s), access: %v", sub.UUID, sub.Status, sub.HasAccess(time.Now()))
 			return nil
 		}).
-		OnSubscriptionBilled(func(_ context.Context, bill *qbitflow.SubscriptionBilled, _ *qbitflow.Event) error {
-			log.Printf("subscription %s billed: %.2f USD (bill %s)", bill.SubscriptionUUID, bill.Amount, bill.UUID)
+		OnSubscriptionBilled(func(_ context.Context, billed *qbitflow.SubscriptionBilled, _ *qbitflow.Event) error {
+			// {bill, subscription}: the bill paid, and the subscription as it leaves it.
+			log.Printf("subscription %s (%s) billed: %s USD (bill %s), paid until %v",
+				billed.Subscription.UUID, billed.Subscription.Status, billed.Bill.AmountUSD, billed.Bill.UUID, billed.Bill.PeriodEnd)
 			return nil
 		}).
 		OnSubscriptionStatusChanged(func(_ context.Context, change *qbitflow.SubscriptionStatusChanged, _ *qbitflow.Event) error {
@@ -68,8 +70,12 @@ func main() {
 			log.Printf("subscription %s: billing failed (%s), %d attempts left", failed.UUID, failed.Reason, failed.RemainingAttempts)
 			return nil
 		}).
-		OnRefundCompleted(func(_ context.Context, refund *qbitflow.Refund, _ *qbitflow.Event) error {
-			log.Printf("refund %s of %s sent", refund.UUID, refund.TxUUID)
+		OnRefundApproved(func(_ context.Context, refund *qbitflow.Refund, _ *qbitflow.Event) error {
+			log.Printf("refund %s of %s sent: %s%% (%s %s)", refund.UUID, refund.TxUUID, refund.RefundPercent, refund.Amount, refund.Currency.Symbol)
+			return nil
+		}).
+		OnRefundRejected(func(_ context.Context, refund *qbitflow.Refund, _ *qbitflow.Event) error {
+			log.Printf("refund %s of %s rejected: %s", refund.UUID, refund.TxUUID, refund.MerchantMessage)
 			return nil
 		}).
 		OnMemberJoined(func(_ context.Context, joined *qbitflow.MemberJoined, _ *qbitflow.Event) error {

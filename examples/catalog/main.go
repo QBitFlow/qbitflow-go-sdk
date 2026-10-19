@@ -28,7 +28,7 @@ func main() {
 		product, err := client.Products.Create(ctx, &qbitflow.CreateProductParams{
 			Name:        "T-shirt",
 			Description: "Blue, size M",
-			Price:       4.99,
+			PriceUSD:    "4.99",          // a decimal string, never a float
 			Reference:   "tshirt-blue-m", // your own id: unique per space
 		})
 		if err != nil {
@@ -43,12 +43,12 @@ func main() {
 	}
 
 	// docs:start products-list
-	products, err := client.Products.List(ctx, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, p := range products {
-		fmt.Printf("%s %q: %.2f USD (%s)\n", p.UUID, p.Name, p.Price, p.Reference)
+	// Iterate walks every page (List returns one); hidden products only with IncludeHidden.
+	for p, err := range client.Products.Iterate(ctx, nil) {
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("%s %q: %s USD (%s)\n", p.UUID, p.Name, p.PriceUSD, p.Reference)
 	}
 	// docs:end products-list
 
@@ -72,9 +72,9 @@ func main() {
 	for _, c := range page.Items {
 		fmt.Println(c.UUID, c.Email)
 	}
-	if page.NextCursor != nil {
-		// Pass it back as CustomerListParams.Cursor for the next page.
-		fmt.Println("next cursor:", *page.NextCursor)
+	if page.HasMore {
+		// Pass it back, verbatim, as CustomerListParams.Cursor for the next page.
+		fmt.Println("next cursor:", page.NextCursor)
 	}
 	// docs:end customers-list
 }

@@ -5,11 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0] - 2026-10-07
+## [3.0.0] - 2026-10-19
 
-The SDK for **QBitFlow API v2**, aligned with the API docs `v2` @ `58460e9` and with the
-behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share (same services, methods,
-errors, retries and webhook verification). A major release: the module path, the client and most names change.
+The SDK for **QBitFlow API v2**, aligned with the final API v2 contract (api-hub `docs/api` @
+`fab875c`) and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
+(same services, methods, errors, retries, validation and webhook verification). A major release:
+the module path, the client, the routes and most names change.
 [MIGRATION-v3.md](MIGRATION-v3.md) maps every 2.x method and type to its replacement.
 
 This entry describes the changes since 2.1.0, the last published release (2.5.0 was prepared
@@ -20,54 +21,117 @@ but never published; its changes are part of 3.0.0).
 -   **Module path `github.com/QBitFlow/qbitflow-go-sdk/v3`**, one root package `qbitflow`: the
     `pkg/qbitflow`, `pkg/models`, `pkg/errors` and `pkg/utils` packages are gone. Requires
     **Go 1.27**.
--   **API v2**: the default base URL is `https://api.qbitflow.app/v2`. API v1 runs next to it,
-    against the same data, for a transition period.
+-   **API v2**: the default base URL is `https://api.qbitflow.app/v2`, with its REST routes:
+    plural collections (`/products/:uuid`, `/customers`, `/payments`, `/subscriptions`,
+    `/bills/:uuid`, `/refunds`, `/wallets`, `/currencies`, `/checkout-sessions/…`,
+    `/payment-failures`, `/transactions`, `/held-funds`), updates as `PATCH`, actions as
+    `POST /<resource>/:uuid/<verb>`, lookups by reference as list filters, and every `DELETE`
+    answering `204` with no body. `/v1` is gone.
 -   **The client.** `qbitflow.NewClient(apiKey, ...ClientOption) (*Client, error)` replaces `New`,
     `NewWithConfig`, `Config`, `SetBaseURL` and `SetTimeout`. Options: `WithBaseURL`,
-    `WithTimeout` (now per attempt), `WithMaxRetries`, `WithHTTPClient`, `WithOnBehalfOf`. The
-    key must be non-blank and start with `sk_` (a `*ValidationError` otherwise; nothing is sent).
-    The services are the client's fields; the `New…Service` constructors and the per-service
-    `OnBehalfOf` methods are gone.
+    `WithTimeout` (now per attempt), `WithMaxRetries` (`0` disables retries), `WithHTTPClient`,
+    `WithOnBehalfOf`. The key must be non-blank and start with `sk_` (a `*ValidationError`
+    otherwise; nothing is sent). The services are the client's fields; the `New…Service`
+    constructors and the per-service `OnBehalfOf` methods are gone.
 -   **`context.Context` first and `...RequestOption` last on every method**
     (`WithOnBehalfOf`, `WithIdempotencyKey`, `WithRequestID`).
 -   **Ids are UUID strings.** Products are named by `UUID` (was the numeric `ID`), and
     `ProductID` is `ProductUUID` everywhere; people are named by their user UUID (`UserID` →
-    `UserUUID`). `On-Behalf-Of` takes a member's user UUID: `client.OnBehalfOf(userUUID string)`.
-    `OrganizationID` is gone from every model. Currencies keep numeric ids.
--   **Users and claims become invitations, members and the trust layer**: `Users.*` →
+    `UserUUID`). `On-Behalf-Of` takes a member's user UUID: `client.OnBehalfOf(userUUID string)`;
+    `""` means the organization level and the header is then omitted (never sent blank).
+    `OrganizationID` is gone from every model. Currencies keep numeric ids. Transaction ids are
+    prefixed (`pay@`, `sub@`, `sub-hist@`, `refund@`, `transfer@`, `release@`) and every route
+    also takes the bare UUID.
+-   **Money is a decimal string, never a float**, in requests and in responses: USD amounts
+    (`PriceUSD`, `AmountUSD`, `PaidUSD`, `TotalUSD`, `AttemptedUSD`), token amounts (`Amount`,
+    `Paid`, `Owed`, next to their `…MinUnits`) and fee rates in percent (`FeePercent`,
+    `OrganizationFeePercent`, `RefundPercent`: `"1.5"` is 1.5 %). `CreateProductParams.Price` →
+    `PriceUSD string`, the session params' inline `Price` → `PriceUSD string`,
+    `FeeItem.AmountUSD`, `CreateRefundParams.RefundPercent`,
+    `CreateInvitationParams.OrganizationFeePercent` and `UpdateMemberParams.OrganizationFeePercent`
+    are strings. No `float64` is left in a model or a params type.
+-   **Amounts are token amounts.** `Payment.Amount`, `Bill.Amount`, `Transaction.Amount` and
+    `HeldFundsReleased.Amount` are now in the currency's units (`"10"` for 10 USDC), next to
+    `AmountMinUnits` and the new `AmountUSD` (what `Amount` used to be).
+-   **Users and claims become invitations, members and held funds**: `Users.*` →
     `Invitations.*` and `Members.*` (a person exists once they accept an invitation);
     `Claims.*` → `Members.Trust` and the held-funds reads. `ApiKeys.*` is removed (keys are
     managed in the dashboard; `Client.Me` describes the current key).
 -   **Checkout sessions have their own service.** `Payments.CreateSession` and
     `Subscriptions.CreateSession` → `CheckoutSessions.CreatePayment` / `CreateSubscription`,
-    whose params take plain values (`ProductUUID`, `Reference`… instead of pointers) and return a
-    `*CheckoutSession` (`UUID`, `Link`, `ExpiresAt`). `TransactionStatus.GetTransactionStatus` →
-    `CheckoutSessions.GetStatus(ctx, uuid)`, with four statuses (`created`,
-    `waitingConfirmation`, `completed`, `expired`): a failed attempt is `created` with
-    `LastAttempt` set, and is never final.
+    whose params take plain values and return a `*CreatedCheckoutSession` (`Link`, `UUID`,
+    `ExpiresAt`, always set). `TransactionStatus.GetTransactionStatus` →
+    `CheckoutSessions.Get(ctx, uuid)` (`GET /checkout-sessions/:uuid`), with four statuses
+    (`created`, `waitingConfirmation`, `completed`, `expired`) and `ExpiresAt` while open: a
+    failed attempt is `created` with `LastAttempt` set, and is never final.
 -   **Subscriptions.** `Status` (was `SubscriptionStatus`) takes `trial`, `trialExpired`,
     `active`, `pastDue`, `paused`, `stopped`, `cancelled`; `low_on_funds` and `pending` became
     `ActionRequired` values (`topUpAllowance`, `raiseMaximum`, `confirmTrial`), and the `Stopped`
-    bool the `stopped` status. `Frequency` is a `Duration` (was seconds), `NextBillingDate` a
-    `*time.Time` (nil once cancelled), `LastBillingDate` a `time.Time`. `ForceCancel` →
-    `Cancel(ctx, uuid, *CancelSubscriptionParams)` (a POST, `Immediate` false cancels at the end
-    of the paid period, returns `*SubscriptionCancellation` with `Pending` for an HTTP 202);
-    `ExecuteTestBillingCycle` → `ExecuteTestBilling` (returns the bill's `*BillingState`);
-    `GetPaymentHistory` → `ListBills` / `IterateBills`, or `GetPublicHistory`; `Get` returns
-    cancelled subscriptions too.
--   **Fee rates are percents**: `FeeBps` → `FeePercent`, `OrganizationFeeBps` →
-    `OrganizationFeePercent` (`150` bps is `1.5`).
--   **Models renamed and retyped**: `LinkResponse` → `CheckoutSession`, `TransactionStatus` →
-    `CheckoutSessionStatus`, `SubscriptionHistory` → `Bill`, `RefundEntry` → `Refund` (`TxID` →
-    `TxUUID`), `User` → `Member`, `UserRole` → `Role`, `CursorData` → `Page`, `TxAmountsFull` →
-    `TxAmounts`; `TransactionHash` → `TxHash`; `Currency` on payments, bills and subscriptions is
-    a `*Currency`; `Payment.Metadata` a value. Optional strings are plain `string`s (`""` when
-    absent: `Customer.PhoneNumber`, `Payment.Reference`…); other optional fields are pointers.
--   **Enum values** follow the API's lowerCamelCase (`pastDue`, `trialExpired`,
-    `subscriptionHistory`); `TransactionTypeOneTimePayment` → `TransactionTypePayment`,
+    bool the `stopped` status. `Frequency` is a `Duration` (was seconds); `LastBillingDate` →
+    `LastBilledAt`, `NextBillingDate` → `NextBillingAt`, `MinimumCancellationDate` →
+    `CancellableAt` (all `*time.Time`, nil when absent); `Allowance` is an `*Allowance` object
+    (`Amount`, `AmountMinUnits`, `AmountUSD`, `RemainingPeriods`, `MaxPerPeriod`,
+    `MaxPerPeriodMinUnits`) that absorbs `MaxAmountPerPeriod`; `From`, `ProductUUID` and
+    `SubscriptionHash` are absent when unknown; `Currency` is a value; `ManagementPageLink` is on
+    the subscription itself. `ForceCancel` → `Cancel(ctx, uuid, *CancelSubscriptionParams)`
+    (`POST /subscriptions/:uuid/cancel`; `Immediate` false cancels at the end of the paid period;
+    returns `*SubscriptionCancellation` with `Pending` for an HTTP 202);
+    `ExecuteTestBillingCycle` → `TestBill` (`POST /subscriptions/:uuid/test-bill`, returns a
+    `*TestBill`: `BillUUID` `sub-hist@…`, `Stage`, `Outcome`, `Attempts`, `NextAttemptAt`);
+    `GetPaymentHistory` → `ListBills` / `IterateBills`; `Get` returns cancelled subscriptions too.
+-   **The settlement.** `Payment.Metadata` (the fee split) → `Payment.Settlement`, a
+    `Settlement` (`FeePercent`, `OrganizationFee`, `ReferralFee`, `Split`, `Transaction`) on
+    payments, bills, transactions and held-funds lines; `TransferSettlement` on refunds and held
+    funds releases. `PaymentMetadata`, `TxMetadata`, `BlockData`, `NetworkFees`, `TxAmounts`,
+    `TxAmountsMinUnits` and `TxAmountsUSD` are replaced by `Settlement`, `Split` (each part a
+    `TokenAmount`; `Split.Platform` no longer includes the referrer's share),
+    `SettlementTransaction` (`BlockNumber`, `BlockTime`, `GasUsed`, `Fee`, `L1Fee`,
+    `NativePriceUSD`) and `TransferSettlement`. `OrganizationFee.Organization` and
+    `ReferralFee.Referrer` → `Address`.
+-   **`Metadata` is now your own data**: a `map[string]string` on `Product`, `Customer`,
+    `Payment` (copied from its checkout, read-only), `Subscription`, `Transaction` and the
+    `checkout.expired` session.
+-   **Models renamed and retyped**: `LinkResponse` → `CreatedCheckoutSession`,
+    `TransactionStatus` → `CheckoutSessionStatus`, `SubscriptionHistory` → `Bill`, `RefundEntry`
+    → `Refund` (`TxID` → `TxUUID`), `User` → `Member`, `UserRole` → `Role`, `CursorData` →
+    `Page`; `TransactionHash` → `TxHash`. `Name` → `FirstName` on `Customer`, `CustomerSummary`,
+    `Member` and `MeMember` (and the customer params); a payment's and a bill's `Name` /
+    `Description` → `ProductName` / `ProductDescription`; `Product.Price` → `PriceUSD`;
+    `Me.OnBehalfOf` → `OnBehalfOfUserUUID`; `Member.AcceptedCurrencyIDs` → `AcceptedCurrencies`
+    (`[]Currency`); `Wallet.PublicKey` → `Address`; `TokenWallet.TokenID` / `Token` → `Currency`;
+    `Balance` is the `Currency` plus a `TokenAmount` (was a code, `Balance` and `BalanceUSD`);
+    `HeldFunds.TotalAmount` and `MemberHeldFunds.TotalAmount` → `TotalUSD`;
+    `LedgerEntry.Amount` → `AmountUSD`, `LedgerEntry.Metadata` → `Settlement`, plus `Owed`;
+    `Invitation.TrustLayer` → `HoldFunds` (and on the params); `InvitationCreated
+    {Invitation, Link}` → `CreatedInvitation`, flat (the invitation's fields and `Link`);
+    `MemberHeldFundsSummary` → `MemberHeldFunds`; `BillingState` → `TestBill`; the
+    `CurrencyID` fields are gone (each model carries its `Currency` object, as a value). Optional
+    strings are plain `string`s (`""` when absent); other optional fields are pointers.
+-   **The currency object** gains `Code` (`BASE:USDC`) and `Chain`; `Address` is absent on a
+    native coin; the nested `MainCurrency` is gone (`MainCurrencyID` stays).
+-   **Enum values** follow the API's lowerCamelCase (`pastDue`, `trialExpired`);
+    `TransactionTypeOneTimePayment` → `TransactionTypePayment`,
     `TransactionTypeExecuteSubscriptionPayment` → `TransactionTypeExecuteSubscription`, the PAYG
-    values are `createPaygSubscription` / `cancelPaygSubscription`; `RefundStatusFailed` is
-    removed.
+    values are `createPaygSubscription` / `cancelPaygSubscription`. `LedgerEntryType` and
+    `AccountingEventType` `subscriptionHistory` → `bill` (`LedgerEntryTypeBill`,
+    `AccountingEventTypeBill`). `RefundStatus` adds `cancelled` (a merchant's draft dropped
+    before it was sent) and keeps `failed` (declared, never set). `WebhookPayloadVersionV1` is
+    removed: v2 is the only payload.
+-   **Pagination**: `GetAll…(limit, cursor)` → `List(ctx, *…ListParams)` returning a `*Page[T]`
+    `{Items, HasMore, NextCursor}`: `HasMore` is a field (no `HasMore()` method), `NextCursor` an
+    opaque `string` (`""` on the last page). Iterators stop when `HasMore` is false. Bounded lists
+    (`Currencies.List`, `Wallets.List`, `Wallets.ListForMember`, `Wallets.ListAcceptedCurrencies`,
+    `Members.ListHeldFunds`, `Accounting.ExportJSON`) return a slice (and follow a `NextCursor`
+    should one ever claim more, so an export is never cut short silently). Iterators also stop on
+    an empty page that claims more (a server fault).
+-   **Lookups by reference are list filters.** `Products`, `Customers`, `Payments` and
+    `Subscriptions` `GetByReference(ctx, reference)` run the list's `?reference=` filter and
+    return the item whose `Reference` equals the one asked for (exactly), or a `*NotFoundError`
+    (status 404, code `not_found`) when none does — never another resource.
+    The reference is validated. `Customers.GetByEmail` is removed: an email may match several
+    customers (`Customers.List` with `Email`).
+-   **Deletes and revokes return only an error**: `Invitations.Revoke` no longer returns the
+    invitation (`204`).
 -   **Errors.** Every error embeds an `*APIError` (`StatusCode`, `Code`, `Message`, `Details`,
     `RequestID`, `FieldErrors`, `RawBody`, `Err`) and has one type per condition, matched with
     `errors.As`: `ValidationError` (400 `validation_failed` and client-side checks),
@@ -78,65 +142,86 @@ but never published; its changes are part of 3.0.0).
     package and its constructors are gone.
 -   **Webhooks** use API v2's scheme: the `QBitFlow-Signature: t=…,v1=…` header, an HMAC-SHA256 of
     `t + "." + rawBody` over the raw body (no canonical JSON), and the event envelope
-    `{id, type, version, createdAt, test, userUuid, data}`. Endpoints must be on payload version
-    v2: v1 bodies are not parsed. `Webhooks.Verify(payload, signature, timestamp) (bool, error)`
-    → `Webhooks.VerifyRemote(ctx, endpointUUID, rawBody, signatureHeader) error`.
--   **Pagination**: `GetAll…(limit, cursor)` → `List(ctx, *…ListParams)` returning a `*Page[T]`,
-    with filters.
+    `{id, type, version, createdAt, test, userUuid, data}`; a version other than `v2` is refused.
+    `Webhooks.Verify(payload, signature, timestamp) (bool, error)` →
+    `Webhooks.VerifyRemote(ctx, endpointUUID, rawBody, signatureHeader) error`.
+-   **Webhook events renamed and reshaped**: `refund.completed` → `refund.approved`
+    (`EventTypeRefundApproved`, `Event.RefundApproved()`, `WebhookRouter.OnRefundApproved`),
+    `refund.denied` → `refund.rejected` (`EventTypeRefundRejected`, `RefundRejected()`,
+    `OnRefundRejected`). `subscription.billed`'s data is nested: `SubscriptionBilled{Bill,
+    Subscription}` (the flattened `SubscriptionReference` / `SubscriptionStatus` are
+    `Subscription.Reference` / `.Status`). `subscription.created`'s data is a plain
+    `*Subscription` (the `SubscriptionCreated` type is gone). `subscription.upcomingBill`'s
+    `BillingDate` → `BillingAt` and its `AmountUSD` is a string. `heldFunds.released`'s
+    `TxMetadata` → `Settlement`. The `checkout.expired` session has `PriceUSD`, `AmountUSD` (was
+    `Price` / `Amount` numbers), `AvailableCurrencies` (was `AvailableCurrencyIDs`), `Metadata`,
+    and `UpgradingFromTrial` as a bool.
+-   **Renamed methods** (inside 3.0.0's preparation, before the API v2 final contract):
+    `CheckoutSessions.GetStatus` → `Get`; `Payments.ListCombined` / `IterateCombined` →
+    `Transactions.List` / `Iterate` (`CombinedPayment` → `Transaction`, `CombinedPaymentSource`
+    → `TransactionKind` with `payment` / `bill`, the `Source` filter → `Type`);
+    `Subscriptions.ExecuteTestBilling` → `TestBill`; `Refunds.Initiate` → `Create`
+    (`InitiateRefundParams` → `CreateRefundParams`); `Refunds.List` (active) and `ListInactive` /
+    `IterateInactive` → one `Refunds.List` / `Iterate` with a `Status` filter;
+    `Wallets.ListSupportedCurrencies` → `ListAcceptedCurrencies` (`SupportedCurrenciesParams` →
+    `AcceptedCurrenciesParams`); `Currencies.ListAvailable` / `ListMain` → `Currencies.List`
+    with `Main`; `Webhooks.Endpoints.List` takes `*EndpointListParams` and returns a page.
 
 ### Added
 
--   `Client.Me`: what the key is (role, space, mode), the recommended start-up check;
-    `Client.OnBehalfOf`: a client acting in a member's space, sharing the connections.
--   `CheckoutSessions`: `CreatePayment`, `CreateSubscription` (with `ExpiresInMinutes` and the
-    `{{UUID}}` / `{{TRANSACTION_TYPE}}` redirect placeholders), `GetStatus`, `Expire`.
--   Checkout fees: `CreatePaymentSessionParams.Fees` (`*CheckoutFees`: up to 10 `FeeItem` lines
-    of your own, `Label`, `Description`, `AmountUSD`, and `ProcessingFee *bool`, which has the
-    customer pay QBitFlow's processing fee, grossed up so you keep the price and your lines;
-    `nil` follows the dashboard's `checkout.customerPaysProcessingFee` setting). The customer
-    pays the price plus every line, then the network fee on top; test mode caps that amount,
-    fees included, at $5. Validated before sending (at most 10 lines; `Label` the name rule, 1
-    to 40; `Description` the text rule, at most 200; `AmountUSD` above 0, at most 1,000,000, at
-    most 2 decimals), errors on `fees.items[i].<field>`. `Payment.Price` and `Payment.Fees`
-    (`Amount` = price + fees, also on `payment.completed`), `PaymentSessionData.Fees` and
-    `Amount` (`checkout.expired`), `FeeLine` (`AmountUSD` a decimal string) and the open enum
+-   `Client.Me`: what the key is (role, space, mode, the member acted for), the recommended
+    start-up check; `Client.OnBehalfOf`: a client acting in a member's space, sharing the
+    connections. `MeSpace` has `Role`, `TrustedAt`, `CreatedAt` and `OrganizationFeePercent`.
+-   `CheckoutSessions`: `CreatePayment`, `CreateSubscription` (with `ExpiresInMinutes`,
+    `Metadata` and the `{{UUID}}` / `{{TRANSACTION_TYPE}}` redirect placeholders), `Get`,
+    `Expire`.
+-   Checkout fees: `CreatePaymentSessionParams.Fees` and `CreateSubscriptionSessionParams.Fees`
+    (`*CheckoutFees`: up to 10 `FeeItem` lines of your own, `Label`, `Description`, `AmountUSD`,
+    and `ProcessingFee *bool`, which has the customer pay QBitFlow's processing fee, grossed up so
+    you keep the price and your lines; `nil` follows the dashboard's
+    `checkout.customerPaysProcessingFee` setting). The customer pays the price plus every line,
+    then the network fee on top; test mode caps that amount, fees included, at `"5"`. A
+    subscription's are locked with its price: every bill charges both. `Payment.PriceUSD` and
+    `Fees`, `Subscription.Fees`, `Transaction.PriceUSD` and `Fees`, `FeeLine` and the open enum
     `FeeLineType` (`FeeLineTypeCustom`, `FeeLineTypeProcessingFee`).
--   Checkout fees on subscriptions: `CreateSubscriptionSessionParams.Fees` (the same
-    `*CheckoutFees` and rules, errors on `fees.items[i].<field>` after the terms'), locked with the
-    price: every bill charges the price plus every line. `Subscription.Fees` (the lines, next to
-    `PriceUSD`, which stays the price; also on every `subscription.*` webhook); the session's
-    `Fees` and `Amount` on a subscription checkout too.
--   `AccountingEvent` follows the API's export: amounts in the currency's units (not min units),
-    `Currency` (was `tokenSymbol`), `CurrencyPriceUSD`, and the network fees apart from the net:
-    `NetworkFeesPaidBy` (the open enum `NetworkFeesPayer`: `payer`, `merchant`, `organization`),
-    `NetworkFees`, `NetworkFeesCurrency`, `NetworkFeesCurrencyDecimals`,
-    `NetworkFeesCurrencyPriceUSD`, `NetworkFeesUSD`. Its fields are in the CSV's column order; the
-    always-empty `UserName`, `UserLastName`, `CustomerName` and `CustomerLastName` are gone.
--   `Payments.List` / `ListCombined` with filters (customer, product, dates, `Refunded`,
-    `IncludeMembers` / `UserUUID`, `Source`, `SubscriptionUUID`); `Payments.Get` with
-    `ReadParams`. `Failures.List`: the failed payment attempts.
--   `Subscriptions.List` (status, reference and the shared filters), `ListBills`, `GetBill`;
-    `Subscription.CurrentPeriodEnd` (grant access while now is before it), `ActionRequired`,
-    `PriceUSD`, `CancellationReason`, `Dunning`.
--   `Refunds.Initiate`: a merchant's refund of a payment or a bill, signed in the dashboard;
-    refund list filters (`IncludeMembers`, `UserUUID`, `Held`).
+-   Merchant metadata (`map[string]string`) on `CreateProductParams` / `UpdateProductParams`,
+    `CreateCustomerParams` / `UpdateCustomerParams`, both session creates, and
+    `Subscriptions.Update` (`PATCH /subscriptions/:uuid`, `UpdateSubscriptionParams`): merged on
+    the updates, a key set to `""` deleting it.
+-   `Transactions.List` / `Iterate` (`GET /transactions`): the feed of payments and bills, each a
+    `Transaction` with its `Type`, filtered by `Type`, `SubscriptionUUID`, `Refunded` and the
+    shared filters.
+-   `Payments.List` with filters (customer, product, dates, `Reference`, `Refunded`,
+    `IncludeMembers` / `UserUUID`); `Payments.Get` with `ReadParams`. `Failures.List`: the failed
+    payment attempts (`Attempted`, `AttemptedUSD`, `Currency`).
+-   `Products.List` / `Iterate` (paginated: `Limit`, `Cursor`, `IncludeHidden`, `Subscription`,
+    `Reference`) and subscription products; `Customers.List` / `Iterate` (`Email`, `Reference`,
+    `Verified`).
+-   `Subscriptions.List` (status, reference and the shared filters), `Update`, `ListBills`,
+    `GetBill` (`GET /bills/:uuid`); `Subscription.CurrentPeriodEnd` (grant access while now is
+    before it), `ActionRequired`, `PriceUSD`, `CancellationReason`, `Dunning`, `Metadata`,
+    `ManagementPageLink`; `Allowance`.
+-   `Refunds.List` / `Iterate` (`Status` (repeatable), `TxUUID`, `Held`, `IncludeMembers`,
+    `UserUUID`), `Refunds.Get` (`GET /refunds/:uuid`) and `Refunds.Create` (`POST /refunds`): a
+    merchant's refund of a payment or a bill, signed in the dashboard. A `Refund` carries `Paid`,
+    `Amount`, its `Currency` and, once approved, its `Settlement`.
 -   `Members` (`List`, `Get`, `Update`, `Remove`, `Trust`, `ListHeldFunds`, `GetHeldFunds`,
     `GetOwnHeldFunds`) and `Invitations` (`Create`, `List`, `Revoke`) for marketplaces.
--   `Wallets` (`List` with balances, `ListForMember`, `ListSupportedCurrencies`),
-    `Accounting.ExportCSV`, `Currencies.Get`, product filters and subscription products,
-    customer filters.
--   `Webhooks.Endpoints` (`List`, `Create` with the secret shown once, `Get`, `Update`,
-    `Delete`) and `Webhooks.Events` (the event log: `List`, `Get` with its deliveries).
+-   `Wallets` (`List` with balances, `ListForMember`, `ListAcceptedCurrencies`),
+    `Accounting.ExportCSV`, `Currencies.Get`.
+-   `TokenAmount` (`Amount`, `AmountMinUnits`, `AmountUSD`), the shape of every token amount.
+-   `Webhooks.Endpoints` (`List` / `Iterate` paginated, `Create` with the secret shown once,
+    `Get`, `Update`, `Delete`) and `Webhooks.Events` (the event log: `List`, `Iterate`, `Get` with
+    its deliveries).
 -   Webhook verification without a client: `VerifyWebhook`, `VerifyWebhookRequest` (net/http,
     1 MiB, the body put back), `ConstructEvent`, `ParseEvent`, `WithTolerance`, `WithClock`;
     every `v1=` signature is checked, so a secret rotation needs nothing on the receiver's side.
     The header constants `SignatureHeader`, `EventIDHeader`, `EventTypeHeader`,
     `WebhookVersionHeader`.
 -   Typed events: an `Event` with an accessor per type (`PaymentCompleted()`,
-    `SubscriptionBilled()`, `MemberJoined()`, `CheckoutExpired()`… 15 types) and
-    `DecodeData[T]()` for the others; `EventType` constants.
--   An iterator (`iter.Seq2`) next to every paginated list: `Iterate`, `IterateCombined`,
-    `IterateBills`, `IterateInactive`.
+    `SubscriptionBilled()`, `RefundApproved()`, `MemberJoined()`, `CheckoutExpired()`… 15 types)
+    and `DecodeData[T]()` for the others; `EventType` constants.
+-   An iterator (`iter.Seq2`) next to every paginated list: `Iterate`, `IterateBills`.
 -   Retries: reads and the 7 creates are retried on network errors, timeouts, 5xx, 429 (after
     `Retry-After`, at most 60 s) and `409 idempotency_key_in_use`, 3 times by default with a
     1 s · 2ⁿ back-off; `WithMaxRetries(0)` disables them; `IsRetryable`.
@@ -144,7 +229,15 @@ but never published; its changes are part of 3.0.0).
     `WithIdempotencyKey` for retries across processes.
 -   `WithRequestID` (`X-Request-Id`) and the request id on every error.
 -   Client-side validation mirroring the API v2 validators, through each params type's
-    `Validate` method, run before every request (no request is sent on failure).
+    `Validate` method, run before every request (no request is sent on failure): names, texts,
+    references (also on the `Reference` filters and `GetByReference`), emails (also the customers'
+    `Email` filter), phones, URLs, USD amounts as strings (at most 2 decimals, above 0, at most
+    1,000,000), percents as strings (at most 2 decimals and 16 characters; `RefundPercent` above
+    0 up to 100, `OrganizationFeePercent` 0 to 50, required on `UpdateMemberParams`), metadata
+    (at most 50 keys of 1 to 40 of `A-Z a-z 0-9 _ - . :`, values of at most 500 characters
+    without control or bidirectional characters), durations, cursors (at most 200 characters),
+    the refunds' `Status` filter (at most 5 known statuses), the transactions' `Type`, the
+    `release@` transaction prefix, and a clearable `UpdateCustomerParams.LastName`.
 -   `User-Agent: qbitflow-go/3.0.0` and the `Version` constant.
 -   Integration helpers, with the same behaviour in the four SDKs:
     -   `WebhookRouter` (`NewWebhookRouter(secret, ...WebhookRouterOption)`): verifies, parses
@@ -156,14 +249,15 @@ but never published; its changes are part of 3.0.0).
         `WithWebhookErrorHandler` reports the errors.
     -   `SignWebhook(rawBody, secret, t)`: the `QBitFlow-Signature` header QBitFlow would send,
         to test webhook handlers.
-    -   `CheckoutSessions.WaitForCompletion(ctx, uuid, *WaitOptions)`: polls the status until it
-        is final (default timeout 10 minutes, interval 3 s, at least 1 s) and returns it, or the
-        last status seen at the timeout.
+    -   `CheckoutSessions.WaitForCompletion(ctx, uuid, *WaitOptions)`: polls `Get` until the
+        session is final (default timeout 10 minutes, interval 3 s, at least 1 s) and returns it,
+        or the last status seen at the timeout.
     -   `Subscription.HasAccess(at)`: `CurrentPeriodEnd` set and `at` before it.
     -   `FormatAmount` / `ParseAmount` and `Currency.FormatAmount`: exact conversions between a
         token's smallest unit and a decimal amount (string arithmetic, never a float).
     -   `Accounting.ExportJSONRange` / `ExportCSVRange`: an export over any range, in windows of
-        at most 95 days joined in order (the CSV header once).
+        at most 92 days, both ends included (`[from, from+91d]`), joined in order (the CSV header
+        once).
     -   `NewClientFromEnv`: a client from `QBITFLOW_API_KEY`, `QBITFLOW_BASE_URL` and
         `QBITFLOW_ON_BEHALF_OF`, the options given overriding them.
     -   `PlaceholderUUID` and `PlaceholderTransactionType`: the `{{UUID}}` and
@@ -173,18 +267,33 @@ but never published; its changes are part of 3.0.0).
 
 ### Changed
 
--   Responses decode leniently: a field the API leaves out or sends as `null` gets its zero
-    value; a value of the wrong JSON type is a `ServerError`. Unknown enum values are kept as
-    is, decimal strings are never parsed, timestamps keep the offset the API sends.
+-   `AccountingEvent` follows the API's export: amounts in the currency's units as decimal
+    strings, each with its `…MinUnits` twin (`GrossAmountMinUnits`, `PlatformFeeMinUnits`,
+    `ReferralFeeMinUnits`, `OrganizationFeeMinUnits`, `NetAmountMinUnits`,
+    `NetworkFeesMinUnits`); USD amounts and rates as decimal strings; `Currency` (was
+    `tokenSymbol`), `CurrencyPriceUSD`, and the network fees apart from the net
+    (`NetworkFeesPaidBy`, the open enum `NetworkFeesPayer`: `payer`, `merchant`, `organization`).
+    `PaymentReference` / `RelatedPaymentReference` → `Reference` / `RelatedReference`,
+    `PaymentUUID` / `RelatedPaymentUUID` → `TxUUID` / `RelatedTxUUID`; a fee that doesn't apply is
+    absent (was `"0"`). The always-empty `UserName`, `UserLastName`, `CustomerName` and
+    `CustomerLastName` are gone. The export window is at most 92 days, both ends included.
+-   Responses decode leniently: a field the API leaves out gets its zero value; a value of the
+    wrong JSON type is a `ServerError` (a JSON number where a decimal string is expected
+    included). Unknown enum values are kept as is, decimal strings are never parsed. Every answer
+    is a JSON object: a `null` body is a `ServerError`.
 -   Redirects are never followed: a 3xx is a `ServerError` (2.1.0 replayed the request, API key
     included, against the redirect's target).
 -   A 2xx with an empty or non-JSON body where a result is expected is a `ServerError`, not a
     zero-valued result.
--   A request body JSON cannot represent (NaN, ±Inf, invalid UTF-8) is a `ValidationError`, and
-    nothing is sent.
+-   A request body JSON cannot represent (invalid UTF-8) is a `ValidationError`, and nothing is
+    sent.
 -   Update params send an explicit `""` for the clearable fields
-    (`UpdateCustomerParams.PhoneNumber` / `Address`, `UpdateProductParams.Description`,
-    `UpdateWebhookEndpointParams.Description`): `new("")` clears them, `nil` leaves them.
+    (`UpdateCustomerParams.LastName` / `PhoneNumber` / `Address`,
+    `UpdateProductParams.Description`, `UpdateWebhookEndpointParams.Description`): `new("")`
+    clears them, `nil` leaves them.
+-   The event log's cursor is opaque (was an event id); the subscriptions' `Status` and the event
+    log's `Type` filters are sent as given (the API checks them).
+-   `CustomerSummary.Deleted` is a `bool`; `DeliveryAttempt.Skipped` a `bool`.
 -   Error messages read `<message> (status <status>, code <code>, request <requestId>)`,
     followed by each field error; the SDK's own validation messages never echo the rejected
     values.
@@ -195,7 +304,9 @@ but never published; its changes are part of 3.0.0).
     `TransactionStatus` (and its WebSocket URL helper), `Payments.GetSession`,
     `Subscriptions.GetSession`, `Payments.GetCustomerForTransaction` (read
     `Payment.CustomerUUID`, then `Customers.Get`), `Refunds.GetByTransactionUUID` (read
-    `Payment.Refund` / `Bill.Refund`).
+    `Payment.Refund` / `Bill.Refund`, or `Refunds.List` with `TxUUID`), `Customers.GetByEmail`
+    (`Customers.List` with `Email`), `Subscriptions.GetPaymentHistory` and the public bill
+    history (the customer's page; `ListBills` has every bill).
 -   The v1 webhook verifier: `CanonicalJSON`, `ComputeWebhookSignature`,
     `VerifyWebhookSignature`, `ExtractWebhookHeaders`, `WebhookHeaders`, `VerifyOptions`
     (including `SkipTimestampCheck`), `DefaultMaxTimestampAge`, `TEST_WEBHOOK_ID`, the
@@ -203,19 +314,22 @@ but never published; its changes are part of 3.0.0).
     `SubscriptionStatusTransitionWebhook`.
 -   `SessionCheckout`, `StatusResponse`, `SuccessResponse`, `ErrorResponse`, `Organization`,
     `ApiKey`, `ClaimFund`, `CreateClaimRequestResponse`, `TransactionShortType`,
-    `SubscriptionType`, `CursorQueryBuilder`, `ValidateProductTextForTest`.
+    `SubscriptionType`, `CursorQueryBuilder`, `ValidateProductTextForTest`; `legacyId` is not
+    modelled.
 
 ### Fixed
 
 -   **Field validation errors were read from the wrong key** (a top-level `errors` list instead
     of the API's `details.errors`), so every field of a 400 came back empty. `FieldErrors` now
     names each failing input by the name sent, dotted when nested (`frequency.unit`).
--   User-supplied path segments and query values are escaped: a reference containing `/`, `?`,
-    `#`, `%` or `&` no longer changes the request.
+-   User-supplied path segments and query values are escaped: an id containing `/`, `?`, `#`,
+    `%` or `&` no longer changes the request.
 -   Lengths are counted in characters (code points), as the API does, not in bytes: accented
     and CJK names are no longer refused locally.
 -   The webhook timestamp check is overflow-safe: a timestamp centuries away is refused instead
     of wrapping into the accepted window.
+
+The website snippet ids are unchanged (none renamed or retired).
 
 ## [2.1.0] - 2026-09-21
 

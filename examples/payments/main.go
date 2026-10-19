@@ -1,5 +1,5 @@
 // Command payments lists a page of last month's payments, walks every payment with the
-// iterator, converts an amount exactly, and reads one payment by its id and by its order
+// iterator, lists the payments-and-bills feed, converts an amount exactly, and reads one payment by its id and by its order
 // reference.
 //
 //	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [PAYMENT_UUID=pay@…] go run ./examples/payments
@@ -33,25 +33,40 @@ func main() {
 		log.Fatal(err)
 	}
 	for _, p := range page.Items {
-		fmt.Printf("%s %q: %.2f USD\n", p.UUID, p.Reference, p.Amount)
+		// Amounts are decimal strings: the token's (Amount, with Currency) and USD (AmountUSD).
+		fmt.Printf("%s %q: %s %s (%s USD)\n", p.UUID, p.Reference, p.Amount, p.Currency.Symbol, p.AmountUSD)
 	}
-	if page.NextCursor != nil {
-		// Pass it back as PaymentListParams.Cursor for the next page.
-		fmt.Println("next cursor:", *page.NextCursor)
+	if page.HasMore {
+		// Pass it back, verbatim, as PaymentListParams.Cursor for the next page.
+		fmt.Println("next cursor:", page.NextCursor)
 	}
 	// docs:end payments-list
 
 	// docs:start pagination-iterate
 	// Fetches one page at a time, only as the loop consumes it; break stops the fetching.
-	var total float64
+	// It stops after the page whose HasMore is false.
+	count := 0
 	for payment, err := range client.Payments.Iterate(ctx, &qbitflow.PaymentListParams{Limit: 50}) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		total += payment.Amount
+		count++
+		fmt.Println(payment.UUID, payment.AmountUSD, "USD")
 	}
-	fmt.Printf("%.2f USD received in total\n", total)
+	fmt.Println(count, "payments")
 	// docs:end pagination-iterate
+
+	// docs:start transactions-list
+	// One feed of one-time payments and subscription bills, newest first; each row reads like
+	// its resource. Type filters it to one kind (TransactionKindPayment or TransactionKindBill).
+	feed, err := client.Transactions.List(ctx, &qbitflow.TransactionListParams{Limit: 20})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, tx := range feed.Items {
+		fmt.Println(tx.Type, tx.UUID, tx.AmountUSD, "USD")
+	}
+	// docs:end transactions-list
 
 	amounts()
 
@@ -69,11 +84,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(payment.UUID, payment.Reference, payment.Amount, "USD")
+	fmt.Println(payment.UUID, payment.Reference, payment.AmountUSD, "USD", payment.Metadata)
 
+	// Runs GET /payments?reference= and returns its one payment.
 	byReference, err := client.Payments.GetByReference(ctx, "order-1042") // your order id
 	if err != nil {
-		log.Fatal(err) // a *qbitflow.NotFoundError when no payment has this reference
+		log.Fatal(err) // a *qbitflow.NotFoundError (404, not_found) when no payment has this reference
 	}
 	fmt.Println("order-1042 was paid by", byReference.UUID)
 	// docs:end payments-get

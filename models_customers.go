@@ -5,25 +5,32 @@ import (
 	"time"
 )
 
-// Customer is a customer of a space.
+// Customer is a merchant's customer: who pays, named on the payments and subscriptions it makes.
 type Customer struct {
-	// UUID is the customer's id.
+	// UUID is the customer's id (a UUIDv7).
 	UUID string `json:"uuid"`
-	// Name is the first name.
-	Name string `json:"name"`
-	// LastName is the last name, when given.
+	// FirstName is the first name.
+	FirstName string `json:"firstName"`
+	// LastName is the last name; "" (absent) when not given.
 	LastName string `json:"lastName,omitempty"`
-	// Email is the email address, lowercase. Several customers of a space may share one.
+	// Email is the email address, lowercase (matched case-insensitively). Several customers of a
+	// space may share one (see Verified).
 	Email string `json:"email"`
-	// Verified is true for a customer the merchant created, false for one created from the
-	// email a payer typed at checkout.
+	// Verified is true for a customer the merchant created (the API, the dashboard), who vouches
+	// for its details; false for one QBitFlow created from the email a payer typed at a checkout
+	// that named no customer (nobody proved the payer owns that address). A checkout never links a
+	// typed email to a verified customer.
 	Verified bool `json:"verified"`
-	// PhoneNumber is the phone number, when given.
+	// PhoneNumber is the phone number; "" (absent) when not given.
 	PhoneNumber string `json:"phoneNumber,omitempty"`
-	// Address is the physical address, when given.
+	// Address is the physical address; "" (absent) when not given.
 	Address string `json:"address,omitempty"`
-	// Reference is the merchant's reference, when given.
+	// Reference is the merchant's reference (its id in your system), unique per space; ""
+	// (absent) without one.
 	Reference string `json:"reference,omitempty"`
+	// Metadata is the merchant's own data on the customer (never copied onto its payments or
+	// subscriptions); empty without any.
+	Metadata map[string]string `json:"metadata"`
 	// CreatedAt is when it was created.
 	CreatedAt time.Time `json:"createdAt"`
 	// Test is true in test mode.
@@ -34,18 +41,24 @@ type Customer struct {
 
 // CreateCustomerParams creates a customer (Customers.Create).
 type CreateCustomerParams struct {
-	// Name is required: the first name, 2 to 100 characters, one line.
-	Name string `json:"name"`
+	// FirstName is required: 2 to 100 characters, one line.
+	FirstName string `json:"firstName"`
 	// LastName is optional: 1 to 100 characters, one line.
 	LastName string `json:"lastName,omitempty"`
-	// Email is required (stored lowercase), at most 254 characters.
+	// Email is required (stored lowercase), at most 254 characters. Not unique: several
+	// customers of a space may share one.
 	Email string `json:"email"`
 	// PhoneNumber is optional: at most 32 characters, digits and . - ( ) space, an optional +.
 	PhoneNumber string `json:"phoneNumber,omitempty"`
 	// Address is optional: at most 500 characters.
 	Address string `json:"address,omitempty"`
-	// Reference is your reference (e.g. your own customer id), unique per space.
+	// Reference is your reference (e.g. your own customer id), unique per space and mode: 1 to
+	// 100 of A-Z a-z 0-9 . _ : @ -.
 	Reference string `json:"reference,omitempty"`
+	// Metadata is your own data on the customer (a CRM key): at most 50 keys of 1 to 40
+	// characters among A-Z a-z 0-9 _ - . :, values of at most 500 characters without control or
+	// bidirectional characters. A key set to "" is not stored.
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // Validate checks the params (behaviour §8).
@@ -54,8 +67,8 @@ func (p *CreateCustomerParams) Validate() error {
 		return newValidationError("params are required")
 	}
 	var v validator
-	if v.required("name", p.Name) {
-		v.name("name", p.Name, 2, 100)
+	if v.required("firstName", p.FirstName) {
+		v.name("firstName", p.FirstName, 2, 100)
 	}
 	v.name("lastName", p.LastName, 1, 100)
 	if v.required("email", p.Email) {
@@ -64,22 +77,28 @@ func (p *CreateCustomerParams) Validate() error {
 	v.phone("phoneNumber", p.PhoneNumber)
 	v.text("address", p.Address, 0, 500)
 	v.reference("reference", p.Reference)
+	v.metadata("metadata", p.Metadata)
 	return v.err()
 }
 
 // UpdateCustomerParams updates a customer (Customers.Update): unset fields are unchanged.
-// The reference cannot be changed.
+// FirstName and Email cannot be cleared; LastName, PhoneNumber and Address are cleared with a
+// pointer to "". The reference cannot change.
 type UpdateCustomerParams struct {
-	// Name is the new first name ("" = unchanged).
-	Name string `json:"name,omitempty"`
-	// LastName is the new last name ("" = unchanged).
-	LastName string `json:"lastName,omitempty"`
+	// FirstName is the new first name, 2 to 100 characters ("" = unchanged).
+	FirstName string `json:"firstName,omitempty"`
+	// LastName is the new last name (1 to 100 characters); a pointer to "" clears it, nil leaves
+	// it unchanged.
+	LastName *string `json:"lastName,omitempty"`
 	// Email is the new email ("" = unchanged).
 	Email string `json:"email,omitempty"`
 	// PhoneNumber is the new phone number; a pointer to "" clears it, nil leaves it unchanged.
 	PhoneNumber *string `json:"phoneNumber,omitempty"`
 	// Address is the new address; a pointer to "" clears it, nil leaves it unchanged.
 	Address *string `json:"address,omitempty"`
+	// Metadata is merged into the customer's: a key set to a value sets it, a key set to ""
+	// deletes it, keys not named are kept (nil: unchanged). At most 50 keys once merged.
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // Validate checks the params (behaviour §8).
@@ -88,8 +107,10 @@ func (p *UpdateCustomerParams) Validate() error {
 		return newValidationError("params are required")
 	}
 	var v validator
-	v.name("name", p.Name, 2, 100)
-	v.name("lastName", p.LastName, 1, 100)
+	v.name("firstName", p.FirstName, 2, 100)
+	if p.LastName != nil {
+		v.name("lastName", *p.LastName, 1, 100)
+	}
 	v.email("email", p.Email)
 	if p.PhoneNumber != nil {
 		v.phone("phoneNumber", *p.PhoneNumber)
@@ -97,19 +118,23 @@ func (p *UpdateCustomerParams) Validate() error {
 	if p.Address != nil {
 		v.text("address", *p.Address, 0, 500)
 	}
+	v.metadata("metadata", p.Metadata)
 	return v.err()
 }
 
 // CustomerListParams filters Customers.List.
 type CustomerListParams struct {
-	// Limit is the page size (server default 10, max 100; 0 = default).
+	// Limit is the page size (server default 20, max 100; 0 = default).
 	Limit int
-	// Cursor is the previous page's NextCursor; "" for the first page.
+	// Cursor is the previous page's NextCursor, verbatim; "" for the first page.
 	Cursor string
-	// Email keeps only the customers with this email, whatever its casing.
+	// Email keeps only the customers with this email, whatever its casing (several may share one).
 	Email string
-	// Verified keeps only the customers the merchant created (true) or those created at
-	// checkout (false).
+	// Reference keeps only the customer with this reference (a page of 0 or 1 customer;
+	// Customers.GetByReference reads it).
+	Reference string
+	// Verified keeps only the customers the merchant created (true) or those created from an
+	// email a payer typed at checkout (false).
 	Verified *bool
 }
 
@@ -119,7 +144,9 @@ func (p *CustomerListParams) Validate() error {
 		return nil
 	}
 	var v validator
+	v.cursor(p.Cursor)
 	v.email("email", p.Email)
+	v.reference("reference", p.Reference)
 	return v.err()
 }
 
@@ -130,6 +157,7 @@ func (p *CustomerListParams) values() url.Values {
 	q := url.Values{}
 	setPage(q, p.Limit, p.Cursor)
 	setString(q, "email", p.Email)
+	setString(q, "reference", p.Reference)
 	setBoolPtr(q, "verified", p.Verified)
 	return q
 }

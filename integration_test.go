@@ -7,7 +7,8 @@
 // The read-only group only reads. The write group also needs QBITFLOW_LIVE_WRITES=1 and a
 // test-mode key (or QBITFLOW_ALLOW_LIVE_MODE_WRITES=1, for a live-mode key on a disposable
 // server such as one running on local chains); it creates a product, a customer, checkout
-// sessions (one with fees) and a webhook endpoint, and deletes (or expires) each of them.
+// sessions (one with fees) and a webhook endpoint, and deletes (or expires) each of them; it sets
+// and deletes a metadata key on the latest subscription, if there is one.
 package qbitflow_test
 
 import (
@@ -48,7 +49,7 @@ func liveContext(t *testing.T) context.Context {
 
 // isOrganizationKey reports whether me is an organization key acting for itself.
 func isOrganizationKey(me *qbitflow.Me) bool {
-	return me.Role == qbitflow.RoleAdmin && me.OnBehalfOf == ""
+	return me.Role == qbitflow.RoleAdmin && me.OnBehalfOfUserUUID == ""
 }
 
 func TestLiveReadOnly(t *testing.T) {
@@ -64,9 +65,22 @@ func TestLiveReadOnly(t *testing.T) {
 	}
 	t.Logf("key: role %s, test mode %v", me.Role, me.Space.Test)
 
-	t.Run("Products.List", func(t *testing.T) {
-		if _, err := c.Products.List(ctx, &qbitflow.ProductListParams{IncludeHidden: true}); err != nil {
+	t.Run("Products", func(t *testing.T) {
+		page, err := c.Products.List(ctx, &qbitflow.ProductListParams{IncludeHidden: true, Limit: 2})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(page.Items) > 2 || page.HasMore != (page.NextCursor != "") {
+			t.Errorf("page %+v", page)
+		}
+		if len(page.Items) > 0 && page.Items[0].Reference != "" {
+			byRef, err := c.Products.GetByReference(ctx, page.Items[0].Reference)
+			if err != nil || byRef.UUID != page.Items[0].UUID {
+				t.Errorf("GetByReference(%q): %+v %v", page.Items[0].Reference, byRef, err)
+			}
+		}
+		if _, err := c.Products.GetByReference(ctx, "sdk-go-no-such-reference"); !errors.As(err, new(*qbitflow.NotFoundError)) {
+			t.Errorf("GetByReference unknown: want *NotFoundError, got %v", err)
 		}
 	})
 	t.Run("Customers", func(t *testing.T) {
@@ -91,28 +105,73 @@ func TestLiveReadOnly(t *testing.T) {
 		}
 	})
 	t.Run("Payments", func(t *testing.T) {
-		if _, err := c.Payments.List(ctx, &qbitflow.PaymentListParams{Limit: 5}); err != nil {
+		payments, err := c.Payments.List(ctx, &qbitflow.PaymentListParams{Limit: 5})
+		if err != nil {
 			t.Fatal(err)
 		}
+		if len(payments.Items) > 0 {
+			p, err := c.Payments.Get(ctx, payments.Items[0].UUID, nil)
+			if err != nil || p.UUID != payments.Items[0].UUID || p.Currency.Code == "" || p.AmountUSD == "" {
+				t.Errorf("Get: %+v %v", p, err)
+			}
+		}
 		since := time.Now().Add(-30 * 24 * time.Hour)
-		if _, err := c.Payments.ListCombined(ctx, &qbitflow.CombinedPaymentListParams{Limit: 5, CreatedAfter: &since}); err != nil {
+		txs, err := c.Transactions.List(ctx, &qbitflow.TransactionListParams{Limit: 5, CreatedAfter: &since})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tx := range txs.Items {
+			if tx.Type != qbitflow.TransactionKindPayment && tx.Type != qbitflow.TransactionKindBill {
+				t.Errorf("transaction type %q", tx.Type)
+			}
+		}
+		if _, err := c.Transactions.List(ctx, &qbitflow.TransactionListParams{Limit: 5, Type: qbitflow.TransactionKindBill}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := c.Failures.List(ctx, &qbitflow.FailureListParams{Limit: 5}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	t.Run("Subscriptions.List", func(t *testing.T) {
-		if _, err := c.Subscriptions.List(ctx, &qbitflow.SubscriptionListParams{Limit: 5}); err != nil {
+	t.Run("Subscriptions", func(t *testing.T) {
+		subs, err := c.Subscriptions.List(ctx, &qbitflow.SubscriptionListParams{Limit: 5})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(subs.Items) > 0 {
+			sub := subs.Items[0]
+			if _, err := c.Subscriptions.Get(ctx, sub.UUID, nil); err != nil {
+				t.Errorf("Get: %v", err)
+			}
+			bills, err := c.Subscriptions.ListBills(ctx, sub.UUID, &qbitflow.BillListParams{Limit: 2})
+			if err != nil {
+				t.Fatalf("ListBills: %v", err)
+			}
+			if len(bills.Items) > 0 {
+				if b, err := c.Subscriptions.GetBill(ctx, bills.Items[0].UUID, nil); err != nil || b.SubscriptionUUID != sub.UUID {
+					t.Errorf("GetBill: %+v %v", b, err)
+				}
+			}
 		}
 	})
 	t.Run("Refunds", func(t *testing.T) {
-		if _, err := c.Refunds.List(ctx, nil); err != nil {
+		pending, err := c.Refunds.List(ctx, &qbitflow.RefundListParams{Status: []qbitflow.RefundStatus{qbitflow.RefundStatusPending}})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.Refunds.ListInactive(ctx, &qbitflow.RefundListParams{Limit: 5}); err != nil {
+		for _, r := range pending.Items {
+			if r.Status != qbitflow.RefundStatusPending {
+				t.Errorf("refund %s is %s in the pending list", r.UUID, r.Status)
+			}
+		}
+		answered, err := c.Refunds.List(ctx, &qbitflow.RefundListParams{Limit: 5,
+			Status: []qbitflow.RefundStatus{qbitflow.RefundStatusApproved, qbitflow.RefundStatusRejected}})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if len(answered.Items) > 0 {
+			if r, err := c.Refunds.Get(ctx, answered.Items[0].UUID); err != nil || r.UUID != answered.Items[0].UUID {
+				t.Errorf("Get: %+v %v", r, err)
+			}
 		}
 	})
 	t.Run("Members", func(t *testing.T) {
@@ -124,6 +183,10 @@ func TestLiveReadOnly(t *testing.T) {
 		}
 		if _, err := c.Members.ListHeldFunds(ctx); err != nil {
 			t.Fatal(err)
+		}
+		held, err := c.Members.GetOwnHeldFunds(ctx)
+		if err != nil || len(held.Ledgers) != 0 {
+			t.Fatalf("GetOwnHeldFunds for the organization: %+v %v", held, err)
 		}
 	})
 	t.Run("Invitations.List", func(t *testing.T) {
@@ -138,17 +201,23 @@ func TestLiveReadOnly(t *testing.T) {
 		if _, err := c.Wallets.List(ctx, &qbitflow.WalletListParams{WithBalances: true}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.Wallets.ListSupportedCurrencies(ctx, nil); err != nil {
+		if _, err := c.Wallets.ListAcceptedCurrencies(ctx, nil); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("Currencies", func(t *testing.T) {
-		currencies, err := c.Currencies.ListAvailable(ctx, &qbitflow.CurrencyListParams{Test: me.Space.Test})
+		currencies, err := c.Currencies.List(ctx, &qbitflow.CurrencyListParams{Test: me.Space.Test})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.Currencies.ListMain(ctx, nil); err != nil {
+		natives, err := c.Currencies.List(ctx, &qbitflow.CurrencyListParams{Test: me.Space.Test, Main: true})
+		if err != nil {
 			t.Fatal(err)
+		}
+		for _, n := range natives {
+			if n.Address != "" || n.MainCurrencyID != nil {
+				t.Errorf("main currency %+v is a token", n)
+			}
 		}
 		if len(currencies) > 0 {
 			cur, err := c.Currencies.Get(ctx, currencies[0].ID)
@@ -174,7 +243,7 @@ func TestLiveReadOnly(t *testing.T) {
 		t.Logf("%d accounting events", len(events))
 	})
 	t.Run("Webhooks", func(t *testing.T) {
-		if _, err := c.Webhooks.Endpoints.List(ctx); err != nil {
+		if _, err := c.Webhooks.Endpoints.List(ctx, &qbitflow.EndpointListParams{Limit: 5}); err != nil {
 			t.Fatal(err)
 		}
 		page, err := c.Webhooks.Events.List(ctx, &qbitflow.EventListParams{Limit: 5})
@@ -187,8 +256,8 @@ func TestLiveReadOnly(t *testing.T) {
 			}
 		}
 	})
-	t.Run("CheckoutSessions.GetStatus unknown", func(t *testing.T) {
-		_, err := c.CheckoutSessions.GetStatus(ctx, "pay@019eca82-5680-7b00-8000-00000000dead")
+	t.Run("CheckoutSessions.Get unknown", func(t *testing.T) {
+		_, err := c.CheckoutSessions.Get(ctx, "pay@019eca82-5680-7b00-8000-00000000dead")
 		if !errors.As(err, new(*qbitflow.NotFoundError)) {
 			t.Fatalf("want *NotFoundError, got %T %v", err, err)
 		}
@@ -230,7 +299,8 @@ func cleanup(t *testing.T, what string, f func(ctx context.Context) error) {
 func TestLiveWritesProduct(t *testing.T) {
 	c, ctx := liveWriter(t)
 	ref := "sdk-go-test-" + suffix()
-	p, err := c.Products.Create(ctx, &qbitflow.CreateProductParams{Name: "SDK Go test", Price: 1, Reference: ref})
+	p, err := c.Products.Create(ctx, &qbitflow.CreateProductParams{Name: "SDK Go test", PriceUSD: "1", Reference: ref,
+		Metadata: map[string]string{"sdk": "go", "run": suffix()}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,13 +310,17 @@ func TestLiveWritesProduct(t *testing.T) {
 	if err != nil || got.Reference != ref {
 		t.Fatalf("Get: %+v %v", got, err)
 	}
+	if got.PriceUSD != "1" || got.Metadata["sdk"] != "go" {
+		t.Errorf("Get: price %q, metadata %v", got.PriceUSD, got.Metadata)
+	}
 	if byRef, err := c.Products.GetByReference(ctx, ref); err != nil || byRef.UUID != p.UUID {
 		t.Fatalf("GetByReference: %+v %v", byRef, err)
 	}
-	price := 2.0
-	updated, err := c.Products.Update(ctx, p.UUID, &qbitflow.UpdateProductParams{Price: &price, Description: ptr("Updated by the Go SDK")})
-	if err != nil || updated.Price != 2 || updated.Description == "" {
-		t.Fatalf("Update: %+v %v", updated, err)
+	updated, err := c.Products.Update(ctx, p.UUID, &qbitflow.UpdateProductParams{PriceUSD: "2.50", Description: ptr("Updated by the Go SDK"),
+		Metadata: map[string]string{"run": "", "tier": "gold"}})
+	if err != nil || updated.PriceUSD != "2.5" || updated.Description == "" || updated.Metadata["sdk"] != "go" ||
+		updated.Metadata["tier"] != "gold" || updated.Metadata["run"] != "" {
+		t.Fatalf("Update (price, metadata merged): %+v %v", updated, err)
 	}
 	if err := c.Products.Delete(ctx, p.UUID); err != nil {
 		t.Fatal(err)
@@ -260,22 +334,31 @@ func TestLiveWritesCustomer(t *testing.T) {
 	c, ctx := liveWriter(t)
 	s := suffix()
 	cust, err := c.Customers.Create(ctx, &qbitflow.CreateCustomerParams{
-		Name: "Ada", LastName: "Test", Email: "sdk-go-test-" + s + "@example.com", PhoneNumber: "+33 6 12 34 56 78", Reference: "sdk-go-" + s,
+		FirstName: "Ada", LastName: "Test", Email: "sdk-go-test-" + s + "@example.com", PhoneNumber: "+33 6 12 34 56 78", Reference: "sdk-go-" + s,
+		Metadata: map[string]string{"crm": "42"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	cleanup(t, "customer", func(ctx context.Context) error { return c.Customers.Delete(ctx, cust.UUID) })
-	if cust.PhoneNumber == "" {
-		t.Errorf("created without its phone: %+v", cust)
+	if cust.PhoneNumber == "" || cust.FirstName != "Ada" || !cust.Verified || cust.Metadata["crm"] != "42" {
+		t.Errorf("created %+v", cust)
+	}
+	if byRef, err := c.Customers.GetByReference(ctx, "sdk-go-"+s); err != nil || byRef.UUID != cust.UUID {
+		t.Fatalf("GetByReference: %+v %v", byRef, err)
+	}
+	byEmail, err := c.Customers.List(ctx, &qbitflow.CustomerListParams{Email: cust.Email})
+	if err != nil || len(byEmail.Items) != 1 || byEmail.Items[0].UUID != cust.UUID {
+		t.Fatalf("List by email: %+v %v", byEmail, err)
 	}
 
-	updated, err := c.Customers.Update(ctx, cust.UUID, &qbitflow.UpdateCustomerParams{PhoneNumber: ptr("")})
+	updated, err := c.Customers.Update(ctx, cust.UUID, &qbitflow.UpdateCustomerParams{LastName: ptr(""), PhoneNumber: ptr(""),
+		Metadata: map[string]string{"crm": ""}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.PhoneNumber != "" || updated.Email != cust.Email {
-		t.Errorf("Update (clear phone): %+v", updated)
+	if updated.PhoneNumber != "" || updated.LastName != "" || updated.Email != cust.Email || len(updated.Metadata) != 0 {
+		t.Errorf("Update (clear last name, phone, metadata key): %+v", updated)
 	}
 	if err := c.Customers.Delete(ctx, cust.UUID); err != nil {
 		t.Fatal(err)
@@ -285,8 +368,9 @@ func TestLiveWritesCustomer(t *testing.T) {
 func TestLiveWritesCheckout(t *testing.T) {
 	c, ctx := liveWriter(t)
 	session, err := c.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
-		ProductName: "SDK Go test", Price: 1, Reference: "sdk-go-order-" + suffix(),
+		ProductName: "SDK Go test", PriceUSD: "1", Reference: "sdk-go-order-" + suffix(),
 		SuccessURL: "https://example.com/ok?id={{UUID}}", CancelURL: "https://example.com/cancel",
+		Metadata: map[string]string{"orderId": "sdk-go"},
 	})
 	if err != nil {
 		var nr *qbitflow.ConflictError
@@ -307,13 +391,17 @@ func TestLiveWritesCheckout(t *testing.T) {
 		t.Errorf("session %+v", session)
 	}
 
-	status, err := c.CheckoutSessions.GetStatus(ctx, session.UUID)
-	if err != nil || status.Status != qbitflow.CheckoutSessionStatusCreated {
-		t.Fatalf("GetStatus: %+v %v", status, err)
+	status, err := c.CheckoutSessions.Get(ctx, session.UUID)
+	if err != nil || status.Status != qbitflow.CheckoutSessionStatusCreated || status.ExpiresAt == nil {
+		t.Fatalf("Get: %+v %v", status, err)
 	}
 	expired, err := c.CheckoutSessions.Expire(ctx, session.UUID)
 	if err != nil || expired.Status != qbitflow.CheckoutSessionStatusExpired {
 		t.Fatalf("Expire: %+v %v", expired, err)
+	}
+	// The payment does not exist (the session expired unpaid): its reference finds nothing.
+	if _, err := c.Payments.GetByReference(ctx, "sdk-go-order-none-"+suffix()); !errors.As(err, new(*qbitflow.NotFoundError)) {
+		t.Errorf("Payments.GetByReference unknown: %v", err)
 	}
 
 	// H3: an expired session is final, so WaitForCompletion answers at its first poll.
@@ -331,11 +419,11 @@ func TestLiveWritesCheckout(t *testing.T) {
 func TestLiveWritesCheckoutFees(t *testing.T) {
 	c, ctx := liveWriter(t)
 	params := &qbitflow.CreatePaymentSessionParams{
-		ProductName: "T-shirt", Description: "Blue, size M", Price: 3.99, Reference: "order-1044-" + suffix(),
+		ProductName: "T-shirt", Description: "Blue, size M", PriceUSD: "3.99", Reference: "order-1044-" + suffix(),
 		SuccessURL: "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
 		CancelURL:  "https://shop.example.com/orders/cancel",
 		Fees: &qbitflow.CheckoutFees{
-			Items:         []qbitflow.FeeItem{{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75}},
+			Items:         []qbitflow.FeeItem{{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: "0.75"}},
 			ProcessingFee: new(true),
 		},
 	}
@@ -361,9 +449,9 @@ func TestLiveWritesCheckoutFees(t *testing.T) {
 	if session.Link == "" || session.ExpiresAt.IsZero() {
 		t.Errorf("session %+v", session)
 	}
-	status, err := c.CheckoutSessions.GetStatus(ctx, session.UUID)
+	status, err := c.CheckoutSessions.Get(ctx, session.UUID)
 	if err != nil || status.Status != qbitflow.CheckoutSessionStatusCreated {
-		t.Fatalf("GetStatus: %+v %v", status, err)
+		t.Fatalf("Get: %+v %v", status, err)
 	}
 
 	// Test mode caps the amount, fees included, at $5: $3.99 plus a $1.50 line is refused.
@@ -374,7 +462,7 @@ func TestLiveWritesCheckoutFees(t *testing.T) {
 	if me.Space != nil && me.Space.Test {
 		over := *params
 		over.Reference = "order-1044-cap-" + suffix()
-		over.Fees = &qbitflow.CheckoutFees{Items: []qbitflow.FeeItem{{Label: "Shipping", AmountUSD: 1.5}}}
+		over.Fees = &qbitflow.CheckoutFees{Items: []qbitflow.FeeItem{{Label: "Shipping", AmountUSD: "1.50"}}}
 		s, err := c.CheckoutSessions.CreatePayment(ctx, &over)
 		if err == nil {
 			expire(s.UUID)
@@ -388,7 +476,7 @@ func TestLiveWritesCheckoutFees(t *testing.T) {
 
 	// A subscription checkout takes the same fees, charged with every bill.
 	sub, err := c.CheckoutSessions.CreateSubscription(ctx, &qbitflow.CreateSubscriptionSessionParams{
-		ProductName: "Pro", Description: "Monthly plan", Price: 3.99, Reference: "sub-1044-" + suffix(),
+		ProductName: "Pro", Description: "Monthly plan", PriceUSD: "3.99", Reference: "sub-1044-" + suffix(),
 		Frequency:  &qbitflow.Duration{Value: 1, Unit: qbitflow.DurationUnitMonths},
 		SuccessURL: params.SuccessURL, CancelURL: params.CancelURL, Fees: params.Fees,
 	})
@@ -437,8 +525,18 @@ func TestLiveWritesWebhookEndpoint(t *testing.T) {
 	}
 
 	got, err := c.Webhooks.Endpoints.Get(ctx, created.UUID)
-	if err != nil || got.URL != created.URL {
+	if err != nil || got.URL != created.URL || got.PayloadVersion != qbitflow.WebhookPayloadVersionV2 {
 		t.Fatalf("Get: %+v %v", got, err)
+	}
+	found := false
+	for e, err := range c.Webhooks.Endpoints.Iterate(ctx, &qbitflow.EndpointListParams{Limit: 1}) {
+		if err != nil {
+			t.Fatalf("Iterate: %v", err)
+		}
+		found = found || e.UUID == created.UUID
+	}
+	if !found {
+		t.Error("the endpoint is not listed")
 	}
 	disabled := false
 	updated, err := c.Webhooks.Endpoints.Update(ctx, created.UUID, &qbitflow.UpdateWebhookEndpointParams{Description: ptr(""), Enabled: &disabled})
@@ -447,6 +545,39 @@ func TestLiveWritesWebhookEndpoint(t *testing.T) {
 	}
 	if err := c.Webhooks.Endpoints.Delete(ctx, created.UUID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestLiveWritesSubscriptionMetadata sets then deletes a metadata key on the space's latest
+// subscription, if it has one (a PATCH that leaves the subscription as it was).
+func TestLiveWritesSubscriptionMetadata(t *testing.T) {
+	c, ctx := liveWriter(t)
+	subs, err := c.Subscriptions.List(ctx, &qbitflow.SubscriptionListParams{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subs.Items) == 0 {
+		t.Skip("no subscription to update")
+	}
+	sub := subs.Items[0]
+	key := "sdkGoTest"
+	if _, set := sub.Metadata[key]; set {
+		t.Skipf("the subscription already has a %s key", key)
+	}
+	updated, err := c.Subscriptions.Update(ctx, sub.UUID, &qbitflow.UpdateSubscriptionParams{Metadata: map[string]string{key: suffix()}})
+	if err != nil {
+		var pe *qbitflow.PermissionDeniedError
+		if errors.As(err, &pe) && pe.Code == "policy_disabled" {
+			t.Skip("subscriptions are off for this member (members.subscriptions)")
+		}
+		t.Fatal(err)
+	}
+	cleanup(t, "subscription metadata", func(ctx context.Context) error {
+		_, err := c.Subscriptions.Update(ctx, sub.UUID, &qbitflow.UpdateSubscriptionParams{Metadata: map[string]string{key: ""}})
+		return err
+	})
+	if updated.Metadata[key] == "" || len(updated.Metadata) != len(sub.Metadata)+1 {
+		t.Errorf("Update (merge): %v, was %v", updated.Metadata, sub.Metadata)
 	}
 }
 

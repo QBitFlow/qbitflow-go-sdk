@@ -5,7 +5,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -42,49 +44,55 @@ func TestVerifyWebhookSignsRawTimestampText(t *testing.T) {
 	}
 }
 
-// A JSON null is an empty list for a list result but a ServerError where an object is expected.
+// Every answer is a JSON object (lists are pages): a null body is a ServerError, for a list too.
 func TestNullResponseBody(t *testing.T) {
 	ts := newTestServer(t, staticReply(200, "null"))
 	c, _ := newTestClient(t, ts)
-	if _, err := c.Products.Get(context.Background(), "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"); err == nil {
-		t.Fatal("null object body must fail")
-	} else if se := (*ServerError)(nil); !errors.As(err, &se) {
-		t.Fatalf("want *ServerError, got %T: %v", err, err)
+	ctx := context.Background()
+	if _, err := c.Products.Get(ctx, "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"); !errors.As(err, new(*ServerError)) {
+		t.Fatalf("null object body: want *ServerError, got %v", err)
 	}
-	list, err := c.Products.List(context.Background(), nil)
-	if err != nil || len(list) != 0 {
-		t.Fatalf("null list body must decode to an empty list, got %v, %v", list, err)
+	if _, err := c.Products.List(ctx, nil); !errors.As(err, new(*ServerError)) {
+		t.Fatalf("null page body: want *ServerError, got %v", err)
+	}
+	if _, err := c.Currencies.List(ctx, nil); !errors.As(err, new(*ServerError)) {
+		t.Fatalf("null bounded list body: want *ServerError, got %v", err)
 	}
 }
 
 // A "." or ".." path segment would be resolved as a relative path: refused before any request.
+// References are query filters now: "." and ".." are ordinary (valid) references there.
 func TestDotPathSegmentsRefused(t *testing.T) {
-	ts := newTestServer(t, staticReply(200, "{}"))
+	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		ref, _ := json.Marshal(r.URL.Query().Get("reference")) // the item carries the reference asked for
+		jsonReply(w, 200, `{"items":[{"uuid":"sub@1","reference":`+string(ref)+`}],"hasMore":false}`)
+	})
 	c, _ := newTestClient(t, ts)
 	ctx := context.Background()
-	for _, ref := range []string{".", ".."} {
-		_, err := c.Subscriptions.GetByReference(ctx, ref)
+	for _, id := range []string{".", ".."} {
+		_, err := c.Webhooks.Events.Get(ctx, id)
 		var ve *ValidationError
-		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "reference" {
-			t.Errorf("reference %q: want a ValidationError on reference, got %v", ref, err)
-		}
-		if _, err := c.Customers.GetByEmail(ctx, ref); !errors.As(err, &ve) {
-			t.Errorf("email %q: want a ValidationError, got %v", ref, err)
+		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "id" {
+			t.Errorf("event id %q: want a ValidationError on id, got %v", id, err)
 		}
 	}
 	if n := len(ts.recorded()); n != 0 {
 		t.Fatalf("%d requests sent", n)
 	}
-	// "..." is an ordinary value, escaped like any other.
-	if _, err := c.Products.GetByReference(ctx, "..."); err != nil {
-		t.Fatalf("... must be sent: %v", err)
+	for _, ref := range []string{".", "..", "..."} {
+		if _, err := c.Subscriptions.GetByReference(ctx, ref); err != nil {
+			t.Fatalf("reference %q must be sent as a filter: %v", ref, err)
+		}
+	}
+	if got := ts.recorded()[1].query; got != "reference=.." {
+		t.Errorf("query %q", got)
 	}
 }
 
 // Data that does not match its known type is a 400 even when no typed handler is registered.
 func TestRouterRefusesMalformedDataWithoutTypedHandler(t *testing.T) {
 	const secret = "whsec_router"
-	body := []byte(`{"id":"evt_x","type":"payment.completed","version":"v2","test":true,"createdAt":"2026-10-01T12:00:00Z","data":{"amount":"not a number"}}`)
+	body := []byte(`{"id":"evt_x","type":"payment.completed","version":"v2","test":true,"createdAt":"2026-10-01T12:00:00Z","data":{"amount":10}}`)
 	now := time.Now()
 	anyRan := false
 	r := NewWebhookRouter(secret).OnAny(func(context.Context, *Event) error { anyRan = true; return nil })

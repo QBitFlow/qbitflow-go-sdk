@@ -16,14 +16,16 @@ import (
 
 // Ids used by the service tests.
 const (
-	uuidA    = "019eca82-5680-7b00-8000-0000000000c1"
-	uuidB    = "019eca82-5680-7b00-8000-0000000000c2"
-	payID    = "pay@019eca82-5680-7b00-8000-0000000000d1"
-	subID    = "sub@019eca82-5680-7b00-8000-0000000000d2"
-	billID   = "sub-hist@019eca82-5680-7b00-8000-0000000000d3"
-	eventID  = "evt_bd1a913d-188e-5ac5-a2d6-5fd25cd67301"
-	oddRef   = "a/b c@d"     // a reference that needs escaping
-	oddRefEs = "a%2Fb%20c@d" // … as sent
+	uuidA   = "019eca82-5680-7b00-8000-0000000000c1"
+	uuidB   = "019eca82-5680-7b00-8000-0000000000c2"
+	payID   = "pay@019eca82-5680-7b00-8000-0000000000d1"
+	subID   = "sub@019eca82-5680-7b00-8000-0000000000d2"
+	billID  = "sub-hist@019eca82-5680-7b00-8000-0000000000d3"
+	eventID = "evt_bd1a913d-188e-5ac5-a2d6-5fd25cd67301"
+	ref     = "ord:1042@shop" // a reference, sent as the ?reference= filter
+	refEs   = "ord%3A1042%40shop"
+	cursorA = "djF8MDE5ZWNhODI" // opaque cursors
+	cursorB = "djF8MDE5ZWNhODM"
 )
 
 // Instants with a "+" offset: the query must carry it as %2B.
@@ -39,9 +41,31 @@ const (
 
 func fx(name string) string { return modelFixtures[name].json }
 
-func page(item string) string { return `{"items":[` + item + `],"nextCursor":"` + uuidB + `"}` }
+// page is a page of a paginated list that has more.
+func page(item string) string {
+	return `{"items":[` + item + `],"hasMore":true,"nextCursor":"` + cursorB + `"}`
+}
 
-func list(item string) string { return `[` + item + `]` }
+// bounded is a bounded list's (or a last page's) envelope.
+// withReference returns the fixture JSON object with its reference set to ref (the getByReference
+// helpers return only the item carrying the reference they asked for).
+func withReference(t *testing.T, fixture, ref string) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(fixture), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["reference"] = ref
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+func bounded(items ...string) string {
+	return `{"items":[` + strings.Join(items, ",") + `],"hasMore":false}`
+}
 
 func eventFixture(t *testing.T) string {
 	data, err := os.ReadFile("testdata/events/webhook.test.json")
@@ -78,267 +102,282 @@ type routeCase struct {
 	check func(t *testing.T, v any)
 }
 
-// routeCases covers every service method.
+// routeCases covers every service method (the 54 routes of surface.md §2, plus Me).
 func routeCases(t *testing.T) []routeCase {
 	evt := eventFixture(t)
 	no := false
 	yes := true
 	return []routeCase{
 		// Products.
-		{name: "Products.List", method: "GET", path: "/product", query: "includeHidden=true&subscription=false",
+		{name: "Products.List", method: "GET", path: "/products", query: "cursor=" + cursorA + "&includeHidden=true&limit=50&subscription=false",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Products.List(ctx, &ProductListParams{IncludeHidden: true, Subscription: &no}, o...)
+				return c.Products.List(ctx, &ProductListParams{Limit: 50, Cursor: cursorA, IncludeHidden: true, Subscription: &no}, o...)
 			},
-			reply: list(fx("Product")),
+			reply: page(fx("Product")),
 			check: func(t *testing.T, v any) {
-				if p := is[[]Product](t, v); len(p) != 1 || p[0].UUID != "p-1" || p[0].Subscription == nil {
+				if p := is[*Page[Product]](t, v); len(p.Items) != 1 || p.Items[0].UUID != "p-1" || p.Items[0].Subscription == nil ||
+					p.Items[0].PriceUSD != "9.99" || !p.HasMore || p.NextCursor != cursorB {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Products.List nil", method: "GET", path: "/product",
+		{name: "Products.List nil", method: "GET", path: "/products",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Products.List(ctx, nil, o...)
 			},
-			reply: `[]`},
-		{name: "Products.Create", method: "POST", path: "/product", idempotent: true, status: 201,
-			body: `{"name":"Pro","price":9.99,"reference":"pro","subscription":{"frequency":{"value":1,"unit":"months"},"trialPeriod":{"value":0},"minPeriods":3}}`,
+			reply: bounded()},
+		{name: "Products.Create", method: "POST", path: "/products", idempotent: true, status: 201,
+			body: `{"name":"Pro","priceUsd":"9.99","reference":"pro","subscription":{"frequency":{"value":1,"unit":"months"},"trialPeriod":{"value":0},"minPeriods":3},"metadata":{"sku":"PRO-1"}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Products.Create(ctx, &CreateProductParams{Name: "Pro", Price: 9.99, Reference: "pro",
-					Subscription: &SubscriptionTermsParams{Frequency: &Duration{1, DurationUnitMonths}, TrialPeriod: &Duration{}, MinPeriods: ptr[uint32](3)}}, o...)
+				return c.Products.Create(ctx, &CreateProductParams{Name: "Pro", PriceUSD: "9.99", Reference: "pro",
+					Subscription: &SubscriptionTermsParams{Frequency: &Duration{1, DurationUnitMonths}, TrialPeriod: &Duration{}, MinPeriods: ptr[uint32](3)},
+					Metadata:     map[string]string{"sku": "PRO-1"}}, o...)
 			},
 			reply: fx("Product"),
 			check: func(t *testing.T, v any) {
-				if p := is[*Product](t, v); p.UUID != "p-1" || p.Price != 9.99 {
+				if p := is[*Product](t, v); p.UUID != "p-1" || p.PriceUSD != "9.99" || p.Metadata["sku"] != "PRO-1" {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Products.Get", method: "GET", path: "/product/uuid/" + uuidA,
+		{name: "Products.Get", method: "GET", path: "/products/" + uuidA,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Products.Get(ctx, uuidA, o...)
 			},
 			reply: fx("Product")},
-		{name: "Products.GetByReference", method: "GET", path: "/product/reference/" + oddRefEs,
+		{name: "Products.GetByReference", method: "GET", path: "/products", query: "reference=" + refEs,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Products.GetByReference(ctx, oddRef, o...)
+				return c.Products.GetByReference(ctx, ref, o...)
 			},
-			reply: fx("Product")},
-		{name: "Products.Update", method: "PUT", path: "/product/" + uuidA,
-			body: `{"description":"","price":12,"isActive":false}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Products.Update(ctx, uuidA, &UpdateProductParams{Description: ptr(""), Price: ptr(12.0), IsActive: &no}, o...)
-			},
-			reply: fx("Product")},
-		{name: "Products.Delete", method: "DELETE", path: "/product/" + uuidA,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return nil, c.Products.Delete(ctx, uuidA, o...)
-			},
-			reply: `{"message":"Product deleted successfully"}`},
-
-		// Customers.
-		{name: "Customers.Create", method: "POST", path: "/customer", idempotent: true, status: 201,
-			body: `{"name":"Ada","lastName":"Lovelace","email":"ada@example.com","phoneNumber":"+33 6 12 34 56 78","reference":"crm-1"}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Customers.Create(ctx, &CreateCustomerParams{Name: "Ada", LastName: "Lovelace", Email: "ada@example.com",
-					PhoneNumber: "+33 6 12 34 56 78", Reference: "crm-1"}, o...)
-			},
-			reply: fx("Customer"),
+			reply: bounded(withReference(t, fx("Product"), ref)),
 			check: func(t *testing.T, v any) {
-				if c := is[*Customer](t, v); c.UUID != "c-1" || !c.Verified || c.UserUUID != "m-1" {
-					t.Errorf("%+v", c)
-				}
-			}},
-		{name: "Customers.Update", method: "PUT", path: "/customer/" + uuidA,
-			body: `{"email":"new@example.com","phoneNumber":""}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Customers.Update(ctx, uuidA, &UpdateCustomerParams{Email: "new@example.com", PhoneNumber: ptr("")}, o...)
-			},
-			reply: fx("Customer")},
-		{name: "Customers.List", method: "GET", path: "/customer/all",
-			query: "cursor=" + uuidA + "&email=ada%2B1%40example.com&limit=5&verified=true",
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Customers.List(ctx, &CustomerListParams{Limit: 5, Cursor: uuidA, Email: "ada+1@example.com", Verified: &yes}, o...)
-			},
-			reply: page(fx("Customer")),
-			check: func(t *testing.T, v any) {
-				if p := is[*Page[Customer]](t, v); len(p.Items) != 1 || !p.HasMore() || *p.NextCursor != uuidB {
+				if p := is[*Product](t, v); p.UUID != "p-1" {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Customers.Get", method: "GET", path: "/customer/uuid/" + uuidA,
+		{name: "Products.Update", method: "PATCH", path: "/products/" + uuidA,
+			body: `{"description":"","priceUsd":"12.50","isActive":false,"metadata":{"sku":"","tier":"gold"}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Products.Update(ctx, uuidA, &UpdateProductParams{Description: ptr(""), PriceUSD: "12.50", IsActive: &no,
+					Metadata: map[string]string{"sku": "", "tier": "gold"}}, o...)
+			},
+			reply: fx("Product")},
+		{name: "Products.Update remove subscription", method: "PATCH", path: "/products/" + uuidA, body: `{"removeSubscription":true}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Products.Update(ctx, uuidA, &UpdateProductParams{RemoveSubscription: true}, o...)
+			},
+			reply: fx("Product")},
+		{name: "Products.Delete", method: "DELETE", path: "/products/" + uuidA,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return nil, c.Products.Delete(ctx, uuidA, o...)
+			},
+			status: 204},
+
+		// Customers.
+		{name: "Customers.Create", method: "POST", path: "/customers", idempotent: true, status: 201,
+			body: `{"firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","phoneNumber":"+33 6 12 34 56 78","reference":"crm-1","metadata":{"crm":"42"}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Customers.Create(ctx, &CreateCustomerParams{FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com",
+					PhoneNumber: "+33 6 12 34 56 78", Reference: "crm-1", Metadata: map[string]string{"crm": "42"}}, o...)
+			},
+			reply: fx("Customer"),
+			check: func(t *testing.T, v any) {
+				if c := is[*Customer](t, v); c.UUID != "c-1" || !c.Verified || c.UserUUID != "m-1" || c.FirstName != "Ada" || c.Metadata["crm"] != "42" {
+					t.Errorf("%+v", c)
+				}
+			}},
+		{name: "Customers.Update", method: "PATCH", path: "/customers/" + uuidA,
+			body: `{"email":"new@example.com","lastName":"","phoneNumber":"","address":"","metadata":{"crm":""}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Customers.Update(ctx, uuidA, &UpdateCustomerParams{Email: "new@example.com", LastName: ptr(""), PhoneNumber: ptr(""),
+					Address: ptr(""), Metadata: map[string]string{"crm": ""}}, o...)
+			},
+			reply: fx("Customer")},
+		{name: "Customers.Update first name", method: "PATCH", path: "/customers/" + uuidA, body: `{"firstName":"Augusta","lastName":"King"}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Customers.Update(ctx, uuidA, &UpdateCustomerParams{FirstName: "Augusta", LastName: ptr("King")}, o...)
+			},
+			reply: fx("Customer")},
+		{name: "Customers.List", method: "GET", path: "/customers",
+			query: "cursor=" + cursorA + "&email=ada%2B1%40example.com&limit=5&verified=true",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Customers.List(ctx, &CustomerListParams{Limit: 5, Cursor: cursorA, Email: "ada+1@example.com", Verified: &yes}, o...)
+			},
+			reply: page(fx("Customer")),
+			check: func(t *testing.T, v any) {
+				if p := is[*Page[Customer]](t, v); len(p.Items) != 1 || !p.HasMore || p.NextCursor != cursorB {
+					t.Errorf("%+v", p)
+				}
+			}},
+		{name: "Customers.Get", method: "GET", path: "/customers/" + uuidA,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Customers.Get(ctx, uuidA, o...)
 			},
 			reply: fx("Customer")},
-		{name: "Customers.GetByEmail", method: "GET", path: "/customer/email/ada+1@example.com",
+		{name: "Customers.GetByReference", method: "GET", path: "/customers", query: "reference=" + refEs,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Customers.GetByEmail(ctx, "ada+1@example.com", o...)
+				return c.Customers.GetByReference(ctx, ref, o...)
 			},
-			reply: fx("Customer")},
-		{name: "Customers.GetByReference", method: "GET", path: "/customer/reference/" + oddRefEs,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Customers.GetByReference(ctx, oddRef, o...)
-			},
-			reply: fx("Customer")},
-		{name: "Customers.Delete", method: "DELETE", path: "/customer/uuid/" + uuidA,
+			reply: bounded(withReference(t, fx("Customer"), ref))},
+		{name: "Customers.Delete", method: "DELETE", path: "/customers/" + uuidA,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return nil, c.Customers.Delete(ctx, uuidA, o...)
 			},
-			reply: `{"message":"Customer deleted successfully"}`},
+			status: 204},
 
 		// Checkout sessions.
-		{name: "CheckoutSessions.CreatePayment", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
-			body: `{"reference":"order-1","productName":"T-shirt","description":"Blue","price":4.5,"successUrl":"https://shop.example/ok?id={{UUID}}","cancelUrl":"https://shop.example/ko","customerReference":"crm-1","expiresInMinutes":30}`,
+		{name: "CheckoutSessions.CreatePayment", method: "POST", path: "/checkout-sessions/payment", idempotent: true, status: 201,
+			body: `{"reference":"order-1","productName":"T-shirt","description":"Blue","priceUsd":"4.50","successUrl":"https://shop.example/ok?id={{UUID}}",` +
+				`"cancelUrl":"https://shop.example/ko","customerReference":"crm-1","expiresInMinutes":30,"metadata":{"orderId":"order-1"}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{Reference: "order-1", ProductName: "T-shirt",
-					Description: "Blue", Price: 4.5, SuccessURL: "https://shop.example/ok?id={{UUID}}", CancelURL: "https://shop.example/ko",
-					CustomerReference: "crm-1", ExpiresInMinutes: 30}, o...)
+					Description: "Blue", PriceUSD: "4.50", SuccessURL: "https://shop.example/ok?id={{UUID}}", CancelURL: "https://shop.example/ko",
+					CustomerReference: "crm-1", ExpiresInMinutes: 30, Metadata: map[string]string{"orderId": "order-1"}}, o...)
 			},
-			reply: fx("CheckoutSession"),
+			reply: fx("CreatedCheckoutSession"),
 			check: func(t *testing.T, v any) {
-				if s := is[*CheckoutSession](t, v); s.UUID != "pay@1" || s.Link == "" || s.ExpiresAt.IsZero() {
+				if s := is[*CreatedCheckoutSession](t, v); s.UUID != "pay@1" || s.Link == "" || s.ExpiresAt.IsZero() {
 					t.Errorf("%+v", s)
 				}
 			}},
-		{name: "CheckoutSessions.CreatePayment with fees", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
-			body: `{"reference":"order-1044","productName":"T-shirt","description":"Blue, size M","price":3.99,` +
-				`"fees":{"processingFee":true,"items":[{"label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":0.75},{"label":"VAT (20%)","amountUsd":20}]}}`,
+		{name: "CheckoutSessions.CreatePayment with fees", method: "POST", path: "/checkout-sessions/payment", idempotent: true, status: 201,
+			body: `{"reference":"order-1044","productName":"T-shirt","description":"Blue, size M","priceUsd":"3.99",` +
+				`"fees":{"processingFee":true,"items":[{"label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":"0.75"},{"label":"VAT (20%)","amountUsd":"20"}]}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{Reference: "order-1044", ProductName: "T-shirt",
-					Description: "Blue, size M", Price: 3.99, Fees: &CheckoutFees{ProcessingFee: &yes, Items: []FeeItem{
-						{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75}, {Label: "VAT (20%)", AmountUSD: 20},
+					Description: "Blue, size M", PriceUSD: "3.99", Fees: &CheckoutFees{ProcessingFee: &yes, Items: []FeeItem{
+						{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: "0.75"}, {Label: "VAT (20%)", AmountUSD: "20"},
 					}}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreatePayment processing fee off", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
-			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":false,"items":[{"label":"Shipping","amountUsd":19.9}]}}`,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment processing fee off", method: "POST", path: "/checkout-sessions/payment", idempotent: true, status: 201,
+			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":false,"items":[{"label":"Shipping","amountUsd":"19.90"}]}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
-					Fees: &CheckoutFees{ProcessingFee: &no, Items: []FeeItem{{Label: "Shipping", AmountUSD: 19.9}}}}, o...)
+					Fees: &CheckoutFees{ProcessingFee: &no, Items: []FeeItem{{Label: "Shipping", AmountUSD: "19.90"}}}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreatePayment fees without processingFee", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
-			body: `{"productUuid":"` + uuidA + `","fees":{"items":[{"label":"Tax","amountUsd":1000000}]}}`,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment fees without processingFee", method: "POST", path: "/checkout-sessions/payment", idempotent: true, status: 201,
+			body: `{"productReference":"pro","fees":{"items":[{"label":"Tax","amountUsd":"1000000"}]}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
-					Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: 1_000_000}}}}, o...)
+				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductReference: "pro",
+					Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: "1000000"}}}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreatePayment processing fee only", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment processing fee only", method: "POST", path: "/checkout-sessions/payment", idempotent: true, status: 201,
 			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":true}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, Fees: &CheckoutFees{ProcessingFee: &yes}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreatePayment empty fees", method: "POST", path: "/transaction/session-checkout/new/payment", idempotent: true, status: 201,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreatePayment empty fees", method: "POST", path: "/checkout-sessions/payment", idempotent: true, status: 201,
 			body: `{"productUuid":"` + uuidA + `","fees":{}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, Fees: &CheckoutFees{}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreateSubscription", method: "POST", path: "/transaction/session-checkout/new/subscription", idempotent: true, status: 201,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreateSubscription", method: "POST", path: "/checkout-sessions/subscription", idempotent: true, status: 201,
 			body: `{"productUuid":"` + uuidA + `","customerUuid":"` + uuidB + `","frequency":{"value":1,"unit":"weeks"},"trialPeriod":{"value":14,"unit":"days"},"minPeriods":0}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductUUID: uuidA, CustomerUUID: uuidB,
 					Frequency: &Duration{1, DurationUnitWeeks}, TrialPeriod: &Duration{14, DurationUnitDays}, MinPeriods: ptr[uint32](0)}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreateSubscription with fees", method: "POST", path: "/transaction/session-checkout/new/subscription", idempotent: true, status: 201,
-			body: `{"productName":"Pro","price":9.99,"frequency":{"value":1,"unit":"months"},` +
-				`"fees":{"processingFee":true,"items":[{"label":"VAT (20%)","description":"French VAT","amountUsd":2}]}}`,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreateSubscription with fees", method: "POST", path: "/checkout-sessions/subscription", idempotent: true, status: 201,
+			body: `{"productName":"Pro","priceUsd":"9.99","frequency":{"value":1,"unit":"months"},"metadata":{"plan":"pro"},` +
+				`"fees":{"processingFee":true,"items":[{"label":"VAT (20%)","description":"French VAT","amountUsd":"2"}]}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductName: "Pro", Price: 9.99,
-					Frequency: &Duration{1, DurationUnitMonths}, Fees: &CheckoutFees{ProcessingFee: &yes, Items: []FeeItem{
-						{Label: "VAT (20%)", Description: "French VAT", AmountUSD: 2},
+				return c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductName: "Pro", PriceUSD: "9.99",
+					Frequency: &Duration{1, DurationUnitMonths}, Metadata: map[string]string{"plan": "pro"}, Fees: &CheckoutFees{ProcessingFee: &yes, Items: []FeeItem{
+						{Label: "VAT (20%)", Description: "French VAT", AmountUSD: "2"},
 					}}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.CreateSubscription processing fee off", method: "POST", path: "/transaction/session-checkout/new/subscription", idempotent: true, status: 201,
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.CreateSubscription processing fee off", method: "POST", path: "/checkout-sessions/subscription", idempotent: true, status: 201,
 			body: `{"productUuid":"` + uuidA + `","fees":{"processingFee":false}}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductUUID: uuidA, Fees: &CheckoutFees{ProcessingFee: &no}}, o...)
 			},
-			reply: fx("CheckoutSession")},
-		{name: "CheckoutSessions.GetStatus", method: "GET", path: "/transaction/session-checkout/" + payID + "/status",
+			reply: fx("CreatedCheckoutSession")},
+		{name: "CheckoutSessions.Get", method: "GET", path: "/checkout-sessions/" + payID,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.CheckoutSessions.GetStatus(ctx, payID, o...)
+				return c.CheckoutSessions.Get(ctx, payID, o...)
 			},
 			reply: fx("CheckoutSessionStatus"),
 			check: func(t *testing.T, v any) {
-				if s := is[*CheckoutSessionStatus](t, v); s.Status != CheckoutSessionStatusCreated || s.LastAttempt == nil {
+				if s := is[*CheckoutSessionStatus](t, v); s.Status != CheckoutSessionStatusCreated || s.LastAttempt == nil || s.ExpiresAt == nil {
 					t.Errorf("%+v", s)
 				}
 			}},
-		{name: "CheckoutSessions.Expire", method: "POST", path: "/transaction/session-checkout/" + subID + "/expire",
+		{name: "CheckoutSessions.Expire", method: "POST", path: "/checkout-sessions/" + subID + "/expire",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.CheckoutSessions.Expire(ctx, subID, o...)
 			},
-			reply: `{"uuid":"` + subID + `","status":"expired"}`,
+			reply: `{"uuid":"` + subID + `","status":"expired","expiresAt":"2026-10-01T12:00:00Z"}`,
 			check: func(t *testing.T, v any) {
-				if s := is[*CheckoutSessionStatus](t, v); s.Status != CheckoutSessionStatusExpired {
+				if s := is[*CheckoutSessionStatus](t, v); s.Status != CheckoutSessionStatusExpired || s.ExpiresAt == nil {
 					t.Errorf("%+v", s)
 				}
 			}},
 
-		// Payments and failures.
-		{name: "Payments.List", method: "GET", path: "/transaction/payments",
-			query: "createdAfter=" + afterQ + "&createdBefore=" + beforeQ + "&cursor=" + uuidA + "&customerUuid=" + uuidB +
+		// Payments, transactions and failures.
+		{name: "Payments.List", method: "GET", path: "/payments",
+			query: "createdAfter=" + afterQ + "&createdBefore=" + beforeQ + "&cursor=" + cursorA + "&customerUuid=" + uuidB +
 				"&limit=50&productUuid=" + uuidA + "&refunded=false&userUuid=" + memberUUID,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Payments.List(ctx, &PaymentListParams{Limit: 50, Cursor: uuidA, CustomerUUID: uuidB, ProductUUID: uuidA,
+				return c.Payments.List(ctx, &PaymentListParams{Limit: 50, Cursor: cursorA, CustomerUUID: uuidB, ProductUUID: uuidA,
 					CreatedAfter: &after, CreatedBefore: &before, UserUUID: memberUUID, Refunded: &no}, o...)
 			},
 			reply: page(fx("Payment")),
 			check: func(t *testing.T, v any) {
-				if p := is[*Page[Payment]](t, v); len(p.Items) != 1 || p.Items[0].UUID != "pay@1" || p.Items[0].Currency == nil {
+				if p := is[*Page[Payment]](t, v); len(p.Items) != 1 || p.Items[0].UUID != "pay@1" || p.Items[0].Currency.Code != "BASE:USDC" {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Payments.ListCombined", method: "GET", path: "/transaction/payments/combined",
-			query: "includeMembers=true&refunded=true&source=subscriptionHistory&subscriptionUuid=sub%40019eca82-5680-7b00-8000-0000000000d2",
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Payments.ListCombined(ctx, &CombinedPaymentListParams{IncludeMembers: true, Refunded: &yes,
-					Source: CombinedPaymentSourceSubscriptionHistory, SubscriptionUUID: subID}, o...)
-			},
-			reply: page(fx("CombinedPayment")),
-			check: func(t *testing.T, v any) {
-				if p := is[*Page[CombinedPayment]](t, v); p.Items[0].Source != CombinedPaymentSourceSubscriptionHistory {
-					t.Errorf("%+v", p)
-				}
-			}},
-		{name: "Payments.Get", method: "GET", path: "/transaction/payment/" + payID, query: "includeMembers=true",
+		{name: "Payments.Get", method: "GET", path: "/payments/" + payID, query: "includeMembers=true",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Payments.Get(ctx, payID, &ReadParams{IncludeMembers: true}, o...)
 			},
 			reply: fx("Payment"),
 			check: func(t *testing.T, v any) {
-				if p := is[*Payment](t, v); p.Reference != "order-1" || p.Metadata.OrganizationFee == nil {
+				if p := is[*Payment](t, v); p.Reference != "order-1" || p.Settlement.OrganizationFee == nil || p.Amount != "10" {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Payments.Get nil params", method: "GET", path: "/transaction/payment/" + strings.TrimPrefix(payID, "pay@"),
+		{name: "Payments.Get nil params", method: "GET", path: "/payments/" + strings.TrimPrefix(payID, "pay@"),
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Payments.Get(ctx, strings.TrimPrefix(payID, "pay@"), nil, o...)
 			},
 			reply: fx("Payment")},
-		{name: "Payments.GetByReference", method: "GET", path: "/transaction/payment/reference/" + oddRefEs,
+		{name: "Payments.GetByReference", method: "GET", path: "/payments", query: "reference=" + refEs,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Payments.GetByReference(ctx, oddRef, o...)
+				return c.Payments.GetByReference(ctx, ref, o...)
 			},
-			reply: fx("Payment")},
-		{name: "Failures.List", method: "GET", path: "/transaction/failures",
+			reply: bounded(withReference(t, fx("Payment"), ref))},
+		{name: "Transactions.List", method: "GET", path: "/transactions",
+			query: "includeMembers=true&refunded=true&subscriptionUuid=sub%40019eca82-5680-7b00-8000-0000000000d2&type=bill",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Transactions.List(ctx, &TransactionListParams{IncludeMembers: true, Refunded: &yes,
+					Type: TransactionKindBill, SubscriptionUUID: subID}, o...)
+			},
+			reply: page(fx("Transaction")),
+			check: func(t *testing.T, v any) {
+				if p := is[*Page[Transaction]](t, v); p.Items[0].Type != TransactionKindBill || p.Items[0].PeriodEnd == nil {
+					t.Errorf("%+v", p)
+				}
+			}},
+		{name: "Failures.List", method: "GET", path: "/payment-failures",
 			query: "category=allowanceExhausted&kind=bill&limit=3&subscriptionUuid=sub%40019eca82-5680-7b00-8000-0000000000d2",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Failures.List(ctx, &FailureListParams{Limit: 3, Kind: FailureKindBill, Category: FailureCategoryAllowanceExhausted, SubscriptionUUID: subID}, o...)
 			},
 			reply: page(fx("Failure")),
 			check: func(t *testing.T, v any) {
-				if p := is[*Page[Failure]](t, v); p.Items[0].Kind != FailureKindBill {
+				if p := is[*Page[Failure]](t, v); p.Items[0].Kind != FailureKindBill || p.Items[0].Attempted != "9.99" {
 					t.Errorf("%+v", p)
 				}
 			}},
 
 		// Subscriptions.
-		{name: "Subscriptions.List", method: "GET", path: "/transaction/subscriptions",
+		{name: "Subscriptions.List", method: "GET", path: "/subscriptions",
 			query: "createdAfter=" + afterQ + "&customerUuid=" + uuidB + "&reference=crm%3A42&status=pastDue",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Subscriptions.List(ctx, &SubscriptionListParams{CustomerUUID: uuidB, CreatedAfter: &after,
@@ -350,19 +389,34 @@ func routeCases(t *testing.T) []routeCase {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Subscriptions.Get", method: "GET", path: "/transaction/subscription/" + subID,
+		{name: "Subscriptions.Get", method: "GET", path: "/subscriptions/" + subID,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Subscriptions.Get(ctx, subID, nil, o...)
 			},
 			reply: fx("Subscription")},
-		{name: "Subscriptions.GetByReference", method: "GET", path: "/transaction/subscription/reference/subscription/" + oddRefEs,
+		{name: "Subscriptions.GetByReference", method: "GET", path: "/subscriptions", query: "reference=" + refEs,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Subscriptions.GetByReference(ctx, oddRef, o...)
+				return c.Subscriptions.GetByReference(ctx, ref, o...)
+			},
+			reply: bounded(withReference(t, fx("Subscription"), ref))},
+		{name: "Subscriptions.Update", method: "PATCH", path: "/subscriptions/" + subID, body: `{"metadata":{"plan":"","seats":"5"}}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Subscriptions.Update(ctx, subID, &UpdateSubscriptionParams{Metadata: map[string]string{"plan": "", "seats": "5"}}, o...)
+			},
+			reply: fx("Subscription"),
+			check: func(t *testing.T, v any) {
+				if s := is[*Subscription](t, v); s.UUID != "sub@1" || s.Metadata["plan"] != "pro" {
+					t.Errorf("%+v", s)
+				}
+			}},
+		{name: "Subscriptions.Update empty", method: "PATCH", path: "/subscriptions/" + subID, body: `{}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Subscriptions.Update(ctx, subID, &UpdateSubscriptionParams{}, o...)
 			},
 			reply: fx("Subscription")},
-		{name: "Subscriptions.ListBills", method: "GET", path: "/transaction/subscription/" + subID + "/bills", query: "cursor=" + uuidA + "&limit=100",
+		{name: "Subscriptions.ListBills", method: "GET", path: "/subscriptions/" + subID + "/bills", query: "cursor=" + cursorA + "&limit=100",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Subscriptions.ListBills(ctx, subID, &BillListParams{Limit: 100, Cursor: uuidA}, o...)
+				return c.Subscriptions.ListBills(ctx, subID, &BillListParams{Limit: 100, Cursor: cursorA}, o...)
 			},
 			reply: page(fx("Bill")),
 			check: func(t *testing.T, v any) {
@@ -370,22 +424,12 @@ func routeCases(t *testing.T) []routeCase {
 					t.Errorf("%+v", p)
 				}
 			}},
-		{name: "Subscriptions.GetBill", method: "GET", path: "/transaction/subscription/bill/" + billID, query: "includeMembers=true",
+		{name: "Subscriptions.GetBill", method: "GET", path: "/bills/" + billID, query: "includeMembers=true",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Subscriptions.GetBill(ctx, billID, &ReadParams{IncludeMembers: true}, o...)
 			},
 			reply: fx("Bill")},
-		{name: "Subscriptions.GetPublicHistory", method: "GET", path: "/transaction/subscription/history/" + subID,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Subscriptions.GetPublicHistory(ctx, subID, o...)
-			},
-			reply: `[{"uuid":"sub-hist@1","createdAt":"2026-10-01T12:00:00+02:00","amount":9.99,"periodStart":"2026-10-01T12:00:00Z"}]`,
-			check: func(t *testing.T, v any) {
-				if b := is[[]Bill](t, v); len(b) != 1 || b[0].Amount != 9.99 || b[0].CustomerUUID != "" || b[0].Metadata.FeePercent != 0 {
-					t.Errorf("%+v", b)
-				}
-			}},
-		{name: "Subscriptions.Cancel 202", method: "POST", path: "/transaction/subscription/processing/force-cancel/" + subID, query: "immediate=false",
+		{name: "Subscriptions.Cancel 202", method: "POST", path: "/subscriptions/" + subID + "/cancel", query: "immediate=false",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Subscriptions.Cancel(ctx, subID, &CancelSubscriptionParams{Immediate: &no}, o...)
 			},
@@ -395,48 +439,59 @@ func routeCases(t *testing.T) []routeCase {
 					t.Errorf("%+v", s)
 				}
 			}},
-		{name: "Subscriptions.Cancel 200", method: "POST", path: "/transaction/subscription/processing/force-cancel/" + subID,
+		{name: "Subscriptions.Cancel 200", method: "POST", path: "/subscriptions/" + subID + "/cancel",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Subscriptions.Cancel(ctx, subID, nil, o...)
 			},
-			reply: `{"uuid":"sub@1","status":"cancelled","cancellationReason":"merchant"}`,
+			reply: `{"uuid":"sub@1","status":"cancelled","cancellationReason":"merchant","fees":[],"metadata":{}}`,
 			check: func(t *testing.T, v any) {
 				if s := is[*SubscriptionCancellation](t, v); s.Pending || s.Subscription.Status != SubscriptionStatusCancelled {
 					t.Errorf("%+v", s)
 				}
 			}},
-		{name: "Subscriptions.ExecuteTestBilling", method: "POST", path: "/transaction/subscription/processing/execute-billing/" + subID,
+		{name: "Subscriptions.TestBill", method: "POST", path: "/subscriptions/" + subID + "/test-bill",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Subscriptions.ExecuteTestBilling(ctx, subID, o...)
+				return c.Subscriptions.TestBill(ctx, subID, o...)
 			},
-			reply: fx("BillingState"),
+			reply: fx("TestBill"),
 			check: func(t *testing.T, v any) {
-				if s := is[*BillingState](t, v); s.Stage != BillingStageDone || s.Outcome != BillingOutcomePaid {
+				if s := is[*TestBill](t, v); s.Stage != BillingStageWaiting || s.Outcome != BillingOutcomePaid || !strings.HasPrefix(s.BillUUID, "sub-hist@") {
 					t.Errorf("%+v", s)
 				}
 			}},
 
 		// Refunds.
-		{name: "Refunds.List", method: "GET", path: "/transaction/refunds/all", query: "held=true&includeMembers=false",
+		{name: "Refunds.List", method: "GET", path: "/refunds",
+			query: "cursor=" + cursorA + "&held=true&includeMembers=false&limit=5&status=pending&status=cancelled&txUuid=pay%40019eca82-5680-7b00-8000-0000000000d1",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				// Limit and Cursor are ListInactive's: never sent here.
-				return c.Refunds.List(ctx, &RefundListParams{Limit: 5, Cursor: uuidA, IncludeMembers: &no, Held: &yes}, o...)
+				return c.Refunds.List(ctx, &RefundListParams{Limit: 5, Cursor: cursorA, IncludeMembers: &no, Held: &yes,
+					Status: []RefundStatus{RefundStatusPending, RefundStatusCancelled}, TxUUID: payID}, o...)
 			},
-			reply: list(fx("Refund")),
+			reply: page(fx("Refund")),
 			check: func(t *testing.T, v any) {
-				if r := is[[]Refund](t, v); len(r) != 1 || r[0].Approval == nil || r[0].Status != RefundStatusPending {
+				if p := is[*Page[Refund]](t, v); len(p.Items) != 1 || p.Items[0].Approval == nil || p.Items[0].Status != RefundStatusApproved {
+					t.Errorf("%+v", p)
+				}
+			}},
+		{name: "Refunds.List member", method: "GET", path: "/refunds", query: "userUuid=" + memberUUID,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Refunds.List(ctx, &RefundListParams{UserUUID: memberUUID}, o...)
+			},
+			reply: bounded()},
+		{name: "Refunds.Get", method: "GET", path: "/refunds/refund@" + uuidA,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Refunds.Get(ctx, "refund@"+uuidA, o...)
+			},
+			reply: fx("Refund"),
+			check: func(t *testing.T, v any) {
+				if r := is[*Refund](t, v); r.UUID != "refund@1" || r.Amount != "5.0021" {
 					t.Errorf("%+v", r)
 				}
 			}},
-		{name: "Refunds.ListInactive", method: "GET", path: "/transaction/refunds/all/inactive", query: "cursor=" + uuidA + "&limit=5&userUuid=" + memberUUID,
+		{name: "Refunds.Create", method: "POST", path: "/refunds", idempotent: true, status: 201,
+			body: `{"txUuid":"` + billID + `","refundPercent":"50.5","reason":"Damaged","merchantMessage":"Sorry"}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Refunds.ListInactive(ctx, &RefundListParams{Limit: 5, Cursor: uuidA, UserUUID: memberUUID}, o...)
-			},
-			reply: page(fx("Refund"))},
-		{name: "Refunds.Initiate", method: "POST", path: "/transaction/refunds/initiate", idempotent: true, status: 201,
-			body: `{"txUuid":"` + billID + `","refundPercent":50.5,"reason":"Damaged","merchantMessage":"Sorry"}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Refunds.Initiate(ctx, &InitiateRefundParams{TxUUID: billID, RefundPercent: ptr(50.5), Reason: "Damaged", MerchantMessage: "Sorry"}, o...)
+				return c.Refunds.Create(ctx, &CreateRefundParams{TxUUID: billID, RefundPercent: "50.5", Reason: "Damaged", MerchantMessage: "Sorry"}, o...)
 			},
 			reply: fx("Refund"),
 			check: func(t *testing.T, v any) {
@@ -444,15 +499,20 @@ func routeCases(t *testing.T) []routeCase {
 					t.Errorf("%+v", r)
 				}
 			}},
+		{name: "Refunds.Create full", method: "POST", path: "/refunds", idempotent: true, status: 201, body: `{"txUuid":"` + payID + `"}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Refunds.Create(ctx, &CreateRefundParams{TxUUID: payID}, o...)
+			},
+			reply: fx("Refund")},
 
 		// Members.
-		{name: "Members.List", method: "GET", path: "/members", query: "cursor=" + memberUUID + "&limit=20",
+		{name: "Members.List", method: "GET", path: "/members", query: "cursor=" + cursorA + "&limit=20",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Members.List(ctx, &MemberListParams{Limit: 20, Cursor: memberUUID}, o...)
+				return c.Members.List(ctx, &MemberListParams{Limit: 20, Cursor: cursorA}, o...)
 			},
 			reply: page(fx("Member")),
 			check: func(t *testing.T, v any) {
-				if p := is[*Page[Member]](t, v); p.Items[0].UserUUID != "m-1" || len(p.Items[0].AcceptedCurrencyIDs) != 3 {
+				if p := is[*Page[Member]](t, v); p.Items[0].UserUUID != "m-1" || len(p.Items[0].AcceptedCurrencies) != 1 {
 					t.Errorf("%+v", p)
 				}
 			}},
@@ -461,23 +521,23 @@ func routeCases(t *testing.T) []routeCase {
 				return c.Members.Get(ctx, memberUUID, o...)
 			},
 			reply: fx("Member")},
-		{name: "Members.Update", method: "PUT", path: "/members/" + memberUUID, body: `{"organizationFeePercent":0}`,
+		{name: "Members.Update", method: "PATCH", path: "/members/" + memberUUID, body: `{"organizationFeePercent":"0"}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Members.Update(ctx, memberUUID, &UpdateMemberParams{OrganizationFeePercent: 0}, o...)
+				return c.Members.Update(ctx, memberUUID, &UpdateMemberParams{OrganizationFeePercent: "0"}, o...)
 			},
 			reply: fx("Member")},
 		{name: "Members.Remove", method: "DELETE", path: "/members/" + memberUUID,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return nil, c.Members.Remove(ctx, memberUUID, o...)
 			},
-			reply: `{"message":"Member removed"}`},
+			status: 204},
 		{name: "Members.Trust", method: "POST", path: "/members/" + memberUUID + "/trust",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Members.Trust(ctx, memberUUID, o...)
 			},
-			reply: `{"userUuid":"` + memberUUID + `","trustedAt":"2026-10-07T10:00:00+02:00"}`,
+			reply: `{"userUuid":"` + memberUUID + `","trustedAt":"2026-10-07T10:00:00Z","organizationFeePercent":"5","acceptedCurrencies":[]}`,
 			check: func(t *testing.T, v any) {
-				if m := is[*Member](t, v); m.TrustedAt == nil {
+				if m := is[*Member](t, v); m.TrustedAt == nil || m.OrganizationFeePercent != "5" {
 					t.Errorf("%+v", m)
 				}
 			}},
@@ -485,9 +545,9 @@ func routeCases(t *testing.T) []routeCase {
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Members.ListHeldFunds(ctx, o...)
 			},
-			reply: list(fx("MemberHeldFundsSummary")),
+			reply: bounded(fx("MemberHeldFunds")),
 			check: func(t *testing.T, v any) {
-				if h := is[[]MemberHeldFundsSummary](t, v); len(h) != 1 || h[0].Count != 2 {
+				if h := is[[]MemberHeldFunds](t, v); len(h) != 1 || h[0].Count != 2 || h[0].TotalUSD != "98.5" {
 					t.Errorf("%+v", h)
 				}
 			}},
@@ -497,35 +557,40 @@ func routeCases(t *testing.T) []routeCase {
 			},
 			reply: fx("HeldFunds"),
 			check: func(t *testing.T, v any) {
-				if h := is[*HeldFunds](t, v); len(h.Ledgers) != 1 || h.TotalAmount != -10.0042 {
+				if h := is[*HeldFunds](t, v); len(h.Ledgers) != 2 || h.TotalUSD != "-1.0933" {
 					t.Errorf("%+v", h)
 				}
 			}},
-		{name: "Members.GetOwnHeldFunds", method: "GET", path: "/user/held-funds",
+		{name: "Members.GetOwnHeldFunds", method: "GET", path: "/held-funds",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Members.GetOwnHeldFunds(ctx, o...)
 			},
-			reply: `{"ledgers":[],"totalAmount":0}`},
+			reply: `{"ledgers":[],"totalUsd":"0"}`,
+			check: func(t *testing.T, v any) {
+				if h := is[*HeldFunds](t, v); len(h.Ledgers) != 0 || h.TotalUSD != "0" {
+					t.Errorf("%+v", h)
+				}
+			}},
 
 		// Invitations.
 		{name: "Invitations.Create", method: "POST", path: "/invitations", idempotent: true, status: 201,
-			body: `{"email":"seller@example.com","role":"user","trustLayer":true,"organizationFeePercent":2.5,"redirectUrl":"https://shop.example/welcome"}`,
+			body: `{"email":"seller@example.com","role":"user","holdFunds":true,"organizationFeePercent":"2.5","redirectUrl":"https://shop.example/welcome"}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Invitations.Create(ctx, &CreateInvitationParams{Email: "seller@example.com", TrustLayer: true,
-					OrganizationFeePercent: ptr(2.5), RedirectURL: "https://shop.example/welcome"}, o...)
+				return c.Invitations.Create(ctx, &CreateInvitationParams{Email: "seller@example.com", HoldFunds: true,
+					OrganizationFeePercent: "2.5", RedirectURL: "https://shop.example/welcome"}, o...)
 			},
-			reply: fx("InvitationCreated"),
+			reply: fx("CreatedInvitation"),
 			check: func(t *testing.T, v any) {
-				if i := is[*InvitationCreated](t, v); i.Link == "" || i.Invitation.Status != InvitationStatusPending {
+				if i := is[*CreatedInvitation](t, v); i.Link == "" || i.Status != InvitationStatusPending || i.UUID != "i-1" {
 					t.Errorf("%+v", i)
 				}
 			}},
 		{name: "Invitations.Create minimal", method: "POST", path: "/invitations", idempotent: true, status: 201,
-			body: `{"email":"seller@example.com","role":"user","trustLayer":false}`,
+			body: `{"email":"seller@example.com","role":"user","holdFunds":false}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Invitations.Create(ctx, &CreateInvitationParams{Email: "seller@example.com"}, o...)
 			},
-			reply: fx("InvitationCreated")},
+			reply: fx("CreatedInvitation")},
 		{name: "Invitations.List", method: "GET", path: "/invitations", query: "status=pending",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Invitations.List(ctx, &InvitationListParams{Status: InvitationStatusPending}, o...)
@@ -533,38 +598,33 @@ func routeCases(t *testing.T) []routeCase {
 			reply: page(fx("Invitation"))},
 		{name: "Invitations.Revoke", method: "DELETE", path: "/invitations/" + uuidA,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Invitations.Revoke(ctx, uuidA, o...)
+				return nil, c.Invitations.Revoke(ctx, uuidA, o...)
 			},
-			reply: fx("Invitation"),
-			check: func(t *testing.T, v any) {
-				if i := is[*Invitation](t, v); i.UUID != "i-1" {
-					t.Errorf("%+v", i)
-				}
-			}},
+			status: 204},
 
 		// Wallets.
-		{name: "Wallets.List", method: "GET", path: "/wallet/user", query: "withBalances=true",
+		{name: "Wallets.List", method: "GET", path: "/wallets", query: "withBalances=true",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Wallets.List(ctx, &WalletListParams{WithBalances: true}, o...)
 			},
-			reply: list(fx("Wallet")),
+			reply: bounded(fx("Wallet")),
 			check: func(t *testing.T, v any) {
-				if w := is[[]Wallet](t, v); len(w) != 1 || w[0].TokenWallets[0].Balance == nil {
+				if w := is[[]Wallet](t, v); len(w) != 1 || w[0].TokenWallets[0].Balance == nil || w[0].Address != "0xpk" {
 					t.Errorf("%+v", w)
 				}
 			}},
-		{name: "Wallets.ListForMember", method: "GET", path: "/wallet/user/" + memberUUID,
+		{name: "Wallets.ListForMember", method: "GET", path: "/members/" + memberUUID + "/wallets",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Wallets.ListForMember(ctx, memberUUID, o...)
 			},
-			reply: list(fx("Wallet"))},
-		{name: "Wallets.ListSupportedCurrencies", method: "GET", path: "/wallet/supported-currencies", query: "userUuid=" + memberUUID,
+			reply: bounded(fx("Wallet"))},
+		{name: "Wallets.ListAcceptedCurrencies", method: "GET", path: "/wallets/accepted-currencies", query: "userUuid=" + memberUUID,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Wallets.ListSupportedCurrencies(ctx, &SupportedCurrenciesParams{UserUUID: memberUUID}, o...)
+				return c.Wallets.ListAcceptedCurrencies(ctx, &AcceptedCurrenciesParams{UserUUID: memberUUID}, o...)
 			},
-			reply: list(fx("Currency")),
+			reply: bounded(fx("Currency"), fx("Currency/native")),
 			check: func(t *testing.T, v any) {
-				if cs := is[[]Currency](t, v); len(cs) != 1 || cs[0].MainCurrency == nil {
+				if cs := is[[]Currency](t, v); len(cs) != 2 || cs[0].Code != "BASE:USDC" || cs[1].MainCurrencyID != nil {
 					t.Errorf("%+v", cs)
 				}
 			}},
@@ -574,9 +634,9 @@ func routeCases(t *testing.T) []routeCase {
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Accounting.ExportJSON(ctx, "2026-09-01", "2026-09-30", o...)
 			},
-			reply: list(fx("AccountingEvent")),
+			reply: bounded(fx("AccountingEvent")),
 			check: func(t *testing.T, v any) {
-				if a := is[[]AccountingEvent](t, v); len(a) != 1 || a[0].Type != AccountingEventTypeRefund {
+				if a := is[[]AccountingEvent](t, v); len(a) != 1 || a[0].Type != AccountingEventTypeRefund || a[0].GrossAmount != "-10.0042" {
 					t.Errorf("%+v", a)
 				}
 			}},
@@ -585,9 +645,9 @@ func routeCases(t *testing.T) []routeCase {
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Accounting.ExportCSV(ctx, "2026-09-01", "2026-09-30", o...)
 			},
-			reply: "paymentUuid,type\npay@1,payment\n", contentType: "text/csv",
+			reply: "txTimeUtc,type,reference\n2026-09-13T19:23:26Z,payment,order-1\n", contentType: "text/csv",
 			check: func(t *testing.T, v any) {
-				if s := is[string](t, v); s != "paymentUuid,type\npay@1,payment\n" {
+				if s := is[string](t, v); s != "txTimeUtc,type,reference\n2026-09-13T19:23:26Z,payment,order-1\n" {
 					t.Errorf("%q", s)
 				}
 			}},
@@ -599,16 +659,21 @@ func routeCases(t *testing.T) []routeCase {
 				return nil, c.Webhooks.VerifyRemote(ctx, uuidA, []byte(`{"id":"evt_1"}`), "t=1790856000,v1=abc", o...)
 			},
 			reply: `{"message":"Signature valid"}`},
-		{name: "Webhooks.Endpoints.List", method: "GET", path: "/webhooks/endpoints",
+		{name: "Webhooks.Endpoints.List", method: "GET", path: "/webhooks/endpoints", query: "cursor=" + cursorA + "&limit=10",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Webhooks.Endpoints.List(ctx, o...)
+				return c.Webhooks.Endpoints.List(ctx, &EndpointListParams{Limit: 10, Cursor: cursorA}, o...)
 			},
-			reply: list(fx("WebhookEndpointCreated")),
+			reply: page(fx("WebhookEndpointCreated")),
 			check: func(t *testing.T, v any) {
-				if e := is[[]WebhookEndpoint](t, v); len(e) != 1 || e[0].URL != "https://x.io/hook" {
-					t.Errorf("%+v", e)
+				if p := is[*Page[WebhookEndpoint]](t, v); len(p.Items) != 1 || p.Items[0].URL != "https://x.io/hook" || !p.HasMore {
+					t.Errorf("%+v", p)
 				}
 			}},
+		{name: "Webhooks.Endpoints.List nil", method: "GET", path: "/webhooks/endpoints",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Webhooks.Endpoints.List(ctx, nil, o...)
+			},
+			reply: bounded()},
 		{name: "Webhooks.Endpoints.Create", method: "POST", path: "/webhooks/endpoints", idempotent: true, status: 201,
 			body: `{"url":"https://shop.example/hooks","events":["payment.completed","member.joined"],"includeMembers":false,"description":"Shop"}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
@@ -626,39 +691,50 @@ func routeCases(t *testing.T) []routeCase {
 				return c.Webhooks.Endpoints.Get(ctx, uuidA, o...)
 			},
 			reply: fx("WebhookEndpointCreated")},
-		{name: "Webhooks.Endpoints.Update", method: "PUT", path: "/webhooks/endpoints/" + uuidA,
+		{name: "Webhooks.Endpoints.Update", method: "PATCH", path: "/webhooks/endpoints/" + uuidA,
 			body: `{"events":[],"description":"","payloadVersion":"v2","enabled":true}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Webhooks.Endpoints.Update(ctx, uuidA, &UpdateWebhookEndpointParams{Events: []EventType{}, Description: ptr(""),
 					PayloadVersion: WebhookPayloadVersionV2, Enabled: &yes}, o...)
 			},
 			reply: fx("WebhookEndpointCreated")},
+		{name: "Webhooks.Endpoints.Update without events", method: "PATCH", path: "/webhooks/endpoints/" + uuidA, body: `{"url":"https://shop.example/v2"}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Webhooks.Endpoints.Update(ctx, uuidA, &UpdateWebhookEndpointParams{URL: "https://shop.example/v2"}, o...)
+			},
+			reply: fx("WebhookEndpointCreated")},
 		{name: "Webhooks.Endpoints.Delete", method: "DELETE", path: "/webhooks/endpoints/" + uuidA,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return nil, c.Webhooks.Endpoints.Delete(ctx, uuidA, o...)
 			},
-			reply: `{"message":"Endpoint deleted"}`},
-		{name: "Webhooks.Events.List", method: "GET", path: "/webhooks/events", query: "cursor=" + eventID + "&includeMembers=true&limit=2&type=webhook.test",
+			status: 204},
+		{name: "Webhooks.Events.List", method: "GET", path: "/webhooks/events", query: "cursor=" + cursorA + "&includeMembers=true&limit=2&type=webhook.test",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Webhooks.Events.List(ctx, &EventListParams{Limit: 2, Cursor: eventID, Type: EventTypeWebhookTest, IncludeMembers: true}, o...)
+				return c.Webhooks.Events.List(ctx, &EventListParams{Limit: 2, Cursor: cursorA, Type: EventTypeWebhookTest, IncludeMembers: true}, o...)
 			},
-			reply: `{"items":[` + evt + `],"nextCursor":null}`,
+			reply: `{"items":[` + evt + `],"hasMore":false}`,
 			check: func(t *testing.T, v any) {
 				p := is[*Page[Event]](t, v)
-				if len(p.Items) != 1 || p.HasMore() {
+				if len(p.Items) != 1 || p.HasMore {
 					t.Fatalf("%+v", p)
 				}
 				if w, err := p.Items[0].WebhookTest(); err != nil || w.EndpointUUID == "" {
 					t.Errorf("%+v %v", w, err)
 				}
 			}},
+		{name: "Webhooks.Events.List newer type", method: "GET", path: "/webhooks/events", query: "type=invoice.paid",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				// A type newer than the SDK is sent as is (the API judges it).
+				return c.Webhooks.Events.List(ctx, &EventListParams{Type: "invoice.paid"}, o...)
+			},
+			reply: bounded()},
 		{name: "Webhooks.Events.Get", method: "GET", path: "/webhooks/events/" + eventID,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Webhooks.Events.Get(ctx, eventID, o...)
 			},
 			reply: strings.TrimSuffix(strings.TrimSpace(evt), "}") + `,"deliveries":[{"endpointUuid":"` + uuidA + `","url":"https://x.io","delivered":true,
 				"attempts":[{"uuid":"` + uuidB + `","eventId":"` + eventID + `","eventType":"webhook.test","endpointUuid":"` + uuidA + `","attempt":1,
-				"delivered":true,"statusCode":200,"durationMs":12,"attemptedAt":"2026-10-01T12:00:01+02:00"}]}]}`,
+				"delivered":true,"statusCode":200,"durationMs":12,"attemptedAt":"2026-10-01T12:00:01Z"}]}]}`,
 			check: func(t *testing.T, v any) {
 				d := is[*EventDetail](t, v)
 				if d.ID != eventID || d.Type != EventTypeWebhookTest || len(d.Deliveries) != 1 || len(d.Deliveries[0].Attempts) != 1 || !d.Deliveries[0].Delivered {
@@ -667,26 +743,38 @@ func routeCases(t *testing.T) []routeCase {
 			}},
 
 		// Currencies.
-		{name: "Currencies.ListAvailable", method: "GET", path: "/utils/all-available-currencies", query: "test=true",
+		{name: "Currencies.List", method: "GET", path: "/currencies", query: "main=true&test=true",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Currencies.ListAvailable(ctx, &CurrencyListParams{Test: true}, o...)
+				return c.Currencies.List(ctx, &CurrencyListParams{Test: true, Main: true}, o...)
 			},
-			reply: list(fx("Currency"))},
-		{name: "Currencies.ListMain", method: "GET", path: "/utils/all-main-currencies",
+			reply: bounded(fx("Currency/native")),
+			check: func(t *testing.T, v any) {
+				if cs := is[[]Currency](t, v); len(cs) != 1 || cs[0].Code != "ETH" {
+					t.Errorf("%+v", cs)
+				}
+			}},
+		{name: "Currencies.List nil", method: "GET", path: "/currencies",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Currencies.ListMain(ctx, nil, o...)
+				return c.Currencies.List(ctx, nil, o...)
 			},
-			reply: list(fx("Currency"))},
-		{name: "Currencies.Get", method: "GET", path: "/utils/currency/id/8",
+			reply: bounded(fx("Currency"))},
+		{name: "Currencies.Get", method: "GET", path: "/currencies/8",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Currencies.Get(ctx, 8, o...)
 			},
 			reply: fx("Currency"),
 			check: func(t *testing.T, v any) {
-				if cur := is[*Currency](t, v); cur.ID != 8 || cur.Symbol != "USDC" {
+				if cur := is[*Currency](t, v); cur.ID != 8 || cur.Symbol != "USDC" || cur.Chain != ChainBASE {
 					t.Errorf("%+v", cur)
 				}
 			}},
+
+		// The client.
+		{name: "Me", method: "GET", path: "/me",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Me(ctx, o...)
+			},
+			reply: fx("Me")},
 	}
 }
 
@@ -852,12 +940,19 @@ func TestServiceErrorsTyped(t *testing.T) {
 		t.Errorf("Expire: %v", err)
 	}
 
-	ts2 := newTestServer(t, staticReply(400, `{"error":"window too long","code":"bad_request"}`))
+	ts2 := newTestServer(t, staticReply(400, `{"error":"validation failed","code":"validation_failed",`+
+		`"details":{"max":92,"errors":[{"field":"to","message":"to must be at most 92 days after from, both included"}]}}`))
 	c2, _ := newTestClient(t, ts2)
 	csv, err := c2.Accounting.ExportCSV(ctx, "2026-01-01", "2026-09-30")
-	var br *BadRequestError
-	if !errors.As(err, &br) || csv != "" {
+	var ve *ValidationError
+	if !errors.As(err, &ve) || csv != "" || ve.StatusCode != 400 || ve.Details["max"] != float64(92) || ve.FieldErrors[0].Field != "to" {
 		t.Errorf("ExportCSV: %q %v", csv, err)
+	}
+
+	ts4 := newTestServer(t, staticReply(400, `{"error":"test mode only","code":"test_mode_only"}`))
+	c4, _ := newTestClient(t, ts4)
+	if _, err := c4.Subscriptions.TestBill(ctx, subID); !errors.As(err, new(*BadRequestError)) {
+		t.Errorf("TestBill on a live subscription: %v", err)
 	}
 
 	ts3 := newTestServer(t, staticReply(404, `{"error":"not found","code":"not_found"}`))
@@ -867,6 +962,9 @@ func TestServiceErrorsTyped(t *testing.T) {
 	}
 	if err := c3.Products.Delete(ctx, uuidA); !errors.As(err, new(*NotFoundError)) {
 		t.Errorf("Delete: %v", err)
+	}
+	if err := c3.Invitations.Revoke(ctx, uuidA); !errors.As(err, new(*NotFoundError)) {
+		t.Errorf("Revoke: %v", err)
 	}
 	n := 0
 	for _, err := range c3.Customers.Iterate(ctx, nil) {
@@ -880,11 +978,149 @@ func TestServiceErrorsTyped(t *testing.T) {
 	}
 }
 
+// TestGetByReferenceNotFound checks the getByReference helpers: an empty page is a
+// *NotFoundError like a 404 (status 404, code not_found) carrying the list's request id; the
+// reference is checked before sending; a list error comes through as is.
+func TestGetByReferenceNotFound(t *testing.T) {
+	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request, _ int) {
+		w.Header().Set("X-Request-Id", "req-list")
+		jsonReply(w, 200, bounded())
+	})
+	c, _ := newTestClient(t, ts)
+	ctx := context.Background()
+	calls := map[string]func() error{
+		"Products":      func() error { _, err := c.Products.GetByReference(ctx, "pro"); return err },
+		"Customers":     func() error { _, err := c.Customers.GetByReference(ctx, "crm-1"); return err },
+		"Payments":      func() error { _, err := c.Payments.GetByReference(ctx, "order-1"); return err },
+		"Subscriptions": func() error { _, err := c.Subscriptions.GetByReference(ctx, "customer-7731"); return err },
+	}
+	for name, call := range calls {
+		err := call()
+		var nf *NotFoundError
+		if !errors.As(err, &nf) || nf.StatusCode != 404 || nf.Code != "not_found" || nf.RequestID != "req-list" ||
+			!strings.Contains(nf.Message, "reference") || IsRetryable(err) {
+			t.Errorf("%s: %#v", name, err)
+		}
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.Details == nil {
+			t.Errorf("%s: not an *APIError with details", name)
+		}
+	}
+	if n := len(ts.recorded()); n != len(calls) {
+		t.Errorf("%d requests, want one per call", n)
+	}
+
+	before := len(ts.recorded())
+	for _, bad := range []string{"", "  ", "a b", "a/b", strings.Repeat("r", 101)} {
+		if _, err := c.Products.GetByReference(ctx, bad); !errors.As(err, new(*ValidationError)) {
+			t.Errorf("reference %q: %v", bad, err)
+		}
+	}
+	if n := len(ts.recorded()) - before; n != 0 {
+		t.Errorf("%d requests sent for invalid references", n)
+	}
+
+	unauthorized := newTestServer(t, staticReply(401, `{"error":"unauthorized","code":"unauthorized"}`))
+	c2, _ := newTestClient(t, unauthorized)
+	if _, err := c2.Customers.GetByReference(ctx, "crm-1"); !errors.As(err, new(*AuthenticationError)) {
+		t.Errorf("list error: %v", err)
+	}
+	notAPage := newTestServer(t, staticReply(200, `[{"uuid":"p-1"}]`))
+	c3, _ := newTestClient(t, notAPage)
+	if _, err := c3.Products.GetByReference(ctx, "pro"); !errors.As(err, new(*ServerError)) {
+		t.Errorf("a bare list: %v", err)
+	}
+}
+
+// TestDeletesAnswer204 checks every DELETE treats 204 (no body) as success, and never reads a body.
+func TestDeletesAnswer204(t *testing.T) {
+	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request, _ int) { w.WriteHeader(http.StatusNoContent) })
+	c, _ := newTestClient(t, ts)
+	ctx := context.Background()
+	for name, call := range map[string]func() error{
+		"Products.Delete":           func() error { return c.Products.Delete(ctx, uuidA) },
+		"Customers.Delete":          func() error { return c.Customers.Delete(ctx, uuidA) },
+		"Members.Remove":            func() error { return c.Members.Remove(ctx, memberUUID) },
+		"Invitations.Revoke":        func() error { return c.Invitations.Revoke(ctx, uuidA) },
+		"Webhooks.Endpoints.Delete": func() error { return c.Webhooks.Endpoints.Delete(ctx, uuidA) },
+	} {
+		if err := call(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, r := range ts.recorded() {
+		if r.method != http.MethodDelete || r.body != "" {
+			t.Errorf("%s %s with body %q", r.method, r.path, r.body)
+		}
+	}
+}
+
 // TestCancelNoBody checks a 2xx without the subscription is a ServerError, not an empty one.
 func TestCancelNoBody(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request, _ int) { w.WriteHeader(202) })
 	c, _ := newTestClient(t, ts)
 	if _, err := c.Subscriptions.Cancel(context.Background(), subID, nil); !errors.As(err, new(*ServerError)) {
 		t.Errorf("want *ServerError, got %v", err)
+	}
+}
+
+// TestGetByReferenceChecksTheReference: a server that ignores the ?reference= filter answers an
+// ordinary page; the helpers return the item with exactly that reference, or a *NotFoundError —
+// never another resource.
+func TestGetByReferenceChecksTheReference(t *testing.T) {
+	ts := newTestServer(t, staticReply(200, bounded(
+		`{"uuid":"pay@01a0f22f-9600-7000-8000-000000000001","reference":"order-9"}`,
+		`{"uuid":"pay@01a0f22f-9600-7000-8000-000000000002","reference":"order-1042"}`,
+	)))
+	c, _ := newTestClient(t, ts)
+	ctx := context.Background()
+	p, err := c.Payments.GetByReference(ctx, "order-1042")
+	if err != nil || p.UUID != "pay@01a0f22f-9600-7000-8000-000000000002" {
+		t.Errorf("matching item: %+v %v", p, err)
+	}
+	if _, err := c.Payments.GetByReference(ctx, "order-7"); !errors.As(err, new(*NotFoundError)) {
+		t.Errorf("no item with the reference: want *NotFoundError, got %v", err)
+	}
+	if _, err := c.Payments.GetByReference(ctx, "ORDER-1042"); !errors.As(err, new(*NotFoundError)) {
+		t.Errorf("the reference is compared exactly: %v", err)
+	}
+}
+
+// TestBoundedListFollowsHasMore: a bounded list answering hasMore true (never expected) is
+// followed with its nextCursor, the filters kept, so it is never cut short silently; the walk
+// stops on the iterators' guards, and the result is never nil.
+func TestBoundedListFollowsHasMore(t *testing.T) {
+	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request, n int) {
+		switch n {
+		case 0:
+			jsonReply(w, 200, `{"items":[{"id":1}],"hasMore":true,"nextCursor":"c1"}`)
+		case 1:
+			jsonReply(w, 200, `{"items":[{"id":2}],"hasMore":false}`)
+		default:
+			t.Fatalf("request %d past hasMore false", n)
+		}
+	})
+	c, _ := newTestClient(t, ts)
+	cs, err := c.Currencies.List(context.Background(), &CurrencyListParams{Main: true})
+	if err != nil || len(cs) != 2 || cs[0].ID != 1 || cs[1].ID != 2 {
+		t.Fatalf("followed list: %+v %v", cs, err)
+	}
+	reqs := ts.recorded()
+	if len(reqs) != 2 || strings.Contains(reqs[0].query, "cursor") ||
+		!strings.Contains(reqs[1].query, "cursor=c1") || !strings.Contains(reqs[1].query, "main=true") {
+		t.Errorf("requests: %+v", reqs)
+	}
+
+	for name, body := range map[string]string{
+		"empty page with more": `{"items":[],"hasMore":true,"nextCursor":"x"}`,
+		"more without cursor":  `{"items":[{"id":1}],"hasMore":true}`,
+		"null items":           `{"items":null,"hasMore":false}`,
+	} {
+		one := newTestServer(t, staticReply(200, body))
+		c1, _ := newTestClient(t, one)
+		got, err := c1.Currencies.List(context.Background(), nil)
+		if err != nil || got == nil || len(one.recorded()) != 1 {
+			t.Errorf("%s: %#v %v after %d requests", name, got, err, len(one.recorded()))
+		}
 	}
 }

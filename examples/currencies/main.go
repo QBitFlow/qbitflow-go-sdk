@@ -20,12 +20,14 @@ func main() {
 
 	// docs:start currencies-list
 	// A public route limited to 60 requests a minute per IP: cache the list at start-up.
-	currencies, err := client.Currencies.ListAvailable(ctx, nil)
+	// One bounded list (a slice): the live currencies; Test: the test networks'; Main: the
+	// chains' native coins only.
+	currencies, err := client.Currencies.List(ctx, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, c := range currencies {
-		fmt.Printf("%d: %s (%s), %d decimals\n", c.ID, c.Symbol, c.Name, c.Decimals)
+		fmt.Printf("%d: %s (%s on %s), %d decimals\n", c.ID, c.Code, c.Name, c.Chain, c.Decimals)
 	}
 	// docs:end currencies-list
 }
