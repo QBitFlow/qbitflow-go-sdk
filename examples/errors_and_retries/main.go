@@ -23,7 +23,7 @@ func main() {
 	if key == "" {
 		log.Fatal("set QBITFLOW_API_KEY")
 	}
-	// Reads and the 7 idempotent creates are retried on network errors, 5xx and 429 (1 s, 2 s,
+	// Reads and the 6 idempotent creates are retried on network errors, 5xx and 429 (1 s, 2 s,
 	// 4 s…); WithMaxRetries(0) turns that off. WithTimeout bounds each attempt.
 	opts := []qbitflow.ClientOption{qbitflow.WithMaxRetries(3), qbitflow.WithTimeout(15 * time.Second)}
 	if base := os.Getenv("QBITFLOW_BASE_URL"); base != "" {

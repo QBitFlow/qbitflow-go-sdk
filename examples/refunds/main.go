@@ -1,9 +1,8 @@
-// Command refunds lists the pending refunds, reads one, and, given a payment, starts a partial
-// refund of it.
+// Command refunds lists the pending refunds (customers' requests) and reads one.
 //
-//	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [PAYMENT_UUID=pay@…] go run ./examples/refunds
+//	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] go run ./examples/refunds
 //
-// The refund stays pending, and no money moves, until it is signed in the dashboard.
+// Refunds are read only in the SDK: they are answered, or sent, from the dashboard.
 package main
 
 import (
@@ -42,29 +41,10 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		// pending, approved, rejected or cancelled (a merchant's draft dropped before it was sent).
+		// pending (a customer's request), approved or rejected.
 		fmt.Println(refund.UUID, refund.Status, refund.RefundPercent+"%", refund.Amount, refund.Currency.Symbol)
 		// docs:end refunds-get
 	}
-
-	paymentUUID := os.Getenv("PAYMENT_UUID")
-	if paymentUUID == "" {
-		fmt.Println("set PAYMENT_UUID=pay@… to refund half of a payment")
-		return
-	}
-
-	// docs:start refunds-create
-	refund, err := client.Refunds.Create(ctx, &qbitflow.CreateRefundParams{
-		TxUUID:        paymentUUID, // pay@… (or a bill's sub-hist@…)
-		RefundPercent: "50",        // a percent string, of what the customer paid; "" = "100"
-		Reason:        "Damaged item",
-	})
-	if err != nil {
-		log.Fatal(err) // 409 refund_already_exists: one refund per transaction
-	}
-	// Pending: no money moves until you sign the transfer in the dashboard (refund.approved).
-	fmt.Println(refund.UUID, refund.Status)
-	// docs:end refunds-create
 }
 
 func newClient() *qbitflow.Client {

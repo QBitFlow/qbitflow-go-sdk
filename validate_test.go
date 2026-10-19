@@ -73,8 +73,6 @@ func TestRuleText(t *testing.T) {
 	check(t, "address 1 char", (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Address: "x"}).Validate())
 	check(t, "address 501", (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Address: strings.Repeat("x", 501)}).Validate(), "address")
 	check(t, "endpoint description 201", (&CreateWebhookEndpointParams{URL: "https://x.io", Description: strings.Repeat("x", 201)}).Validate(), "description")
-	check(t, "refund reason", (&CreateRefundParams{TxUUID: "pay@" + memberUUID, Reason: "Broken, can you refund?", MerchantMessage: "Sorry\nTeam"}).Validate())
-	check(t, "refund reason bad", (&CreateRefundParams{TxUUID: "pay@" + memberUUID, Reason: "{x}", MerchantMessage: strings.Repeat("m", 501)}).Validate(), "reason", "merchantMessage")
 }
 
 func TestRuleReference(t *testing.T) {
@@ -238,21 +236,14 @@ func TestRuleFees(t *testing.T) {
 }
 
 // TestRulePercent checks the percent rule: a decimal string, digits with at most 2 decimals, at
-// most 16 characters, from 0 (above 0 for a refund) to its maximum, compared exactly.
+// most 16 characters, from 0 to its maximum, compared exactly.
 func TestRulePercent(t *testing.T) {
-	for _, p := range []string{"0.01", "1.5", "33.33", "50", "100", "100.00", "007.5"} {
-		check(t, "refund "+p, (&CreateRefundParams{TxUUID: memberUUID, RefundPercent: p}).Validate())
-	}
-	for _, p := range []string{"0", "0.00", "-1", "100.01", "101", "1.155", "0.30000000000000004", "1e1", ".5", "5.", "50%", " 5",
-		"00000000000000050", "NaN", "Infinity"} { // the 16-character limit: 17 here
-		check(t, "refund "+p, (&CreateRefundParams{TxUUID: memberUUID, RefundPercent: p}).Validate(), "refundPercent")
-	}
-	check(t, "refund default (100)", (&CreateRefundParams{TxUUID: memberUUID}).Validate())
-	for _, p := range []string{"0", "0.05", "1.5", "50", "50.00", "000000000000050"} { // 15 characters
+	for _, p := range []string{"0", "0.00", "0.05", "1.5", "33.33", "50", "50.00", "007.5", "000000000000050"} { // 15 characters
 		check(t, "member fee "+p, (&UpdateMemberParams{OrganizationFeePercent: p}).Validate())
 		check(t, "invitation fee "+p, (&CreateInvitationParams{Email: "a@b.co", OrganizationFeePercent: p}).Validate())
 	}
-	for _, p := range []string{"-0.01", "50.01", "51", "1.234", "1e1", "0000000000000050"} { // 16 is the limit: 16 digits is fine, 17 not
+	for _, p := range []string{"-0.01", "50.01", "51", "1.234", "1.155", "0.30000000000000004", "1e1", ".5", "5.", "50%", " 5", "NaN",
+		"Infinity", "0000000000000050"} { // 16 is the limit: 16 digits is fine, 17 not
 		want := []string{"organizationFeePercent"}
 		if p == "0000000000000050" {
 			want = nil
@@ -436,8 +427,7 @@ func TestRuleIDs(t *testing.T) {
 			t.Errorf("isTxID(%q) = true", id)
 		}
 	}
-	check(t, "txUuid required", (&CreateRefundParams{}).Validate(), "txUuid")
-	check(t, "txUuid bad", (&CreateRefundParams{TxUUID: "order-1"}).Validate(), "txUuid")
+	check(t, "txUuid bad", (&RefundListParams{TxUUID: "order-1"}).Validate(), "txUuid")
 	check(t, "subscriptionUuid filter", (&FailureListParams{SubscriptionUUID: "sub@nope"}).Validate(), "subscriptionUuid")
 
 	if checkPathUUID("uuid", memberUUID) != nil || checkPathUUID("uuid", "") == nil || checkPathUUID("uuid", "pay@"+memberUUID) == nil {
@@ -474,7 +464,7 @@ func TestRuleFilters(t *testing.T) {
 	check(t, "transactions exclusive", (&TransactionListParams{IncludeMembers: true, UserUUID: memberUUID}).Validate(), "userUuid")
 	check(t, "kind/category", (&FailureListParams{Kind: "refund", Category: "boom"}).Validate(), "kind", "category")
 	check(t, "invitation status", (&InvitationListParams{Status: "open"}).Validate(), "status")
-	all := []RefundStatus{RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusCancelled, RefundStatusFailed}
+	all := []RefundStatus{RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusFailed, RefundStatusPending}
 	check(t, "refund statuses ok", (&RefundListParams{Status: all}).Validate())
 	check(t, "refund 6 statuses", (&RefundListParams{Status: append(all, RefundStatusPending)}).Validate(), "status")
 	check(t, "refund unknown status", (&RefundListParams{Status: []RefundStatus{RefundStatusApproved, "completed", ""}}).Validate(), "status[1]", "status[2]")
@@ -573,8 +563,6 @@ func TestUpdateSemantics(t *testing.T) {
 			`{"productUuid":"` + memberUUID + `","fees":{"items":[{"label":"Tax","amountUsd":"1.30"}]}}`},
 		{CreateSubscriptionSessionParams{ProductName: "Pro", PriceUSD: "9.99", Frequency: &Duration{1, DurationUnitWeeks}, ExpiresInMinutes: 30},
 			`{"productName":"Pro","priceUsd":"9.99","expiresInMinutes":30,"frequency":{"value":1,"unit":"weeks"}}`},
-		{CreateRefundParams{TxUUID: "pay@x"}, `{"txUuid":"pay@x"}`},
-		{CreateRefundParams{TxUUID: "pay@x", RefundPercent: "50"}, `{"txUuid":"pay@x","refundPercent":"50"}`},
 		{CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Metadata: map[string]string{"k": "v"}}, `{"firstName":"Ada","email":"a@b.co","metadata":{"k":"v"}}`},
 		{CreateWebhookEndpointParams{URL: "https://x.io", IncludeMembers: ptr(false)}, `{"url":"https://x.io","includeMembers":false}`},
 		{verifyWebhookBody{EndpointUUID: "e", Body: "{}", Signature: "t=1,v1=x"}, `{"endpointUuid":"e","body":"{}","signature":"t=1,v1=x"}`},

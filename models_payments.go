@@ -82,8 +82,8 @@ type Payment struct {
 	// PaidUSD is the same in USD, at the payment's time.
 	PaidUSD string `json:"paidUsd,omitempty"`
 
-	// Refund is its refund (one per transaction), if any (API reads only). A merchant's refund
-	// not sent yet is shown, and doesn't make it unrefundable: a new refund replaces it.
+	// Refund is its refund (one per transaction), if any (API reads only). The merchant's own
+	// refund appears once its transfer confirmed (approved).
 	Refund *RefundSummary `json:"refund,omitempty"`
 	// Refundable says whether it can be refunded now (API reads only).
 	Refundable *bool `json:"refundable,omitempty"`

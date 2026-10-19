@@ -165,7 +165,7 @@ func (p *UpdateMemberParams) Validate() error {
 	}
 	var v validator
 	if v.required("organizationFeePercent", p.OrganizationFeePercent) {
-		v.percent("organizationFeePercent", p.OrganizationFeePercent, 50, false)
+		v.percent("organizationFeePercent", p.OrganizationFeePercent, 50)
 	}
 	return v.err()
 }
@@ -279,7 +279,7 @@ func (p *CreateInvitationParams) Validate() error {
 		v.email("email", p.Email)
 	}
 	if p.OrganizationFeePercent != "" {
-		v.percent("organizationFeePercent", p.OrganizationFeePercent, 50, false)
+		v.percent("organizationFeePercent", p.OrganizationFeePercent, 50)
 	}
 	v.url("redirectUrl", p.RedirectURL)
 	return v.err()

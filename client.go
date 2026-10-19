@@ -32,7 +32,7 @@ type Client struct {
 	Failures *FailuresService
 	// Subscriptions reads, updates, bills and cancels subscriptions (/subscriptions…, /bills…).
 	Subscriptions *SubscriptionsService
-	// Refunds lists, reads and creates refunds (/refunds…).
+	// Refunds lists and reads refunds (/refunds…).
 	Refunds *RefundsService
 	// Members manages the organization's members and their held funds (organization key).
 	Members *MembersService

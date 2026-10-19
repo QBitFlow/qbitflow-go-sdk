@@ -17,7 +17,7 @@ const (
 		`"address":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","mainCurrencyId":3,"test":false}`
 	fxNative   = `{"id":1,"code":"ETH","symbol":"ETH","name":"Ethereum","chain":"ETH","decimals":18,"test":false}`
 	fxSummary  = `{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","reference":"crm-1","deleted":true}`
-	fxRefundSm = `{"uuid":"refund@1","status":"cancelled","initiatedBy":"merchant","refundPercent":"50","amount":"5.0021",` +
+	fxRefundSm = `{"uuid":"refund@1","status":"approved","initiatedBy":"merchant","refundPercent":"50","amount":"5.0021",` +
 		`"amountMinUnits":"5002100","amountUsd":"5.0021","createdAt":"2026-10-01T12:00:00Z","respondedAt":"2026-10-01T13:00:00Z"}`
 	fxAttempt    = `{"status":"failed","code":"insufficient_funds","message":"Not enough USDC","txHash":"0xa","at":"2026-10-01T12:00:00Z"}`
 	fxTx         = `{"blockNumber":"52468103","blockTime":"2026-10-01T11:59:58Z","gasUsed":95000,"fee":{"amount":"0.00000114","amountMinUnits":"1140000000000","amountUsd":"0.005144"},"l1Fee":{"amount":"0.0000001","amountMinUnits":"100000000000","amountUsd":"0.00045"},"nativePriceUsd":"4512.37"}`
@@ -223,7 +223,7 @@ func TestModelValues(t *testing.T) {
 		p.Metadata["orderId"] != "order-1" || p.Paid != "10.0042" || p.PaidUSD != "10.0042" {
 		t.Errorf("payment %+v", p)
 	}
-	if p.Customer == nil || !p.Customer.Deleted || p.Customer.FirstName != "Ada" || p.Refund == nil || p.Refund.Status != RefundStatusCancelled ||
+	if p.Customer == nil || !p.Customer.Deleted || p.Customer.FirstName != "Ada" || p.Refund == nil || p.Refund.Status != RefundStatusApproved ||
 		p.Refund.RefundPercent != "50" || p.Refund.Amount != "5.0021" || p.Refund.RespondedAt == nil ||
 		p.Refundable == nil || *p.Refundable || p.NotRefundableReason != NotRefundableReasonRefundExists {
 		t.Errorf("payment customer and refund %+v %+v", p.Customer, p.Refund)

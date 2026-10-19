@@ -79,7 +79,6 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 		"Customers.Update nil":                  {"", func() error { return drop(c.Customers.Update(ctx, uuidA, nil)) }},
 		"CheckoutSessions.CreatePayment nil":    {"", func() error { return drop(c.CheckoutSessions.CreatePayment(ctx, nil)) }},
 		"CheckoutSessions.CreateSubscription 0": {"", func() error { return drop(c.CheckoutSessions.CreateSubscription(ctx, nil)) }},
-		"Refunds.Create nil":                    {"", func() error { return drop(c.Refunds.Create(ctx, nil)) }},
 		"Subscriptions.Update nil":              {"", func() error { return drop(c.Subscriptions.Update(ctx, subID, nil)) }},
 		"Members.Update nil":                    {"", func() error { return drop(c.Members.Update(ctx, memberUUID, nil)) }},
 		"Invitations.Create nil":                {"", func() error { return drop(c.Invitations.Create(ctx, nil)) }},
@@ -139,9 +138,6 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 			return drop(c.Refunds.List(ctx, &RefundListParams{Status: []RefundStatus{RefundStatusPending, "open"}}))
 		}},
 		"Refunds.List txUuid": {"txUuid", func() error { return drop(c.Refunds.List(ctx, &RefundListParams{TxUUID: "pay-1"})) }},
-		"Refunds.Create percent": {"refundPercent", func() error {
-			return drop(c.Refunds.Create(ctx, &CreateRefundParams{TxUUID: payID, RefundPercent: "0"}))
-		}},
 		"Members.Update fee": {"organizationFeePercent", func() error {
 			return drop(c.Members.Update(ctx, memberUUID, &UpdateMemberParams{OrganizationFeePercent: "51"}))
 		}},

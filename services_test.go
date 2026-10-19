@@ -462,10 +462,10 @@ func routeCases(t *testing.T) []routeCase {
 
 		// Refunds.
 		{name: "Refunds.List", method: "GET", path: "/refunds",
-			query: "cursor=" + cursorA + "&held=true&includeMembers=false&limit=5&status=pending&status=cancelled&txUuid=pay%40019eca82-5680-7b00-8000-0000000000d1",
+			query: "cursor=" + cursorA + "&held=true&includeMembers=false&limit=5&status=pending&status=rejected&txUuid=pay%40019eca82-5680-7b00-8000-0000000000d1",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Refunds.List(ctx, &RefundListParams{Limit: 5, Cursor: cursorA, IncludeMembers: &no, Held: &yes,
-					Status: []RefundStatus{RefundStatusPending, RefundStatusCancelled}, TxUUID: payID}, o...)
+					Status: []RefundStatus{RefundStatusPending, RefundStatusRejected}, TxUUID: payID}, o...)
 			},
 			reply: page(fx("Refund")),
 			check: func(t *testing.T, v any) {
@@ -488,22 +488,6 @@ func routeCases(t *testing.T) []routeCase {
 					t.Errorf("%+v", r)
 				}
 			}},
-		{name: "Refunds.Create", method: "POST", path: "/refunds", idempotent: true, status: 201,
-			body: `{"txUuid":"` + billID + `","refundPercent":"50.5","reason":"Damaged","merchantMessage":"Sorry"}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Refunds.Create(ctx, &CreateRefundParams{TxUUID: billID, RefundPercent: "50.5", Reason: "Damaged", MerchantMessage: "Sorry"}, o...)
-			},
-			reply: fx("Refund"),
-			check: func(t *testing.T, v any) {
-				if r := is[*Refund](t, v); r.UUID != "refund@1" || r.TxUUID != "pay@1" {
-					t.Errorf("%+v", r)
-				}
-			}},
-		{name: "Refunds.Create full", method: "POST", path: "/refunds", idempotent: true, status: 201, body: `{"txUuid":"` + payID + `"}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Refunds.Create(ctx, &CreateRefundParams{TxUUID: payID}, o...)
-			},
-			reply: fx("Refund")},
 
 		// Members.
 		{name: "Members.List", method: "GET", path: "/members", query: "cursor=" + cursorA + "&limit=20",
@@ -923,8 +907,8 @@ func TestServiceRetries(t *testing.T) {
 			idempotent[strings.Fields(rc.name)[0]] = true
 		}
 	}
-	if len(idempotent) != 7 {
-		t.Errorf("%d idempotent methods, want 7: %v", len(idempotent), slices.Sorted(maps.Keys(idempotent)))
+	if len(idempotent) != 6 {
+		t.Errorf("%d idempotent methods, want 6: %v", len(idempotent), slices.Sorted(maps.Keys(idempotent)))
 	}
 }
 

@@ -221,14 +221,10 @@ func (v *validator) usd(field, value string, maxValue int) {
 }
 
 // percent checks a rate in percent sent as a decimal string: digits with at most 2 decimals, at
-// most 16 characters, from 0 (above 0 when positive) to maxValue, compared exactly.
-func (v *validator) percent(field, value string, maxValue int, positive bool) {
-	low := "0"
-	if positive {
-		low = "above 0"
-	}
-	if len(value) > 16 || !decimalPattern.MatchString(value) || (positive && isZeroDecimal(value)) || compareDecimal(value, maxValue) > 0 {
-		v.add(field, "must be a percentage as a decimal string (e.g. \"7.5\"): from %s to %d, with at most 2 decimals", low, maxValue)
+// most 16 characters, from 0 to maxValue, compared exactly.
+func (v *validator) percent(field, value string, maxValue int) {
+	if len(value) > 16 || !decimalPattern.MatchString(value) || compareDecimal(value, maxValue) > 0 {
+		v.add(field, "must be a percentage as a decimal string (e.g. \"7.5\"): from 0 to %d, with at most 2 decimals", maxValue)
 	}
 }
 

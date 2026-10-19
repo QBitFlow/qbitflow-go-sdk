@@ -258,15 +258,17 @@ func (e *Event) SubscriptionUpcomingBill() (*SubscriptionUpcomingBill, error) {
 	return decodeEventData[SubscriptionUpcomingBill](e, EventTypeSubscriptionUpcomingBill)
 }
 
-// RefundRequested decodes a refund.requested event's data: a new pending refund, a customer's
-// request (InitiatedBy customer) or a merchant's own (Refunds.Create).
+// RefundRequested decodes a refund.requested event's data: a new pending refund, always a
+// customer's request (InitiatedBy customer). A merchant's own refund is announced only by
+// refund.approved.
 func (e *Event) RefundRequested() (*Refund, error) {
 	return decodeEventData[Refund](e, EventTypeRefundRequested)
 }
 
 // RefundApproved decodes a refund.approved event's data (was refund.completed): the refund,
 // approved, its transfer confirmed (TxHash, Settlement.Transaction); RefundPercent and Amount
-// are the share actually paid back.
+// are the share actually paid back. For a merchant's own refund (InitiatedBy merchant) it is
+// the first and only event.
 func (e *Event) RefundApproved() (*Refund, error) {
 	return decodeEventData[Refund](e, EventTypeRefundApproved)
 }

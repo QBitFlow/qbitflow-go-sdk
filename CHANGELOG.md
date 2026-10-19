@@ -47,7 +47,7 @@ but never published; its changes are part of 3.0.0).
     `Paid`, `Owed`, next to their `…MinUnits`) and fee rates in percent (`FeePercent`,
     `OrganizationFeePercent`, `RefundPercent`: `"1.5"` is 1.5 %). `CreateProductParams.Price` →
     `PriceUSD string`, the session params' inline `Price` → `PriceUSD string`,
-    `FeeItem.AmountUSD`, `CreateRefundParams.RefundPercent`,
+    `FeeItem.AmountUSD`,
     `CreateInvitationParams.OrganizationFeePercent` and `UpdateMemberParams.OrganizationFeePercent`
     are strings. No `float64` is left in a model or a params type.
 -   **Amounts are token amounts.** `Payment.Amount`, `Bill.Amount`, `Transaction.Amount` and
@@ -114,8 +114,7 @@ but never published; its changes are part of 3.0.0).
     `TransactionTypeExecuteSubscriptionPayment` → `TransactionTypeExecuteSubscription`, the PAYG
     values are `createPaygSubscription` / `cancelPaygSubscription`. `LedgerEntryType` and
     `AccountingEventType` `subscriptionHistory` → `bill` (`LedgerEntryTypeBill`,
-    `AccountingEventTypeBill`). `RefundStatus` adds `cancelled` (a merchant's draft dropped
-    before it was sent) and keeps `failed` (declared, never set). `WebhookPayloadVersionV1` is
+    `AccountingEventTypeBill`). `RefundStatus` keeps `failed` (declared, never set). `WebhookPayloadVersionV1` is
     removed: v2 is the only payload.
 -   **Pagination**: `GetAll…(limit, cursor)` → `List(ctx, *…ListParams)` returning a `*Page[T]`
     `{Items, HasMore, NextCursor}`: `HasMore` is a field (no `HasMore()` method), `NextCursor` an
@@ -160,8 +159,8 @@ but never published; its changes are part of 3.0.0).
     `CheckoutSessions.GetStatus` → `Get`; `Payments.ListCombined` / `IterateCombined` →
     `Transactions.List` / `Iterate` (`CombinedPayment` → `Transaction`, `CombinedPaymentSource`
     → `TransactionKind` with `payment` / `bill`, the `Source` filter → `Type`);
-    `Subscriptions.ExecuteTestBilling` → `TestBill`; `Refunds.Initiate` → `Create`
-    (`InitiateRefundParams` → `CreateRefundParams`); `Refunds.List` (active) and `ListInactive` /
+    `Subscriptions.ExecuteTestBilling` → `TestBill`; `Refunds.Initiate` is
+    removed (`InitiateRefundParams` with it: refunds are read only, below); `Refunds.List` (active) and `ListInactive` /
     `IterateInactive` → one `Refunds.List` / `Iterate` with a `Status` filter;
     `Wallets.ListSupportedCurrencies` → `ListAcceptedCurrencies` (`SupportedCurrenciesParams` →
     `AcceptedCurrenciesParams`); `Currencies.ListAvailable` / `ListMain` → `Currencies.List`
@@ -202,8 +201,9 @@ but never published; its changes are part of 3.0.0).
     before it), `ActionRequired`, `PriceUSD`, `CancellationReason`, `Dunning`, `Metadata`,
     `ManagementPageLink`; `Allowance`.
 -   `Refunds.List` / `Iterate` (`Status` (repeatable), `TxUUID`, `Held`, `IncludeMembers`,
-    `UserUUID`), `Refunds.Get` (`GET /refunds/:uuid`) and `Refunds.Create` (`POST /refunds`): a
-    merchant's refund of a payment or a bill, signed in the dashboard. A `Refund` carries `Paid`,
+    `UserUUID`), and `Refunds.Get` (`GET /refunds/:uuid`), read only: a customer's request is answered, and a
+    merchant's own refund sent, from the dashboard (the merchant's is recorded only once its
+    transfer confirmed, `approved`: `refund.approved` is its only event). A `Refund` carries `Paid`,
     `Amount`, its `Currency` and, once approved, its `Settlement`.
 -   `Members` (`List`, `Get`, `Update`, `Remove`, `Trust`, `ListHeldFunds`, `GetHeldFunds`,
     `GetOwnHeldFunds`) and `Invitations` (`Create`, `List`, `Revoke`) for marketplaces.
@@ -222,7 +222,7 @@ but never published; its changes are part of 3.0.0).
     `SubscriptionBilled()`, `RefundApproved()`, `MemberJoined()`, `CheckoutExpired()`… 15 types)
     and `DecodeData[T]()` for the others; `EventType` constants.
 -   An iterator (`iter.Seq2`) next to every paginated list: `Iterate`, `IterateBills`.
--   Retries: reads and the 7 creates are retried on network errors, timeouts, 5xx, 429 (after
+-   Retries: reads and the 6 creates are retried on network errors, timeouts, 5xx, 429 (after
     `Retry-After`, at most 60 s) and `409 idempotency_key_in_use`, 3 times by default with a
     1 s · 2ⁿ back-off; `WithMaxRetries(0)` disables them; `IsRetryable`.
 -   An `Idempotency-Key` on each create, generated per call and reused by its retries;
@@ -232,8 +232,8 @@ but never published; its changes are part of 3.0.0).
     `Validate` method, run before every request (no request is sent on failure): names, texts,
     references (also on the `Reference` filters and `GetByReference`), emails (also the customers'
     `Email` filter), phones, URLs, USD amounts as strings (at most 2 decimals, above 0, at most
-    1,000,000), percents as strings (at most 2 decimals and 16 characters; `RefundPercent` above
-    0 up to 100, `OrganizationFeePercent` 0 to 50, required on `UpdateMemberParams`), metadata
+    1,000,000), percents as strings (at most 2 decimals and 16 characters;
+    `OrganizationFeePercent` 0 to 50, required on `UpdateMemberParams`), metadata
     (at most 50 keys of 1 to 40 of `A-Z a-z 0-9 _ - . :`, values of at most 500 characters
     without control or bidirectional characters), durations, cursors (at most 200 characters),
     the refunds' `Status` filter (at most 5 known statuses), the transactions' `Type`, the
@@ -329,7 +329,8 @@ but never published; its changes are part of 3.0.0).
 -   The webhook timestamp check is overflow-safe: a timestamp centuries away is refused instead
     of wrapping into the accepted window.
 
-The website snippet ids are unchanged (none renamed or retired).
+The website snippet ids are unchanged (none renamed), except `refunds-create`: it is listed as unsupported
+(refunds are read only; the id stays in the website's catalog, marked retired).
 
 ## [2.1.0] - 2026-09-21
 

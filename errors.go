@@ -131,8 +131,7 @@ type NotFoundError struct{ *APIError }
 func (e *NotFoundError) Unwrap() error { return e.APIError }
 
 // ConflictError is a 409 (unique_violation with details.field, tx_already_sent,
-// merchant_not_ready with details.reason, refund_already_exists with details.refundUuid,
-// held_funds_pending, already_joined, payment_not_due, conflict, idempotency_key_in_use, …).
+// merchant_not_ready with details.reason, held_funds_pending, already_joined, payment_not_due, conflict, idempotency_key_in_use, …).
 type ConflictError struct{ *APIError }
 
 // Unwrap returns the embedded *APIError.

@@ -902,7 +902,7 @@ for r, err := range client.Refunds.Iterate(ctx, &qbitflow.RefundListParams{
 }
 ```
 
-`Refunds.Get` reads one refund by its `refund@…` id, cancelled ones included:
+`Refunds.Get` reads one refund by its `refund@…` id:
 
 <!-- docs:snippet refunds-get -->
 ```go
@@ -910,40 +910,24 @@ refund, err := client.Refunds.Get(ctx, refundUUID) // refund@…
 if err != nil {
 	log.Fatal(err)
 }
-// pending, approved, rejected or cancelled (a merchant's draft dropped before it was sent).
+// pending (a customer's request), approved or rejected.
 fmt.Println(refund.UUID, refund.Status, refund.RefundPercent+"%", refund.Amount, refund.Currency.Symbol)
 ```
 <!-- /docs:snippet -->
 
-`Refunds.Create` starts a refund of a payment (`pay@…`) or a bill (`sub-hist@…`) of the space.
-**It creates a pending refund: no money moves until you sign the transfer in the dashboard**,
-from the wallet that was paid. `refund.approved` tells you when it is sent.
+Refunds are read only here: there is no create. A refund is **requested by the customer** (the
+refund page; you approve or reject it in the dashboard) or **sent by you from the dashboard**,
+signed from the wallet that was paid. Yours exists only once its transfer confirmed: it is recorded
+`approved`, and `refund.approved` (with `InitiatedBy` `merchant`) is the first and only event about
+it. `refund.requested` is always a customer's request.
 
-<!-- docs:snippet refunds-create -->
-```go
-refund, err := client.Refunds.Create(ctx, &qbitflow.CreateRefundParams{
-	TxUUID:        paymentUUID, // pay@… (or a bill's sub-hist@…)
-	RefundPercent: "50",        // a percent string, of what the customer paid; "" = "100"
-	Reason:        "Damaged item",
-})
-if err != nil {
-	log.Fatal(err) // 409 refund_already_exists: one refund per transaction
-}
-// Pending: no money moves until you sign the transfer in the dashboard (refund.approved).
-fmt.Println(refund.UUID, refund.Status)
-```
-<!-- /docs:snippet -->
+`RefundPercent` is a percent string (`"100"`: all of it) of everything the customer paid (`Paid`,
+network fee included); `Amount` / `AmountMinUnits` / `AmountUSD` is what it sends back. There is
+one refund per transaction, whatever it became: `Payment.Refundable` / `NotRefundableReason` say
+whether one would be accepted now.
 
-`RefundPercent` is a percent string (`"50"`, above 0, at most `"100"`, the default) of everything
-the customer paid (`Paid`, network fee included); `Amount` / `AmountMinUnits` / `AmountUSD` is what
-it sends back. `MerchantMessage` is shown to the customer. There is one refund per transaction: a
-second one is a `409 refund_already_exists`, naming the first in `Details["refundUuid"]` (only your
-own unsent draft gives way).
-
-A refund is `pending`, `approved`, `rejected` or `cancelled` (your draft dropped before it was
-sent; `failed` is declared but never set); `InitiatedBy` is `customer` (a request you answer in
-the dashboard) or `merchant`. A held seller's payment already released to them can no longer be
-refunded (`409 held_funds_released`).
+A refund is `pending` (a customer's request waiting for your answer), `approved` or `rejected`
+(both final); `failed` is declared but never set. `InitiatedBy` is `customer` or `merchant`.
 
 ## Marketplaces
 
@@ -1437,7 +1421,7 @@ Every error the SDK returns is one of the types below, matched with `errors.As`.
 | `*AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
 | `*PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`Details["policy"]`), `plan_required` |
 | `*NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `GetByReference` that found nothing (code `not_found`, the list's `RequestID`) |
-| `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `refund_already_exists` (`Details["refundUuid"]`), `held_funds_released`, `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
+| `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `*GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
 | `*IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
 | `*RateLimitError` | 429 | `RetryAfter` (a `time.Duration`), `Limit`, `PeriodSeconds` |
@@ -1489,7 +1473,7 @@ names and texts (lengths in characters, no markup characters), references
 (`A-Z a-z 0-9 . _ : @ -`, 1 to 100, on creates and on the `Reference` filters and `GetByReference`),
 emails (the customers' `Email` filter too), phone numbers, absolute `http(s)` URLs, USD amounts
 (decimal strings with at most 2 decimals, above 0, at most 1,000,000), percents (decimal strings,
-at most 2 decimals: `RefundPercent` above 0 up to 100, `OrganizationFeePercent` 0 to 50),
+at most 2 decimals: `OrganizationFeePercent` 0 to 50),
 metadata (keys, values, at most 50 keys), durations (a frequency between 1 unit and 1 year), UUIDs
 and transaction ids, dates, cursors (at most 200 characters), the checkout's product choice, the
 enum filters (refund `Status`, transaction `Type`, failure `Kind` and `Category`, invitation
@@ -1503,7 +1487,7 @@ metadata, uniqueness.
 
 | | |
 |---|---|
-| Retried methods | every read (GET), and the 7 creates: `CheckoutSessions.CreatePayment`, `CheckoutSessions.CreateSubscription`, `Products.Create`, `Customers.Create`, `Webhooks.Endpoints.Create`, `Invitations.Create`, `Refunds.Create` |
+| Retried methods | every read (GET), and the 6 creates: `CheckoutSessions.CreatePayment`, `CheckoutSessions.CreateSubscription`, `Products.Create`, `Customers.Create`, `Webhooks.Endpoints.Create`, `Invitations.Create` |
 | Never retried | every other write: updates (`Subscriptions.Update` included), deletes, `CheckoutSessions.Expire`, `Subscriptions.Cancel`, `Subscriptions.TestBill`, `Members.Trust`, `Members.Remove`, `Invitations.Revoke`, `Webhooks.VerifyRemote`; a 429 on them is returned, not retried |
 | Retried on | a network error or timeout, a 5xx, a 429, a 409 `idempotency_key_in_use` |
 | Not retried on | any other 4xx (422 `idempotency_key_reused` included), a 3xx, an unusable response |
