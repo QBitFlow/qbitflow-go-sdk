@@ -18,9 +18,9 @@ type Event struct {
 	ID string `json:"id"`
 	// Type is the event's type.
 	Type EventType `json:"type"`
-	// Version is the payload version (v2).
+	// Version is the payload version: v2, the only one.
 	Version WebhookPayloadVersion `json:"version"`
-	// CreatedAt is when it happened.
+	// CreatedAt is when it happened (at most millisecond precision).
 	CreatedAt time.Time `json:"createdAt"`
 	// Test is true when it happened in test mode.
 	Test bool `json:"test"`
@@ -59,7 +59,9 @@ func decodeEventData[T any](e *Event, want EventType) (*T, error) {
 	return &v, nil
 }
 
-// PaymentCompleted is payment.completed's data: the payment, confirmed.
+// PaymentCompleted is payment.completed's data: the payment, confirmed, as Payments.Get returns
+// it to its owner (its refund state excepted: API reads only), and its customer page. Fulfil the
+// order: UUID is the checkout session's pay@…, Reference and Metadata yours.
 type PaymentCompleted struct {
 	Payment
 
@@ -67,93 +69,101 @@ type PaymentCompleted struct {
 	ManagementPageLink string `json:"managementPageLink,omitempty"`
 }
 
-// SubscriptionCreated is subscription.created's data (status active, or trial).
-type SubscriptionCreated struct {
-	Subscription
-
-	// ManagementPageLink is the subscription's management page for its customer.
-	ManagementPageLink string `json:"managementPageLink,omitempty"`
-}
-
-// SubscriptionBilled is subscription.billed's data: the paid bill.
+// SubscriptionBilled is subscription.billed's data: the bill paid, and its subscription as the
+// bill leaves it. Access is paid until Bill.PeriodEnd, unless Subscription.Status is cancelled
+// (a charge that landed just after a cancellation: record it, grant nothing).
 type SubscriptionBilled struct {
-	Bill
-
-	// SubscriptionReference is the subscription's merchant reference, if it has one.
-	SubscriptionReference string `json:"subscriptionReference,omitempty"`
-	// SubscriptionStatus is the subscription's status once the bill is paid.
-	SubscriptionStatus SubscriptionStatus `json:"subscriptionStatus"`
+	// Bill is the bill paid (as Subscriptions.GetBill returns it): its currency, settlement, and
+	// the period it pays, PeriodStart → PeriodEnd.
+	Bill Bill `json:"bill"`
+	// Subscription is the subscription once the bill is paid: active (stopped, paused or
+	// cancelled if that happened while the charge was on its way), its next bill, its allowance,
+	// its reference and its metadata.
+	Subscription Subscription `json:"subscription"`
 }
 
-// SubscriptionStatusChanged is subscription.statusChanged's data.
+// SubscriptionStatusChanged is subscription.statusChanged's data: the subscription with its new
+// Status, and the one before. Every status change sends it, once.
 type SubscriptionStatusChanged struct {
 	Subscription
 
 	// PreviousStatus is the status before the change.
 	PreviousStatus SubscriptionStatus `json:"previousStatus"`
-	// ManagementPageLink is the subscription's management page for its customer.
-	ManagementPageLink string `json:"managementPageLink,omitempty"`
 }
 
-// SubscriptionActionRequiredChanged is subscription.actionRequiredChanged's data.
+// SubscriptionActionRequiredChanged is subscription.actionRequiredChanged's data: the
+// subscription with its new ActionRequired ("" = nothing to do anymore), and the one before.
+// Its ManagementPageLink is where the customer acts.
 type SubscriptionActionRequiredChanged struct {
 	Subscription
 
 	// PreviousActionRequired is what its customer had to do before ("" = nothing).
 	PreviousActionRequired ActionRequired `json:"previousActionRequired,omitempty"`
-	// ManagementPageLink is the subscription's management page for its customer.
-	ManagementPageLink string `json:"managementPageLink,omitempty"`
 }
 
-// SubscriptionBillingFailed is subscription.billingFailed's data: a bill attempt failed.
+// SubscriptionBillingFailed is subscription.billingFailed's data: the subscription as a failed
+// bill attempt leaves it, and the failure. Its ManagementPageLink is where the customer fixes
+// it. Sent once per failed attempt (pastDue), and once when a bill above the customer's maximum
+// starts waiting for a new one (maxAmountExceeded: no attempt spent).
 type SubscriptionBillingFailed struct {
 	Subscription
 
-	// Reason is insufficientBalance, allowanceExhausted, approvalRevoked, maxAmountExceeded or other.
+	// Reason is what the customer does: insufficientBalance (add funds to the wallet),
+	// allowanceExhausted (top up the allowance), approvalRevoked (approve the token again),
+	// maxAmountExceeded (sign a new maximum) or other (the network refused the charge).
 	Reason BillingFailureReason `json:"reason"`
-	// FailureCode is the charge's error code (e.g. insufficient_funds).
+	// FailureCode is the charge's error code (e.g. insufficient_funds, insufficient_allowance).
 	FailureCode string `json:"failureCode,omitempty"`
-	// BillUUID is the bill that failed (sub-hist@…: its id once paid).
+	// BillUUID is the bill that failed: the sub-hist@… its subscription.billed has once it is paid.
 	BillUUID string `json:"billUuid"`
-	// AmountUSD is the bill, in USD (a decimal string, unlike SubscriptionUpcomingBill's).
+	// AmountUSD is the bill, in USD, a decimal string: its PriceUSD plus its Fees lines.
 	AmountUSD string `json:"amountUsd"`
-	// Attempt is this bill's failed attempts so far, this one included.
+	// Attempt is this bill's failed attempts so far, this one included (maxAmountExceeded spends
+	// none).
 	Attempt uint16 `json:"attempt"`
-	// RemainingAttempts is the attempts left.
+	// RemainingAttempts is the attempts left (retried 1, 3, 5 and 7 days after the first failed
+	// attempt). 0: this was the last; its cancellation follows (subscription.statusChanged).
 	RemainingAttempts uint16 `json:"remainingAttempts"`
-	// NextAttemptAt is when the bill is tried again at the latest.
+	// NextAttemptAt is when the bill is tried again at the latest (maxAmountExceeded: when it
+	// stops waiting for a new maximum); nil after the last attempt.
 	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
-	// ManagementPageLink is the subscription's management page, where its customer fixes it.
-	ManagementPageLink string `json:"managementPageLink,omitempty"`
 }
 
-// SubscriptionUpcomingBill is subscription.upcomingBill's data: a bill (or a trial's end) is near.
+// SubscriptionUpcomingBill is subscription.upcomingBill's data: a bill (or a trial's end) is
+// near, sent once per bill some days before (3 by default). Remind the customer when
+// BalanceSufficient or AllowanceSufficient is false, or when TrialEnding.
 type SubscriptionUpcomingBill struct {
 	Subscription
 
-	// BillingDate is when it is billed (for a trial: when the trial ends).
-	BillingDate time.Time `json:"billingDate"`
-	// AmountUSD is the bill, in USD (a number, unlike SubscriptionBillingFailed's): its PriceUSD
-	// plus its Fees lines.
-	AmountUSD float64 `json:"amountUsd"`
-	// TrialEnding is true when the trial ends then: the customer must confirm it to be billed.
+	// BillingAt is when it is billed (for a trial: when the trial ends).
+	BillingAt time.Time `json:"billingAt"`
+	// AmountUSD is what the bill charges, in USD, a decimal string: its PriceUSD plus its Fees
+	// lines.
+	AmountUSD string `json:"amountUsd"`
+	// TrialEnding is true when the trial ends then: the customer confirms the subscription (its
+	// ManagementPageLink) to be billed.
 	TrialEnding bool `json:"trialEnding"`
-	// BalanceSufficient says whether the wallet holds the bill; nil for a trial.
+	// BalanceSufficient says whether the wallet holds the bill at today's price; nil for a trial,
+	// or when it couldn't be checked.
 	BalanceSufficient *bool `json:"balanceSufficient,omitempty"`
-	// AllowanceSufficient says whether the remaining allowance covers the bill; nil for a trial.
+	// AllowanceSufficient says whether the remaining allowance covers the bill; nil for a trial,
+	// or without a price.
 	AllowanceSufficient *bool `json:"allowanceSufficient,omitempty"`
 }
 
-// MemberJoined is member.joined's data: the member, and the invitation they accepted.
+// MemberJoined is member.joined's data: the member, in the mode they joined, and the invitation
+// they accepted. Store UserUUID for On-Behalf-Of.
 type MemberJoined struct {
 	Member
 
-	// InvitationUUID is the invitation they accepted (Invitations.Create's).
+	// InvitationUUID is the invitation they accepted (Invitations.Create's UUID): match the event
+	// to it.
 	InvitationUUID string `json:"invitationUuid"`
 }
 
 // HeldFundsReleased is heldFunds.released's data: the transfer paying a member the funds the
-// organization held for them, and the lines it settled.
+// organization held for them (in the member's space: the envelope's UserUUID), and the lines it
+// settled.
 type HeldFundsReleased struct {
 	// UUID is the transfer's id (transfer@…).
 	UUID string `json:"uuid"`
@@ -163,14 +173,15 @@ type HeldFundsReleased struct {
 	From string `json:"from"`
 	// To is the member's wallet.
 	To string `json:"to"`
-	// Amount is the amount, in USD.
-	Amount float64 `json:"amount"`
-	// AmountMinUnits is the amount in the token's min units (a decimal string).
+	// Amount is what the member received, in the currency's units, exact: the sum of the lines'
+	// Owed.
+	Amount string `json:"amount"`
+	// AmountMinUnits is the same in the currency's smallest unit.
 	AmountMinUnits string `json:"amountMinUnits"`
-	// CurrencyID is the currency paid in.
-	CurrencyID uint64 `json:"currencyId"`
-	// Currency is that currency.
-	Currency *Currency `json:"currency"`
+	// AmountUSD is the same in USD, at the release's price.
+	AmountUSD string `json:"amountUsd"`
+	// Currency is the currency paid in.
+	Currency Currency `json:"currency"`
 	// TxHash is the transaction's hash.
 	TxHash string `json:"txHash"`
 	// Chain is the chain.
@@ -185,9 +196,11 @@ type HeldFundsReleased struct {
 	Received bool `json:"received"`
 	// Type is heldFundsRelease.
 	Type TransferType `json:"type"`
-	// TxMetadata is the transaction's network fees and block.
-	TxMetadata TxMetadata `json:"txMetadata"`
-	// Ledgers are the held-funds lines it settled.
+	// Settlement is the transfer's transaction: its block and what it cost its sender.
+	Settlement TransferSettlement `json:"settlement"`
+	// Ledgers are the lines it settled, oldest first: the payments and bills it paid (positive)
+	// and the refunds of them it took off (negative, type refund), each with what it counted for
+	// (Owed, OwedMinUnits, OwedUSD).
 	Ledgers []LedgerEntry `json:"ledgers"`
 }
 
@@ -214,9 +227,10 @@ func (e *Event) PaymentCompleted() (*PaymentCompleted, error) {
 	return decodeEventData[PaymentCompleted](e, EventTypePaymentCompleted)
 }
 
-// SubscriptionCreated decodes a subscription.created event's data.
-func (e *Event) SubscriptionCreated() (*SubscriptionCreated, error) {
-	return decodeEventData[SubscriptionCreated](e, EventTypeSubscriptionCreated)
+// SubscriptionCreated decodes a subscription.created event's data: the subscription (status
+// active, or trial), as Subscriptions.Get returns it, its ManagementPageLink included.
+func (e *Event) SubscriptionCreated() (*Subscription, error) {
+	return decodeEventData[Subscription](e, EventTypeSubscriptionCreated)
 }
 
 // SubscriptionBilled decodes a subscription.billed event's data.
@@ -244,19 +258,23 @@ func (e *Event) SubscriptionUpcomingBill() (*SubscriptionUpcomingBill, error) {
 	return decodeEventData[SubscriptionUpcomingBill](e, EventTypeSubscriptionUpcomingBill)
 }
 
-// RefundRequested decodes a refund.requested event's data (a pending refund).
+// RefundRequested decodes a refund.requested event's data: a new pending refund, a customer's
+// request (InitiatedBy customer) or a merchant's own (Refunds.Create).
 func (e *Event) RefundRequested() (*Refund, error) {
 	return decodeEventData[Refund](e, EventTypeRefundRequested)
 }
 
-// RefundCompleted decodes a refund.completed event's data (an approved refund).
-func (e *Event) RefundCompleted() (*Refund, error) {
-	return decodeEventData[Refund](e, EventTypeRefundCompleted)
+// RefundApproved decodes a refund.approved event's data (was refund.completed): the refund,
+// approved, its transfer confirmed (TxHash, Settlement.Transaction); RefundPercent and Amount
+// are the share actually paid back.
+func (e *Event) RefundApproved() (*Refund, error) {
+	return decodeEventData[Refund](e, EventTypeRefundApproved)
 }
 
-// RefundDenied decodes a refund.denied event's data (a rejected refund).
-func (e *Event) RefundDenied() (*Refund, error) {
-	return decodeEventData[Refund](e, EventTypeRefundDenied)
+// RefundRejected decodes a refund.rejected event's data (was refund.denied): a customer's
+// request rejected by whoever decides it. A decision, final.
+func (e *Event) RefundRejected() (*Refund, error) {
+	return decodeEventData[Refund](e, EventTypeRefundRejected)
 }
 
 // MemberJoined decodes a member.joined event's data.
@@ -323,10 +341,10 @@ func validateEventData(e *Event) error {
 		_, err = e.SubscriptionUpcomingBill()
 	case EventTypeRefundRequested:
 		_, err = e.RefundRequested()
-	case EventTypeRefundCompleted:
-		_, err = e.RefundCompleted()
-	case EventTypeRefundDenied:
-		_, err = e.RefundDenied()
+	case EventTypeRefundApproved:
+		_, err = e.RefundApproved()
+	case EventTypeRefundRejected:
+		_, err = e.RefundRejected()
 	case EventTypeMemberJoined:
 		_, err = e.MemberJoined()
 	case EventTypeMemberRemoved:

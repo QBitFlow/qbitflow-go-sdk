@@ -45,60 +45,71 @@ func TestRuleName(t *testing.T) {
 	good := []string{"Pro plan", "O’Brien", "Smith & Co", "prod/backend", "Dr. Who (II)", "Zoë", "李小龙", "ab", strings.Repeat("é", 100)}
 	bad := []string{"a", "  ", " \t ", "line\nbreak", "tab\there", "<b>", "x{y}", "a[1]", "back`tick", `back\slash`, "pi|pe", "semi;colon", `quo"te`, "til~de", "car^et", "bidi‮name", "bidi⁦x", "nul\x00x", strings.Repeat("é", 101)}
 	for _, s := range good {
-		check(t, "name "+s, (&CreateProductParams{Name: s, Price: 1}).Validate())
+		check(t, "name "+s, (&CreateProductParams{Name: s, PriceUSD: "1"}).Validate())
 	}
 	for _, s := range bad {
-		check(t, "name "+s, (&CreateProductParams{Name: s, Price: 1}).Validate(), "name")
+		check(t, "name "+s, (&CreateProductParams{Name: s, PriceUSD: "1"}).Validate(), "name")
 	}
-	check(t, "lastName 1 char", (&CreateCustomerParams{Name: "Ada", LastName: "L", Email: "a@b.co"}).Validate())
-	check(t, "lastName newline", (&CreateCustomerParams{Name: "Ada", LastName: "L\n", Email: "a@b.co"}).Validate(), "lastName")
+	check(t, "lastName 1 char", (&CreateCustomerParams{FirstName: "Ada", LastName: "L", Email: "a@b.co"}).Validate())
+	check(t, "lastName newline", (&CreateCustomerParams{FirstName: "Ada", LastName: "L\n", Email: "a@b.co"}).Validate(), "lastName")
+	check(t, "firstName 1 char", (&CreateCustomerParams{FirstName: "A", Email: "a@b.co"}).Validate(), "firstName")
+	check(t, "firstName required", (&CreateCustomerParams{Email: "a@b.co"}).Validate(), "firstName")
+	check(t, "update firstName", (&UpdateCustomerParams{FirstName: "A"}).Validate(), "firstName")
+	check(t, "update lastName", (&UpdateCustomerParams{LastName: ptr("L")}).Validate())
+	check(t, "update lastName bad", (&UpdateCustomerParams{LastName: ptr("bidi\u202ex")}).Validate(), "lastName")
+	check(t, "session productName", (&CreatePaymentSessionParams{ProductName: "a", PriceUSD: "1"}).Validate(), "productName")
 }
 
 func TestRuleText(t *testing.T) {
 	good := []string{"Two\nlines\r\nand\ttab", "Lifetime access (Pro) & more: 100%", "ok"}
 	bad := []string{"   ", "\n\n", "<script>", "x\x07bell", strings.Repeat("x", 501), "a"}
 	for _, s := range good {
-		check(t, "description", (&CreateProductParams{Name: "Pro", Price: 1, Description: s}).Validate())
+		check(t, "description", (&CreateProductParams{Name: "Pro", PriceUSD: "1", Description: s}).Validate())
 	}
 	for _, s := range bad {
-		check(t, "description", (&CreateProductParams{Name: "Pro", Price: 1, Description: s}).Validate(), "description")
+		check(t, "description", (&CreateProductParams{Name: "Pro", PriceUSD: "1", Description: s}).Validate(), "description")
 	}
 	// ≤500 without a minimum, and the endpoint description ≤200.
-	check(t, "address 1 char", (&CreateCustomerParams{Name: "Ada", Email: "a@b.co", Address: "x"}).Validate())
-	check(t, "address 501", (&CreateCustomerParams{Name: "Ada", Email: "a@b.co", Address: strings.Repeat("x", 501)}).Validate(), "address")
+	check(t, "address 1 char", (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Address: "x"}).Validate())
+	check(t, "address 501", (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Address: strings.Repeat("x", 501)}).Validate(), "address")
 	check(t, "endpoint description 201", (&CreateWebhookEndpointParams{URL: "https://x.io", Description: strings.Repeat("x", 201)}).Validate(), "description")
-	check(t, "refund reason", (&InitiateRefundParams{TxUUID: "pay@" + memberUUID, Reason: "Broken, can you refund?", MerchantMessage: "Sorry\nTeam"}).Validate())
-	check(t, "refund reason bad", (&InitiateRefundParams{TxUUID: "pay@" + memberUUID, Reason: "{x}", MerchantMessage: strings.Repeat("m", 501)}).Validate(), "reason", "merchantMessage")
+	check(t, "refund reason", (&CreateRefundParams{TxUUID: "pay@" + memberUUID, Reason: "Broken, can you refund?", MerchantMessage: "Sorry\nTeam"}).Validate())
+	check(t, "refund reason bad", (&CreateRefundParams{TxUUID: "pay@" + memberUUID, Reason: "{x}", MerchantMessage: strings.Repeat("m", 501)}).Validate(), "reason", "merchantMessage")
 }
 
 func TestRuleReference(t *testing.T) {
 	for _, s := range []string{"order-1042", "INV_2026.10:01@shop", "a", strings.Repeat("r", 100)} {
-		check(t, "reference "+s, (&CreateCustomerParams{Name: "Ada", Email: "a@b.co", Reference: s}).Validate())
+		check(t, "reference "+s, (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Reference: s}).Validate())
 	}
 	for _, s := range []string{"has space", "slash/x", "é", "#1", strings.Repeat("r", 101)} {
-		check(t, "reference "+s, (&CreateCustomerParams{Name: "Ada", Email: "a@b.co", Reference: s}).Validate(), "reference")
+		check(t, "reference "+s, (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Reference: s}).Validate(), "reference")
 	}
 	check(t, "session refs", (&CreatePaymentSessionParams{ProductReference: "bad ref", Reference: "o/1", CustomerReference: "c 1"}).Validate(), "reference", "productReference", "customerReference")
+	// Every ?reference= filter is checked like a created reference (they are lookups now).
 	check(t, "subscription filter", (&SubscriptionListParams{Reference: "bad ref"}).Validate(), "reference")
+	check(t, "product filter", (&ProductListParams{Reference: "bad ref"}).Validate(), "reference")
+	check(t, "customer filter", (&CustomerListParams{Reference: strings.Repeat("r", 101)}).Validate(), "reference")
+	check(t, "payment filter", (&PaymentListParams{Reference: "o/1"}).Validate(), "reference")
+	check(t, "dots are references", (&PaymentListParams{Reference: ".."}).Validate())
 }
 
 func TestRulePhone(t *testing.T) {
 	for _, s := range []string{"+33 6 12 34 56 78", "555 (123) 4567", "06.12.34.56.78", "123456"} {
-		check(t, "phone "+s, (&CreateCustomerParams{Name: "Ada", Email: "a@b.co", PhoneNumber: s}).Validate())
+		check(t, "phone "+s, (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", PhoneNumber: s}).Validate())
 	}
 	for _, s := range []string{"12345", "+", "phone", "+33 6 12 34 56 7x", "-123456", "123456-", "+" + strings.Repeat("1", 32)} {
-		check(t, "phone "+s, (&CreateCustomerParams{Name: "Ada", Email: "a@b.co", PhoneNumber: s}).Validate(), "phoneNumber")
+		check(t, "phone "+s, (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", PhoneNumber: s}).Validate(), "phoneNumber")
 	}
 }
 
 func TestRuleEmail(t *testing.T) {
 	for _, s := range []string{"a@b.co", "First.Last+tag@Example.COM", "x@sub.domain.io"} {
-		check(t, "email "+s, (&CreateCustomerParams{Name: "Ada", Email: s}).Validate())
+		check(t, "email "+s, (&CreateCustomerParams{FirstName: "Ada", Email: s}).Validate())
 	}
 	for _, s := range []string{"no-at", "a@b", "@b.co", "a@.b.co", "a@b.co.", "a b@c.io", "a@@b.co", "a@b@c.io", strings.Repeat("a", 250) + "@b.co"} {
-		check(t, "email "+s, (&CreateCustomerParams{Name: "Ada", Email: s}).Validate(), "email")
+		check(t, "email "+s, (&CreateCustomerParams{FirstName: "Ada", Email: s}).Validate(), "email")
 	}
-	check(t, "email required", (&CreateCustomerParams{Name: "Ada"}).Validate(), "email")
+	check(t, "email required", (&CreateCustomerParams{FirstName: "Ada"}).Validate(), "email")
 	check(t, "invitation email", (&CreateInvitationParams{Email: "nope"}).Validate(), "email")
 	check(t, "filter email", (&CustomerListParams{Email: "nope"}).Validate(), "email")
 }
@@ -115,19 +126,47 @@ func TestRuleURL(t *testing.T) {
 	check(t, "endpoint url update", (&UpdateWebhookEndpointParams{URL: "x"}).Validate(), "url")
 }
 
-func TestRulePrice(t *testing.T) {
-	for _, p := range []float64{0.01, 5, 1e6} {
-		check(t, "price", (&CreateProductParams{Name: "Pro", Price: p}).Validate())
+// TestRuleUSD checks the usd rule on every money input: a decimal string, digits with at most 2
+// decimals, above 0 and at most 1,000,000, compared exactly (no float).
+func TestRuleUSD(t *testing.T) {
+	good := []string{"0.01", "0.1", "1", "4.99", "5", "12.50", "19.9", "1000000", "1000000.00", "0000012.5", "999999.99"}
+	bad := []string{"", "0", "0.00", "-1", "+1", "1e2", "abc", ".5", "1.", " 1", "1 ", "1.999", "0.001", "0.000001", "1000000.01",
+		"1000001", "1000000000", "1,5", "1_000", "NaN", "Infinity", "٣"}
+	for _, a := range good {
+		check(t, "priceUsd "+a, (&CreateProductParams{Name: "Pro", PriceUSD: a}).Validate())
+		check(t, "update priceUsd "+a, (&UpdateProductParams{PriceUSD: a}).Validate())
+		check(t, "inline priceUsd "+a, (&CreatePaymentSessionParams{ProductName: "Pro", PriceUSD: a}).Validate())
 	}
-	for _, p := range []float64{0, -1, math.NaN(), math.Inf(1)} {
-		check(t, "price", (&CreateProductParams{Name: "Pro", Price: p}).Validate(), "price")
+	for _, a := range bad {
+		check(t, "priceUsd "+a, (&CreateProductParams{Name: "Pro", PriceUSD: a}).Validate(), "priceUsd")
+		if a != "" {
+			check(t, "update priceUsd "+a, (&UpdateProductParams{PriceUSD: a}).Validate(), "priceUsd")
+			check(t, "inline priceUsd "+a, (&CreatePaymentSessionParams{ProductName: "Pro", PriceUSD: a}).Validate(), "priceUsd")
+			check(t, "subscription inline priceUsd "+a, (&CreateSubscriptionSessionParams{ProductName: "Pro", PriceUSD: a}).Validate(), "priceUsd")
+		}
 	}
-	check(t, "update price", (&UpdateProductParams{Price: ptr(0.0)}).Validate(), "price")
 	check(t, "update no price", (&UpdateProductParams{}).Validate())
+	err := (&CreateProductParams{Name: "Pro", PriceUSD: "1.999"}).Validate()
+	if want := `priceUsd must be an amount in USD as a decimal string (e.g. "12.50"): above 0, at most 1000000, with at most 2 decimals`; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("message: %v", err)
+	}
+	// The exact comparison: no float rounding at the bounds.
+	for _, tc := range []struct {
+		value string
+		limit int
+		want  int
+	}{
+		{"1000000", 1_000_000, 0}, {"999999.99", 1_000_000, -1}, {"1000000.01", 1_000_000, 1}, {"0.5", 1_000_000, -1},
+		{"50", 50, 0}, {"50.00", 50, 0}, {"50.01", 50, 1}, {"0050", 50, 0}, {"49.99", 50, -1}, {"100.1", 100, 1}, {"99", 100, -1}, {"101", 100, 1},
+	} {
+		if got := compareDecimal(tc.value, tc.limit); got != tc.want {
+			t.Errorf("compareDecimal(%q, %d) = %d, want %d", tc.value, tc.limit, got, tc.want)
+		}
+	}
 }
 
 func TestRuleFees(t *testing.T) {
-	line := FeeItem{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75}
+	line := FeeItem{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: "0.75"}
 	session := func(fees *CheckoutFees) *CreatePaymentSessionParams {
 		return &CreatePaymentSessionParams{ProductUUID: memberUUID, Fees: fees}
 	}
@@ -144,7 +183,7 @@ func TestRuleFees(t *testing.T) {
 	check(t, "processing fee off", session(&CheckoutFees{ProcessingFee: ptr(false), Items: lines(1)}).Validate())
 	check(t, "10 lines", session(&CheckoutFees{Items: lines(10)}).Validate())
 	check(t, "11 lines", session(&CheckoutFees{Items: lines(11)}).Validate(), "fees.items")
-	check(t, "11 lines, the last bad", session(&CheckoutFees{Items: append(lines(10), FeeItem{Label: "a|b", AmountUSD: 1})}).Validate(),
+	check(t, "11 lines, the last bad", session(&CheckoutFees{Items: append(lines(10), FeeItem{Label: "a|b", AmountUSD: "1"})}).Validate(),
 		"fees.items", "fees.items[10].label")
 
 	// label: required, the name rule, 1 to 40 code points.
@@ -163,20 +202,19 @@ func TestRuleFees(t *testing.T) {
 		check(t, "description "+d, withItem(func(i *FeeItem) { i.Description = d }).Validate(), "fees.items[0].description")
 	}
 
-	// amountUsd: finite, above 0, at most 1,000,000, at most 2 decimals.
-	tenth, fifth := 0.1, 0.2
-	for _, a := range []float64{0.01, 0.75, 4.99, 19.9, 20, 1e2, 1_000_000} {
+	// amountUsd: required, the usd rule (a decimal string, above 0, at most 1,000,000, 2 decimals).
+	for _, a := range []string{"0.01", "0.75", "4.99", "19.9", "20", "100", "1000000", "12.50"} {
 		check(t, fmt.Sprint("amountUsd ", a), withItem(func(i *FeeItem) { i.AmountUSD = a }).Validate())
 	}
-	for _, a := range []float64{0, -1, -0.01, 0.001, 1.999, 1_000_000.01, 1_000_001, tenth + fifth, math.NaN(), math.Inf(1), math.Inf(-1)} {
+	for _, a := range []string{"", "0", "-1", "-0.01", "0.001", "1.999", "1000000.01", "1000001", "1e2", "+1", "abc", ".5", "0.30000000000000004"} {
 		check(t, fmt.Sprint("amountUsd ", a), withItem(func(i *FeeItem) { i.AmountUSD = a }).Validate(), "fees.items[0].amountUsd")
 	}
 
 	// Every failing line is reported, by its index.
-	bad := session(&CheckoutFees{Items: []FeeItem{line, {Label: "", AmountUSD: 1}, {Label: "Tax", Description: " ", AmountUSD: 0}}})
+	bad := session(&CheckoutFees{Items: []FeeItem{line, {Label: "", AmountUSD: "1"}, {Label: "Tax", Description: " ", AmountUSD: "0"}}})
 	check(t, "several lines", bad.Validate(), "fees.items[1].label", "fees.items[2].description", "fees.items[2].amountUsd")
-	err := withItem(func(i *FeeItem) { i.AmountUSD = 1.999 }).Validate()
-	if want := "fees.items[0].amountUsd must be an amount in USD above 0 and at most 1000000, with at most 2 decimals"; err == nil || !strings.Contains(err.Error(), want) {
+	err := withItem(func(i *FeeItem) { i.AmountUSD = "1.999" }).Validate()
+	if want := `fees.items[0].amountUsd must be an amount in USD as a decimal string (e.g. "12.50"): above 0, at most 1000000, with at most 2 decimals`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("message: %v", err)
 	}
 	// The fees and the session's own fields are reported together.
@@ -190,26 +228,125 @@ func TestRuleFees(t *testing.T) {
 	check(t, "subscription processing fee only", sub(&CheckoutFees{ProcessingFee: ptr(true)}).Validate())
 	check(t, "subscription 10 lines", sub(&CheckoutFees{ProcessingFee: ptr(false), Items: lines(10)}).Validate())
 	check(t, "subscription 11 lines", sub(&CheckoutFees{Items: lines(11)}).Validate(), "fees.items")
-	check(t, "subscription bad line", sub(&CheckoutFees{Items: []FeeItem{{Label: "a|b", Description: " ", AmountUSD: 0.001}}}).Validate(),
+	check(t, "subscription bad line", sub(&CheckoutFees{Items: []FeeItem{{Label: "a|b", Description: " ", AmountUSD: "0.001"}}}).Validate(),
 		"fees.items[0].label", "fees.items[0].description", "fees.items[0].amountUsd")
 	check(t, "subscription fees and terms", (&CreateSubscriptionSessionParams{ProductUUID: memberUUID, Frequency: &Duration{Value: 1},
-		Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: -1}}}}).Validate(), "frequency.unit", "fees.items[0].amountUsd")
+		Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: "-1"}}}}).Validate(), "frequency.unit", "fees.items[0].amountUsd")
+	// The fees are reported last, after the session's own fields (metadata included).
+	check(t, "fees after metadata", (&CreatePaymentSessionParams{ProductUUID: memberUUID, Metadata: map[string]string{"k": "\x00"},
+		Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: "0"}}}}).Validate(), "metadata.k", "fees.items[0].amountUsd")
 }
 
+// TestRulePercent checks the percent rule: a decimal string, digits with at most 2 decimals, at
+// most 16 characters, from 0 (above 0 for a refund) to its maximum, compared exactly.
 func TestRulePercent(t *testing.T) {
-	for _, p := range []float64{0.01, 1.5, 33.33, 100} {
-		check(t, "refund", (&InitiateRefundParams{TxUUID: memberUUID, RefundPercent: &p}).Validate())
+	for _, p := range []string{"0.01", "1.5", "33.33", "50", "100", "100.00", "007.5"} {
+		check(t, "refund "+p, (&CreateRefundParams{TxUUID: memberUUID, RefundPercent: p}).Validate())
 	}
-	tenth := 0.1
-	for _, p := range []float64{0, -1, 100.01, 1.155, tenth + 0.2, math.NaN(), math.Inf(1)} { // 0.1+0.2 at run time is 0.30000000000000004
-		check(t, "refund", (&InitiateRefundParams{TxUUID: memberUUID, RefundPercent: &p}).Validate(), "refundPercent")
+	for _, p := range []string{"0", "0.00", "-1", "100.01", "101", "1.155", "0.30000000000000004", "1e1", ".5", "5.", "50%", " 5",
+		"00000000000000050", "NaN", "Infinity"} { // the 16-character limit: 17 here
+		check(t, "refund "+p, (&CreateRefundParams{TxUUID: memberUUID, RefundPercent: p}).Validate(), "refundPercent")
 	}
-	for _, p := range []float64{0, 0.05, 1.5, 50} {
-		check(t, "member fee", (&UpdateMemberParams{OrganizationFeePercent: p}).Validate())
-		check(t, "invitation fee", (&CreateInvitationParams{Email: "a@b.co", OrganizationFeePercent: &p}).Validate())
+	check(t, "refund default (100)", (&CreateRefundParams{TxUUID: memberUUID}).Validate())
+	for _, p := range []string{"0", "0.05", "1.5", "50", "50.00", "000000000000050"} { // 15 characters
+		check(t, "member fee "+p, (&UpdateMemberParams{OrganizationFeePercent: p}).Validate())
+		check(t, "invitation fee "+p, (&CreateInvitationParams{Email: "a@b.co", OrganizationFeePercent: p}).Validate())
 	}
-	for _, p := range []float64{-0.01, 50.01, 1.234} {
-		check(t, "member fee", (&UpdateMemberParams{OrganizationFeePercent: p}).Validate(), "organizationFeePercent")
+	for _, p := range []string{"-0.01", "50.01", "51", "1.234", "1e1", "0000000000000050"} { // 16 is the limit: 16 digits is fine, 17 not
+		want := []string{"organizationFeePercent"}
+		if p == "0000000000000050" {
+			want = nil
+		}
+		check(t, "member fee "+p, (&UpdateMemberParams{OrganizationFeePercent: p}).Validate(), want...)
+		check(t, "invitation fee "+p, (&CreateInvitationParams{Email: "a@b.co", OrganizationFeePercent: p}).Validate(), want...)
+	}
+	check(t, "member fee 17 characters", (&UpdateMemberParams{OrganizationFeePercent: "00000000000000050"}).Validate(), "organizationFeePercent")
+	check(t, "member fee required", (&UpdateMemberParams{}).Validate(), "organizationFeePercent")
+	check(t, "invitation fee default", (&CreateInvitationParams{Email: "a@b.co"}).Validate())
+}
+
+// TestRuleMetadata checks the metadata rule on every carrier: at most 50 keys; keys 1 to 40 of
+// A-Z a-z 0-9 _ - . : (errors on metadata, the key not echoed); values at most 500 code points
+// without control (tab included) or bidirectional characters (errors on metadata.<key>).
+func TestRuleMetadata(t *testing.T) {
+	keys := func(n int) map[string]string {
+		m := map[string]string{}
+		for i := range n {
+			m[fmt.Sprintf("k%d", i)] = "v"
+		}
+		return m
+	}
+	carriers := map[string]func(map[string]string) error{
+		"product": func(m map[string]string) error {
+			return (&CreateProductParams{Name: "Pro", PriceUSD: "1", Metadata: m}).Validate()
+		},
+		"product upd": func(m map[string]string) error { return (&UpdateProductParams{Metadata: m}).Validate() },
+		"customer": func(m map[string]string) error {
+			return (&CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Metadata: m}).Validate()
+		},
+		"customer upd": func(m map[string]string) error { return (&UpdateCustomerParams{Metadata: m}).Validate() },
+		"payment": func(m map[string]string) error {
+			return (&CreatePaymentSessionParams{ProductUUID: memberUUID, Metadata: m}).Validate()
+		},
+		"subscription": func(m map[string]string) error {
+			return (&CreateSubscriptionSessionParams{ProductUUID: memberUUID, Metadata: m}).Validate()
+		},
+		"subscription upd": func(m map[string]string) error { return (&UpdateSubscriptionParams{Metadata: m}).Validate() },
+	}
+	for name, validate := range carriers {
+		check(t, name+" nil", validate(nil))
+		check(t, name+" 50 keys", validate(keys(50)))
+		check(t, name+" 51 keys", validate(keys(51)), "metadata")
+		check(t, name+" good", validate(map[string]string{"orderId": "order-1042", "crm:customer": "C-5521", "a.b_c-d": "é ☃ 😀", "x": ""}))
+		check(t, name+" key 40", validate(map[string]string{strings.Repeat("k", 40): "v"}))
+		check(t, name+" key 41", validate(map[string]string{strings.Repeat("k", 41): "v"}), "metadata")
+		check(t, name+" empty key", validate(map[string]string{"": "v"}), "metadata")
+		check(t, name+" key with space", validate(map[string]string{"order id": "v"}), "metadata")
+		check(t, name+" key with slash", validate(map[string]string{"a/b": "v"}), "metadata")
+		check(t, name+" key non-ASCII", validate(map[string]string{"clé": "v"}), "metadata")
+		check(t, name+" value 500", validate(map[string]string{"k": strings.Repeat("😀", 500)}))
+		check(t, name+" value 501", validate(map[string]string{"k": strings.Repeat("é", 501)}), "metadata.k")
+		check(t, name+" value NUL", validate(map[string]string{"k": "a\x00b"}), "metadata.k")
+		check(t, name+" value tab", validate(map[string]string{"k": "a\tb"}), "metadata.k")
+		check(t, name+" value newline", validate(map[string]string{"k": "a\nb"}), "metadata.k")
+		check(t, name+" value bidi", validate(map[string]string{"k": "a\u202eb"}), "metadata.k")
+		check(t, name+" value bidi isolate", validate(map[string]string{"k": "a\u2066b"}), "metadata.k")
+		// Several bad keys are one error on metadata (the keys not echoed); bad values each.
+		err := validate(map[string]string{"bad key": "v", "worse/key": "v", "a": "\x01", "b": "\x02"})
+		check(t, name+" several", err, "metadata.a", "metadata.b", "metadata")
+		if err != nil && (strings.Contains(err.Error(), "bad key") || strings.Contains(err.Error(), "worse")) {
+			t.Errorf("%s: a bad key is echoed: %v", name, err)
+		}
+	}
+	// On an update a "" value is sent: it deletes the key.
+	b, _ := json.Marshal(UpdateCustomerParams{Metadata: map[string]string{"crm": "", "plan": "pro"}})
+	if string(b) != `{"metadata":{"crm":"","plan":"pro"}}` {
+		t.Errorf("update metadata %s", b)
+	}
+}
+
+// TestRuleCursor checks the cursor of every paginated list: at most 200 characters, opaque.
+func TestRuleCursor(t *testing.T) {
+	ok, long := strings.Repeat("c", 200), strings.Repeat("c", 201)
+	lists := map[string]func(string) error{
+		"products":      func(c string) error { return (&ProductListParams{Cursor: c}).Validate() },
+		"customers":     func(c string) error { return (&CustomerListParams{Cursor: c}).Validate() },
+		"payments":      func(c string) error { return (&PaymentListParams{Cursor: c}).Validate() },
+		"transactions":  func(c string) error { return (&TransactionListParams{Cursor: c}).Validate() },
+		"failures":      func(c string) error { return (&FailureListParams{Cursor: c}).Validate() },
+		"subscriptions": func(c string) error { return (&SubscriptionListParams{Cursor: c}).Validate() },
+		"bills":         func(c string) error { return (&BillListParams{Cursor: c}).Validate() },
+		"refunds":       func(c string) error { return (&RefundListParams{Cursor: c}).Validate() },
+		"members":       func(c string) error { return (&MemberListParams{Cursor: c}).Validate() },
+		"invitations":   func(c string) error { return (&InvitationListParams{Cursor: c}).Validate() },
+		"endpoints":     func(c string) error { return (&EndpointListParams{Cursor: c}).Validate() },
+		"events":        func(c string) error { return (&EventListParams{Cursor: c}).Validate() },
+	}
+	for name, validate := range lists {
+		check(t, name+" opaque", validate("djF8MDE5Y2FkZmQtODkwMA=="))
+		check(t, name+" 200", validate(ok))
+		check(t, name+" 200 code points", validate(strings.Repeat("é", 200)))
+		check(t, name+" 201", validate(long), "cursor")
 	}
 }
 
@@ -243,7 +380,7 @@ func TestRuleDuration(t *testing.T) {
 	}
 	for _, tc := range cases {
 		terms := tc.terms
-		check(t, tc.name, (&CreateProductParams{Name: "Pro", Price: 1, Subscription: &terms}).Validate(), tc.want...)
+		check(t, tc.name, (&CreateProductParams{Name: "Pro", PriceUSD: "1", Subscription: &terms}).Validate(), tc.want...)
 	}
 
 	// On a session the terms are top-level and optional.
@@ -262,15 +399,17 @@ func TestRuleSession(t *testing.T) {
 	}{
 		{"by uuid", CreatePaymentSessionParams{ProductUUID: memberUUID}, nil},
 		{"by reference", CreatePaymentSessionParams{ProductReference: "pro-plan"}, nil},
-		{"inline", CreatePaymentSessionParams{ProductName: "Pro", Price: 10}, nil},
-		{"inline + description", CreatePaymentSessionParams{ProductName: "Pro", Price: 10, Description: "Lifetime"}, nil},
+		{"inline", CreatePaymentSessionParams{ProductName: "Pro", PriceUSD: "10"}, nil},
+		{"inline + description", CreatePaymentSessionParams{ProductName: "Pro", PriceUSD: "10", Description: "Lifetime"}, nil},
 		{"nothing", CreatePaymentSessionParams{}, []string{"productUuid"}},
 		{"uuid + reference", CreatePaymentSessionParams{ProductUUID: memberUUID, ProductReference: "x"}, []string{"productUuid"}},
-		{"uuid + inline", CreatePaymentSessionParams{ProductUUID: memberUUID, ProductName: "Pro", Price: 1}, []string{"productUuid"}},
+		{"uuid + inline", CreatePaymentSessionParams{ProductUUID: memberUUID, ProductName: "Pro", PriceUSD: "1"}, []string{"productUuid"}},
+		{"reference + price", CreatePaymentSessionParams{ProductReference: "pro", PriceUSD: "1"}, []string{"productUuid"}},
 		{"uuid + description", CreatePaymentSessionParams{ProductUUID: memberUUID, Description: "x y"}, []string{"productUuid"}},
-		{"inline without price", CreatePaymentSessionParams{ProductName: "Pro"}, []string{"price"}},
-		{"inline without name", CreatePaymentSessionParams{Price: 3}, []string{"productName"}},
-		{"inline negative price", CreatePaymentSessionParams{ProductName: "Pro", Price: -3}, []string{"price"}},
+		{"inline without price", CreatePaymentSessionParams{ProductName: "Pro"}, []string{"priceUsd"}},
+		{"inline without name", CreatePaymentSessionParams{PriceUSD: "3"}, []string{"productName"}},
+		{"inline without name, bad price", CreatePaymentSessionParams{PriceUSD: "-3"}, []string{"productName", "priceUsd"}},
+		{"inline negative price", CreatePaymentSessionParams{ProductName: "Pro", PriceUSD: "-3"}, []string{"priceUsd"}},
 		{"bad uuid", CreatePaymentSessionParams{ProductUUID: "42"}, []string{"productUuid"}},
 		{"bad customer uuid", CreatePaymentSessionParams{ProductUUID: memberUUID, CustomerUUID: "x"}, []string{"customerUuid"}},
 		{"expires 10", CreatePaymentSessionParams{ProductUUID: memberUUID, ExpiresInMinutes: 10}, nil},
@@ -281,13 +420,13 @@ func TestRuleSession(t *testing.T) {
 	for _, tc := range cases {
 		check(t, tc.name, tc.p.Validate(), tc.want...)
 	}
-	check(t, "subscription inline", (&CreateSubscriptionSessionParams{ProductName: "Pro", Price: 9.99, Frequency: &Duration{1, DurationUnitMonths}}).Validate())
-	check(t, "subscription mixing", (&CreateSubscriptionSessionParams{ProductReference: "pro", Price: 9.99}).Validate(), "productUuid")
+	check(t, "subscription inline", (&CreateSubscriptionSessionParams{ProductName: "Pro", PriceUSD: "9.99", Frequency: &Duration{1, DurationUnitMonths}}).Validate())
+	check(t, "subscription mixing", (&CreateSubscriptionSessionParams{ProductReference: "pro", PriceUSD: "9.99"}).Validate(), "productUuid")
 	check(t, "nil params", (*CreatePaymentSessionParams)(nil).Validate())
 }
 
 func TestRuleIDs(t *testing.T) {
-	for _, id := range []string{memberUUID, "019ECA82-5680-7B00-8000-0000000000B1", "pay@" + memberUUID, "sub@" + memberUUID, "payg@" + memberUUID, "sub-hist@" + memberUUID, "refund@" + memberUUID, "transfer@" + memberUUID} {
+	for _, id := range []string{memberUUID, "019ECA82-5680-7B00-8000-0000000000B1", "pay@" + memberUUID, "sub@" + memberUUID, "payg@" + memberUUID, "sub-hist@" + memberUUID, "refund@" + memberUUID, "transfer@" + memberUUID, "release@" + memberUUID} {
 		if !isTxID(id) {
 			t.Errorf("isTxID(%q) = false", id)
 		}
@@ -297,8 +436,8 @@ func TestRuleIDs(t *testing.T) {
 			t.Errorf("isTxID(%q) = true", id)
 		}
 	}
-	check(t, "txUuid required", (&InitiateRefundParams{}).Validate(), "txUuid")
-	check(t, "txUuid bad", (&InitiateRefundParams{TxUUID: "order-1"}).Validate(), "txUuid")
+	check(t, "txUuid required", (&CreateRefundParams{}).Validate(), "txUuid")
+	check(t, "txUuid bad", (&CreateRefundParams{TxUUID: "order-1"}).Validate(), "txUuid")
 	check(t, "subscriptionUuid filter", (&FailureListParams{SubscriptionUUID: "sub@nope"}).Validate(), "subscriptionUuid")
 
 	if checkPathUUID("uuid", memberUUID) != nil || checkPathUUID("uuid", "") == nil || checkPathUUID("uuid", "pay@"+memberUUID) == nil {
@@ -307,7 +446,14 @@ func TestRuleIDs(t *testing.T) {
 	if checkPathTxID("uuid", "sub@"+memberUUID) != nil || checkPathTxID("uuid", "") == nil || checkPathTxID("uuid", "x") == nil {
 		t.Error("checkPathTxID")
 	}
-	if checkPathRequired("reference", "a/b") != nil || checkPathRequired("reference", " ") == nil {
+	check(t, "refunds txUuid filter", (&RefundListParams{TxUUID: "pay-1"}).Validate(), "txUuid")
+	check(t, "refunds txUuid filter ok", (&RefundListParams{TxUUID: "sub-hist@" + memberUUID}).Validate())
+	check(t, "transactions subscriptionUuid", (&TransactionListParams{SubscriptionUUID: "sub@x"}).Validate(), "subscriptionUuid")
+	// Path UUIDs accept the nil UUID (the API answers 404); only On-Behalf-Of refuses it.
+	if checkPathUUID("uuid", "00000000-0000-0000-0000-000000000000") != nil {
+		t.Error("checkPathUUID refuses the nil UUID")
+	}
+	if checkPathRequired("id", "evt_a/b") != nil || checkPathRequired("id", " ") == nil || checkPathRequired("id", "..") == nil {
 		t.Error("checkPathRequired")
 	}
 }
@@ -316,17 +462,27 @@ func TestRuleFilters(t *testing.T) {
 	check(t, "exclusive", (&PaymentListParams{IncludeMembers: true, UserUUID: memberUUID}).Validate(), "userUuid")
 	check(t, "user only", (&PaymentListParams{UserUUID: memberUUID}).Validate())
 	check(t, "bad uuids", (&SubscriptionListParams{CustomerUUID: "x", ProductUUID: "y", UserUUID: "z"}).Validate(), "customerUuid", "productUuid", "userUuid")
-	check(t, "status", (&SubscriptionListParams{Status: "hibernating"}).Validate(), "status")
-	check(t, "status ok", (&SubscriptionListParams{Status: SubscriptionStatusCancelled}).Validate())
-	check(t, "source", (&CombinedPaymentListParams{Source: "subscription_history"}).Validate(), "source")
+	// Subscription status and events type are not checked client-side: a newer value is sent.
+	check(t, "subscription status newer", (&SubscriptionListParams{Status: "hibernating"}).Validate())
+	check(t, "subscription status ok", (&SubscriptionListParams{Status: SubscriptionStatusCancelled}).Validate())
+	check(t, "event type newer", (&EventListParams{Type: "payment.done"}).Validate())
+	check(t, "event type ok", (&EventListParams{Type: EventTypeWebhookTest}).Validate())
+	// The enum filters the API enforces are checked against the known values.
+	check(t, "transactions type", (&TransactionListParams{Type: "subscriptionHistory"}).Validate(), "type")
+	check(t, "transactions type refund", (&TransactionListParams{Type: "refund"}).Validate(), "type")
+	check(t, "transactions type ok", (&TransactionListParams{Type: TransactionKindBill}).Validate())
+	check(t, "transactions exclusive", (&TransactionListParams{IncludeMembers: true, UserUUID: memberUUID}).Validate(), "userUuid")
 	check(t, "kind/category", (&FailureListParams{Kind: "refund", Category: "boom"}).Validate(), "kind", "category")
 	check(t, "invitation status", (&InvitationListParams{Status: "open"}).Validate(), "status")
-	check(t, "event type", (&EventListParams{Type: "payment.done"}).Validate(), "type")
-	check(t, "event type ok", (&EventListParams{Type: EventTypeWebhookTest}).Validate())
+	all := []RefundStatus{RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusCancelled, RefundStatusFailed}
+	check(t, "refund statuses ok", (&RefundListParams{Status: all}).Validate())
+	check(t, "refund 6 statuses", (&RefundListParams{Status: append(all, RefundStatusPending)}).Validate(), "status")
+	check(t, "refund unknown status", (&RefundListParams{Status: []RefundStatus{RefundStatusApproved, "completed", ""}}).Validate(), "status[1]", "status[2]")
 	check(t, "refund exclusive", (&RefundListParams{IncludeMembers: ptr(true), UserUUID: memberUUID}).Validate(), "userUuid")
 	check(t, "refund includeMembers false + user", (&RefundListParams{IncludeMembers: ptr(false), UserUUID: memberUUID}).Validate())
-	check(t, "supported currencies", (&SupportedCurrenciesParams{UserUUID: "x"}).Validate(), "userUuid")
-	for _, p := range []interface{ Validate() error }{(*PaymentListParams)(nil), (*CustomerListParams)(nil), (*EventListParams)(nil), (*RefundListParams)(nil)} {
+	check(t, "accepted currencies", (&AcceptedCurrenciesParams{UserUUID: "x"}).Validate(), "userUuid")
+	for _, p := range []interface{ Validate() error }{(*PaymentListParams)(nil), (*CustomerListParams)(nil), (*EventListParams)(nil), (*RefundListParams)(nil),
+		(*ProductListParams)(nil), (*TransactionListParams)(nil), (*EndpointListParams)(nil), (*BillListParams)(nil), (*MemberListParams)(nil), (*AcceptedCurrenciesParams)(nil)} {
 		if p.Validate() != nil {
 			t.Errorf("nil %T must be valid", p)
 		}
@@ -355,11 +511,12 @@ func TestRuleEndpointEvents(t *testing.T) {
 		twenty[i] = EventTypePaymentCompleted
 	}
 	check(t, "20 events", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: twenty}).Validate())
-	check(t, "21 events", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: append(twenty, EventTypeRefundDenied)}).Validate(), "events")
-	check(t, "webhook.test", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{EventTypeRefundDenied, EventTypeWebhookTest}}).Validate(), "events[1]")
+	check(t, "21 events", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: append(twenty, EventTypeRefundRejected)}).Validate(), "events")
+	check(t, "webhook.test", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{EventTypeRefundRejected, EventTypeWebhookTest}}).Validate(), "events[1]")
+	check(t, "empty entry", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{EventTypeRefundApproved, ""}}).Validate(), "events[1]")
 	check(t, "update webhook.test", (&UpdateWebhookEndpointParams{Events: []EventType{EventTypeWebhookTest}}).Validate(), "events[0]")
 	check(t, "unknown type passes (the API judges)", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{"future.event"}}).Validate())
-	check(t, "payloadVersion v1", (&UpdateWebhookEndpointParams{PayloadVersion: WebhookPayloadVersionV1}).Validate(), "payloadVersion")
+	check(t, "payloadVersion v1", (&UpdateWebhookEndpointParams{PayloadVersion: "v1"}).Validate(), "payloadVersion")
 	check(t, "payloadVersion v2", (&UpdateWebhookEndpointParams{PayloadVersion: WebhookPayloadVersionV2}).Validate())
 }
 
@@ -394,24 +551,31 @@ func TestUpdateSemantics(t *testing.T) {
 		want   string
 	}{
 		{UpdateCustomerParams{}, `{}`},
-		{UpdateCustomerParams{PhoneNumber: ptr(""), Address: ptr("")}, `{"phoneNumber":"","address":""}`},
-		{UpdateCustomerParams{Name: "Ada", PhoneNumber: ptr("+33 6 12 34 56 78")}, `{"name":"Ada","phoneNumber":"+33 6 12 34 56 78"}`},
+		{UpdateCustomerParams{LastName: ptr(""), PhoneNumber: ptr(""), Address: ptr("")}, `{"lastName":"","phoneNumber":"","address":""}`},
+		{UpdateCustomerParams{FirstName: "Ada", PhoneNumber: ptr("+33 6 12 34 56 78")}, `{"firstName":"Ada","phoneNumber":"+33 6 12 34 56 78"}`},
+		{UpdateCustomerParams{Metadata: map[string]string{"crm": ""}}, `{"metadata":{"crm":""}}`},
 		{UpdateProductParams{}, `{}`},
 		{UpdateProductParams{Description: ptr("")}, `{"description":""}`},
-		{UpdateProductParams{Price: ptr(9.99), IsActive: ptr(false), RemoveSubscription: true}, `{"price":9.99,"isActive":false,"removeSubscription":true}`},
+		{UpdateProductParams{PriceUSD: "9.99", IsActive: ptr(false), RemoveSubscription: true}, `{"priceUsd":"9.99","isActive":false,"removeSubscription":true}`},
+		{UpdateSubscriptionParams{}, `{}`},
+		{UpdateSubscriptionParams{Metadata: map[string]string{"plan": "", "seats": "5"}}, `{"metadata":{"plan":"","seats":"5"}}`},
 		{UpdateWebhookEndpointParams{}, `{}`},
 		{UpdateWebhookEndpointParams{Description: ptr(""), Events: []EventType{}}, `{"events":[],"description":""}`},
 		{UpdateWebhookEndpointParams{Enabled: ptr(false), PayloadVersion: WebhookPayloadVersionV2}, `{"payloadVersion":"v2","enabled":false}`},
-		{UpdateMemberParams{}, `{"organizationFeePercent":0}`},
-		{CreateInvitationParams{Email: "a@b.co"}, `{"email":"a@b.co","role":"user","trustLayer":false}`},
-		{CreateInvitationParams{Email: "a@b.co", TrustLayer: true, OrganizationFeePercent: ptr(2.5), RedirectURL: "https://x.io"}, `{"email":"a@b.co","role":"user","trustLayer":true,"organizationFeePercent":2.5,"redirectUrl":"https://x.io"}`},
-		{CreateProductParams{Name: "Pro", Price: 10}, `{"name":"Pro","price":10}`},
-		{CreateProductParams{Name: "Pro", Price: 10, Subscription: &SubscriptionTermsParams{Frequency: &Duration{1, DurationUnitMonths}, TrialPeriod: &Duration{}, MinPeriods: ptr(uint32(0))}},
-			`{"name":"Pro","price":10,"subscription":{"frequency":{"value":1,"unit":"months"},"trialPeriod":{"value":0},"minPeriods":0}}`},
+		{UpdateMemberParams{OrganizationFeePercent: "0"}, `{"organizationFeePercent":"0"}`},
+		{CreateInvitationParams{Email: "a@b.co"}, `{"email":"a@b.co","role":"user","holdFunds":false}`},
+		{CreateInvitationParams{Email: "a@b.co", HoldFunds: true, OrganizationFeePercent: "2.5", RedirectURL: "https://x.io"}, `{"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5","redirectUrl":"https://x.io"}`},
+		{CreateProductParams{Name: "Pro", PriceUSD: "10"}, `{"name":"Pro","priceUsd":"10"}`},
+		{CreateProductParams{Name: "Pro", PriceUSD: "10.50", Subscription: &SubscriptionTermsParams{Frequency: &Duration{1, DurationUnitMonths}, TrialPeriod: &Duration{}, MinPeriods: ptr(uint32(0))}},
+			`{"name":"Pro","priceUsd":"10.50","subscription":{"frequency":{"value":1,"unit":"months"},"trialPeriod":{"value":0},"minPeriods":0}}`},
 		{CreatePaymentSessionParams{ProductUUID: memberUUID}, `{"productUuid":"` + memberUUID + `"}`},
-		{CreateSubscriptionSessionParams{ProductName: "Pro", Price: 9.99, Frequency: &Duration{1, DurationUnitWeeks}, ExpiresInMinutes: 30},
-			`{"productName":"Pro","price":9.99,"expiresInMinutes":30,"frequency":{"value":1,"unit":"weeks"}}`},
-		{InitiateRefundParams{TxUUID: "pay@x"}, `{"txUuid":"pay@x"}`},
+		{CreatePaymentSessionParams{ProductUUID: memberUUID, Fees: &CheckoutFees{Items: []FeeItem{{Label: "Tax", AmountUSD: "1.30"}}}},
+			`{"productUuid":"` + memberUUID + `","fees":{"items":[{"label":"Tax","amountUsd":"1.30"}]}}`},
+		{CreateSubscriptionSessionParams{ProductName: "Pro", PriceUSD: "9.99", Frequency: &Duration{1, DurationUnitWeeks}, ExpiresInMinutes: 30},
+			`{"productName":"Pro","priceUsd":"9.99","expiresInMinutes":30,"frequency":{"value":1,"unit":"weeks"}}`},
+		{CreateRefundParams{TxUUID: "pay@x"}, `{"txUuid":"pay@x"}`},
+		{CreateRefundParams{TxUUID: "pay@x", RefundPercent: "50"}, `{"txUuid":"pay@x","refundPercent":"50"}`},
+		{CreateCustomerParams{FirstName: "Ada", Email: "a@b.co", Metadata: map[string]string{"k": "v"}}, `{"firstName":"Ada","email":"a@b.co","metadata":{"k":"v"}}`},
 		{CreateWebhookEndpointParams{URL: "https://x.io", IncludeMembers: ptr(false)}, `{"url":"https://x.io","includeMembers":false}`},
 		{verifyWebhookBody{EndpointUUID: "e", Body: "{}", Signature: "t=1,v1=x"}, `{"endpointUuid":"e","body":"{}","signature":"t=1,v1=x"}`},
 	}
@@ -423,7 +587,7 @@ func TestUpdateSemantics(t *testing.T) {
 	}
 
 	// Validation follows the same semantics: a clearing "" passes, nil passes.
-	check(t, "clear phone/address", (&UpdateCustomerParams{PhoneNumber: ptr(""), Address: ptr("")}).Validate())
+	check(t, "clear lastName/phone/address", (&UpdateCustomerParams{LastName: ptr(""), PhoneNumber: ptr(""), Address: ptr("")}).Validate())
 	check(t, "bad phone", (&UpdateCustomerParams{PhoneNumber: ptr("abc")}).Validate(), "phoneNumber")
 	check(t, "blank address", (&UpdateCustomerParams{Address: ptr("   ")}).Validate(), "address")
 	check(t, "clear description", (&UpdateProductParams{Description: ptr("")}).Validate())
@@ -434,9 +598,10 @@ func TestUpdateSemantics(t *testing.T) {
 }
 
 func TestValidationCollectsAllFields(t *testing.T) {
-	err := (&CreateCustomerParams{Name: "x", LastName: "<", Email: "nope", PhoneNumber: "1", Address: " ", Reference: "a b"}).Validate()
-	check(t, "all", err, "name", "lastName", "email", "phoneNumber", "address", "reference")
-	if !strings.HasPrefix(err.Error(), "validation failed; name: name must be 2 to 100 characters") {
+	err := (&CreateCustomerParams{FirstName: "x", LastName: "<", Email: "nope", PhoneNumber: "1", Address: " ", Reference: "a b",
+		Metadata: map[string]string{"k": "\x7f"}}).Validate()
+	check(t, "all", err, "firstName", "lastName", "email", "phoneNumber", "address", "reference", "metadata.k")
+	if !strings.HasPrefix(err.Error(), "validation failed; firstName: firstName must be 2 to 100 characters") {
 		t.Errorf("message %q", err.Error())
 	}
 }

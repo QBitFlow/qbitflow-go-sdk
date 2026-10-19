@@ -55,10 +55,10 @@ type response struct {
 	body   []byte
 }
 
-// pathf formats an API path, escaping every segment: a "/" inside a reference is sent as %2F,
-// never as a path separator, and "." / ".." segments are escaped too.
+// pathf formats an API path, escaping every segment: a "/" inside an id is sent as %2F, never
+// as a path separator, and "." / ".." segments are escaped too.
 //
-//	pathf("/product/reference/%s", ref)
+//	pathf("/products/%s", uuid)
 func pathf(format string, segments ...string) string {
 	args := make([]any, len(segments))
 	for i, segment := range segments {
@@ -73,7 +73,7 @@ func pathf(format string, segments ...string) string {
 
 // call sends e and decodes its JSON answer into a T. The workhorse of the service methods:
 //
-//	page, err := s.client.call[Page[Customer]](ctx, endpoint{method: http.MethodGet, path: "/customer/all", query: params.values()}, opts)
+//	page, err := s.client.call[Page[Customer]](ctx, endpoint{method: http.MethodGet, path: "/customers", query: params.values()}, opts)
 func (c *Client) call[T any](ctx context.Context, e endpoint, opts []RequestOption) (T, error) {
 	v, _, err := c.callStatus[T](ctx, e, opts)
 	return v, err
@@ -89,7 +89,7 @@ func (c *Client) callRef[T any](ctx context.Context, e endpoint, opts []RequestO
 }
 
 // callStatus is call that also returns the HTTP status, for the routes whose 2xx status
-// means something (force-cancel: 202 = still confirming on-chain).
+// means something (a subscription's cancel: 202 = still confirming on-chain).
 func (c *Client) callStatus[T any](ctx context.Context, e endpoint, opts []RequestOption) (T, int, error) {
 	var zero T
 	resp, err := c.send(ctx, e, opts)
@@ -103,10 +103,72 @@ func (c *Client) callStatus[T any](ctx context.Context, e endpoint, opts []Reque
 	return v, resp.status, nil
 }
 
-// callVoid sends e and ignores the answer's body (deletes answer {"message": …}).
+// callVoid sends e and ignores the answer's body (every DELETE answers 204, no body).
 func (c *Client) callVoid(ctx context.Context, e endpoint, opts []RequestOption) error {
 	_, err := c.send(ctx, e, opts)
 	return err
+}
+
+// callItems sends e, a bounded list (one page, hasMore false: currencies, wallets, held funds,
+// the accounting export), and returns its items, never nil. Defensively, a page that claims more
+// is followed with its nextCursor (e's query carrying it) until hasMore is false, so a list the
+// server ever splits is never cut short silently; the walk stops on the same guards as
+// iteratePages (no next cursor, a cursor that did not move, an empty page).
+func (c *Client) callItems[T any](ctx context.Context, e endpoint, opts []RequestOption) ([]T, error) {
+	items := []T{}
+	cursor := ""
+	for {
+		page, err := c.call[Page[T]](ctx, e, opts)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, page.Items...)
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor || len(page.Items) == 0 {
+			return items, nil
+		}
+		cursor = page.NextCursor
+		query := url.Values{}
+		for k, v := range e.query {
+			query[k] = v
+		}
+		query.Set("cursor", cursor)
+		e.query = query
+	}
+}
+
+// getByReference runs a list's ?reference= filter (a page of 0 or 1 item) and returns the item
+// whose reference (read with ref) is exactly the one asked for. No such item is a
+// *NotFoundError, like a 404 (status 404, code not_found), carrying the list answer's request id;
+// checking the reference means a server that ignored the filter can never hand back another
+// resource. what names the resource in the error's message ("product").
+func (c *Client) getByReference[T any](ctx context.Context, path, what, reference string, ref func(*T) string, opts []RequestOption) (*T, error) {
+	var v validator
+	if v.required("reference", reference) {
+		v.reference("reference", reference)
+	}
+	if err := v.err(); err != nil {
+		return nil, err
+	}
+	resp, err := c.send(ctx, endpoint{method: http.MethodGet, path: path, query: url.Values{"reference": {reference}}}, opts)
+	if err != nil {
+		return nil, err
+	}
+	page, err := decodeResponse[Page[T]](resp)
+	if err != nil {
+		return nil, err
+	}
+	for i := range page.Items {
+		if ref(&page.Items[i]) == reference {
+			return &page.Items[i], nil
+		}
+	}
+	return nil, &NotFoundError{&APIError{
+		StatusCode: http.StatusNotFound,
+		Code:       codeNotFound,
+		Message:    "no " + what + " with this reference",
+		Details:    map[string]any{},
+		RequestID:  resp.header.Get("X-Request-Id"),
+	}}
 }
 
 // callText sends e and returns the answer's body as text (the CSV accounting export).
@@ -347,9 +409,8 @@ func decodeResponse[T any](resp *response) (T, error) {
 	if len(bytes.TrimSpace(resp.body)) == 0 {
 		return zero, newServerError("empty response body where JSON was expected", resp, nil)
 	}
-	// A JSON null is an empty list for a list result (a Go server marshals a nil slice as null),
-	// but no answer at all where an object is expected.
-	if bytes.Equal(bytes.TrimSpace(resp.body), []byte("null")) && reflect.TypeFor[T]().Kind() != reflect.Slice {
+	// Every answer is a JSON object (lists are pages): null is no answer at all.
+	if bytes.Equal(bytes.TrimSpace(resp.body), []byte("null")) {
 		return zero, newServerError("null response body where a JSON object was expected", resp, nil)
 	}
 	v, err := decodeJSON[T](resp.body)

@@ -32,7 +32,7 @@ func main() {
 	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
 		ProductName: "T-shirt",
 		Description: "Blue, size M",
-		Price:       4.99,
+		PriceUSD:    "4.99",       // a decimal string, never a float
 		Reference:   "order-1042", // your order id: unique per space
 		SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
 		CancelURL:   "https://shop.example.com/orders/cancel",
@@ -47,7 +47,7 @@ func main() {
 	sessionUUID := session.UUID // pay@…
 
 	// docs:start checkout-status
-	status, err := client.CheckoutSessions.GetStatus(ctx, sessionUUID)
+	status, err := client.CheckoutSessions.Get(ctx, sessionUUID)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -81,13 +81,13 @@ func checkoutWithFees(ctx context.Context, client *qbitflow.Client) {
 	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
 		ProductName: "T-shirt",
 		Description: "Blue, size M",
-		Price:       3.99,
+		PriceUSD:    "3.99",
 		Reference:   "order-1044",
 		SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
 		CancelURL:   "https://shop.example.com/orders/cancel",
 		Fees: &qbitflow.CheckoutFees{
 			Items: []qbitflow.FeeItem{
-				{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: 0.75},
+				{Label: "Shipping", Description: "Standard, 3 to 5 days", AmountUSD: "0.75"},
 			},
 			// QBitFlow's processing fee, grossed up so you keep the price and your lines.
 			// Left nil, your checkout.customerPaysProcessingFee setting decides.
@@ -115,7 +115,7 @@ func waitThenExpire(ctx context.Context, client *qbitflow.Client, sessionUUID st
 		Interval: 5 * time.Second, // default 3 s
 	})
 	if err != nil {
-		log.Fatal(err) // GetStatus's errors, or the context's
+		log.Fatal(err) // Get's errors, or the context's
 	}
 	if status.Status != qbitflow.CheckoutSessionStatusCompleted {
 		fmt.Println("not paid (yet):", status.Status) // expired, or still open at the timeout

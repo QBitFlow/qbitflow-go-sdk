@@ -20,14 +20,14 @@ func main() {
 	defer cancel()
 
 	// docs:start accounting-export
-	// The API exports at most 95 days at a time: the …Range methods split any range into
-	// windows, request them in order and join the results (the CSV header once).
+	// The API exports at most 92 days at a time (both included): the …Range methods split any
+	// range into windows, request them in order and join the results (the CSV header once).
 	events, err := client.Accounting.ExportJSONRange(ctx, "2026-01-01", "2026-12-31")
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, e := range events {
-		fmt.Println(e.Type, e.PaymentUUID, e.TxTimeUTC.Format(time.DateOnly), e.ProductName)
+		fmt.Println(e.Type, e.TxUUID, e.TxTimeUTC.Format(time.DateOnly), e.GrossAmountUSD, e.ProductName)
 	}
 
 	csv, err := client.Accounting.ExportCSVRange(ctx, "2026-01-01", "2026-12-31")

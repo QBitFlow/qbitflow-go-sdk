@@ -13,6 +13,7 @@ import (
 // Error codes the SDK branches on (the API's stable `code` values, README §8).
 const (
 	codeValidationFailed     = "validation_failed"
+	codeNotFound             = "not_found"
 	codeIdempotencyKeyInUse  = "idempotency_key_in_use"
 	codeIdempotencyKeyReused = "idempotency_key_reused"
 	codeInvalidSignature     = "invalid_signature"

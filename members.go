@@ -7,7 +7,7 @@ import (
 )
 
 // List returns one page of the organization's members in the key's mode (GET /members; by
-// user UUID, page size 20 by default, at most 100). Organization key only (403 otherwise, also
+// when they joined, page size 20 by default, at most 100). Organization key only (403 otherwise, also
 // with On-Behalf-Of). params may be nil.
 func (s *MembersService) List(ctx context.Context, params *MemberListParams, opts ...RequestOption) (*Page[Member], error) {
 	if err := params.Validate(); err != nil {
@@ -36,9 +36,9 @@ func (s *MembersService) Get(ctx context.Context, userUUID string, opts ...Reque
 	return s.client.callRef[Member](ctx, endpoint{method: http.MethodGet, path: pathf("/members/%s", userUUID)}, opts)
 }
 
-// Update changes a member's organization fee in the key's mode (PUT /members/:userUuid). A
-// checkout already created keeps the fee it was created with. Organization key only. Not
-// retried.
+// Update changes a member's organization fee in the key's mode (PATCH /members/:userUuid). A
+// checkout already created keeps the fee it was created with; a running subscription's next
+// bills take the new one. Organization key only. Not retried.
 func (s *MembersService) Update(ctx context.Context, userUUID string, params *UpdateMemberParams, opts ...RequestOption) (*Member, error) {
 	if err := checkPathUUID("userUuid", userUUID); err != nil {
 		return nil, err
@@ -46,11 +46,11 @@ func (s *MembersService) Update(ctx context.Context, userUUID string, params *Up
 	if err := params.Validate(); err != nil {
 		return nil, err
 	}
-	return s.client.callRef[Member](ctx, endpoint{method: http.MethodPut, path: pathf("/members/%s", userUUID), body: params}, opts)
+	return s.client.callRef[Member](ctx, endpoint{method: http.MethodPatch, path: pathf("/members/%s", userUUID), body: params}, opts)
 }
 
-// Remove removes a member from the key's mode (DELETE /members/:userUuid): their API keys stop
-// working at once and their checkouts stop taking payments; their data stays with the
+// Remove removes a member from the key's mode (DELETE /members/:userUuid, 204): their API keys
+// stop working at once and their checkouts stop taking payments; their data stays with the
 // organization. Organization key only. Not retried.
 //
 // Errors: 409 held_funds_pending while the organization holds live funds for them (release
@@ -73,10 +73,10 @@ func (s *MembersService) Trust(ctx context.Context, userUUID string, opts ...Req
 	return s.client.callRef[Member](ctx, endpoint{method: http.MethodPost, path: pathf("/members/%s/trust", userUUID)}, opts)
 }
 
-// ListHeldFunds returns what the organization holds for each member in the key's mode
-// (GET /members/held-funds). Organization key only.
-func (s *MembersService) ListHeldFunds(ctx context.Context, opts ...RequestOption) ([]MemberHeldFundsSummary, error) {
-	return s.client.call[[]MemberHeldFundsSummary](ctx, endpoint{method: http.MethodGet, path: "/members/held-funds"}, opts)
+// ListHeldFunds returns what the organization holds for each member in the key's mode, the
+// longest held first (GET /members/held-funds; a bounded list). Organization key only.
+func (s *MembersService) ListHeldFunds(ctx context.Context, opts ...RequestOption) ([]MemberHeldFunds, error) {
+	return s.client.callItems[MemberHeldFunds](ctx, endpoint{method: http.MethodGet, path: "/members/held-funds"}, opts)
 }
 
 // GetHeldFunds returns what the organization holds for one member in the key's mode, a
@@ -89,32 +89,33 @@ func (s *MembersService) GetHeldFunds(ctx context.Context, userUUID string, opts
 	return s.client.callRef[HeldFunds](ctx, endpoint{method: http.MethodGet, path: pathf("/members/%s/held-funds", userUUID)}, opts)
 }
 
-// GetOwnHeldFunds returns what the organization holds for the request's space
-// (GET /user/held-funds): call it with a member's key, or OnBehalfOf a member. Empty for the
-// organization's own space.
+// GetOwnHeldFunds returns what the organization holds for the request's space (GET /held-funds):
+// call it with a member's key, or OnBehalfOf a member. Empty for the organization's own space
+// (no ledgers, TotalUSD "0").
 func (s *MembersService) GetOwnHeldFunds(ctx context.Context, opts ...RequestOption) (*HeldFunds, error) {
-	return s.client.callRef[HeldFunds](ctx, endpoint{method: http.MethodGet, path: "/user/held-funds"}, opts)
+	return s.client.callRef[HeldFunds](ctx, endpoint{method: http.MethodGet, path: "/held-funds"}, opts)
 }
 
 // Create invites someone to join the organization as a member in the key's mode
-// (POST /invitations, 201) and returns the invitation and its link (also emailed). The SDK
+// (POST /invitations, 201) and returns the invitation with its link (also emailed). The SDK
 // always sends role "user": the team is invited from the dashboard. It sends an
 // Idempotency-Key and is retried on transient failures. Organization key only; rate limited
-// (50 an hour per organization).
+// (50 an hour per organization: beyond, a *RateLimitError at once, the wait being over the SDK's
+// 60 s retry cap).
 //
 // The person exists in the organization once they accepted: act on the member.joined webhook
 // (MemberJoined.InvitationUUID). Errors: 409 already_joined for someone already a member in
 // that mode.
-func (s *InvitationsService) Create(ctx context.Context, params *CreateInvitationParams, opts ...RequestOption) (*InvitationCreated, error) {
+func (s *InvitationsService) Create(ctx context.Context, params *CreateInvitationParams, opts ...RequestOption) (*CreatedInvitation, error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
 	}
-	return s.client.callRef[InvitationCreated](ctx, endpoint{method: http.MethodPost, path: "/invitations", body: params, idempotent: true}, opts)
+	return s.client.callRef[CreatedInvitation](ctx, endpoint{method: http.MethodPost, path: "/invitations", body: params, idempotent: true}, opts)
 }
 
-// List returns one page of the organization's invitations (GET /invitations; page size 20 by
-// default, at most 100), optionally filtered by Status. Organization key only. params may be
-// nil.
+// List returns one page of the organization's invitations (GET /invitations; newest first,
+// page size 20 by default, at most 100), its team's (role admin) included, optionally filtered
+// by Status. Organization key only. params may be nil.
 func (s *InvitationsService) List(ctx context.Context, params *InvitationListParams, opts ...RequestOption) (*Page[Invitation], error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -132,11 +133,11 @@ func (s *InvitationsService) Iterate(ctx context.Context, params *InvitationList
 	})
 }
 
-// Revoke revokes an invitation (DELETE /invitations/:uuid) and returns it. Organization key
-// only. Not retried.
-func (s *InvitationsService) Revoke(ctx context.Context, uuid string, opts ...RequestOption) (*Invitation, error) {
+// Revoke revokes an invitation (DELETE /invitations/:uuid, 204): its link no longer works.
+// Organization key only. Not retried.
+func (s *InvitationsService) Revoke(ctx context.Context, uuid string, opts ...RequestOption) error {
 	if err := checkPathUUID("uuid", uuid); err != nil {
-		return nil, err
+		return err
 	}
-	return s.client.callRef[Invitation](ctx, endpoint{method: http.MethodDelete, path: pathf("/invitations/%s", uuid)}, opts)
+	return s.client.callVoid(ctx, endpoint{method: http.MethodDelete, path: pathf("/invitations/%s", uuid)}, opts)
 }

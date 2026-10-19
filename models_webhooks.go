@@ -13,19 +13,22 @@ type WebhookEndpoint struct {
 	Test bool `json:"test"`
 	// URL is where the events are posted.
 	URL string `json:"url"`
-	// Events are the event types it receives; empty: every type.
+	// Events are the event types it receives (stored sorted, without duplicates); empty: every
+	// type, including types added later.
 	Events []EventType `json:"events"`
 	// IncludeMembers is true for an organization endpoint that also receives its members' events.
 	IncludeMembers bool `json:"includeMembers"`
-	// PayloadVersion is v2 (the event envelope), or v1 for an endpoint migrated from v1.
+	// PayloadVersion is the payload it receives: v2 (the event envelope), the only version.
 	PayloadVersion WebhookPayloadVersion `json:"payloadVersion"`
-	// Description is a note for the dashboard.
-	Description string `json:"description"`
+	// Description is a note for the dashboard; "" (absent) when none.
+	Description string `json:"description,omitempty"`
 	// CreatedAt is when it was created.
 	CreatedAt time.Time `json:"createdAt"`
 	// RotatedAt is when its secret last changed.
 	RotatedAt *time.Time `json:"rotatedAt,omitempty"`
-	// DisabledAt is when it was disabled; nil while enabled.
+	// DisabledAt is when it was disabled (it receives nothing): after 3 days without a successful
+	// delivery (live mode only), or by its owner; nil while enabled. Update with Enabled true
+	// enables it again.
 	DisabledAt *time.Time `json:"disabledAt,omitempty"`
 	// DisabledReason is why: failing (live mode only: a test-mode endpoint is never disabled for
 	// failing), owner or closed.
@@ -79,8 +82,10 @@ type DeliveryAttempt struct {
 	Attempt int `json:"attempt"`
 	// Delivered is true when the endpoint answered with a 2xx.
 	Delivered bool `json:"delivered"`
-	// Skipped is true when it was not posted (a member's endpoint with members.webhooks off).
-	Skipped *bool `json:"skipped,omitempty"`
+	// Skipped is true when it was not posted: a member's endpoint while the organization's
+	// members.webhooks policy was off for them (never retried; not counted against the endpoint's
+	// health). Absent when false.
+	Skipped bool `json:"skipped,omitempty"`
 	// StatusCode is the endpoint's answer; nil when it didn't answer.
 	StatusCode *int `json:"statusCode,omitempty"`
 	// Error is why it wasn't delivered.
@@ -95,7 +100,8 @@ type DeliveryAttempt struct {
 type CreateWebhookEndpointParams struct {
 	// URL is required: where the events are posted (https and a public host in live mode).
 	URL string `json:"url"`
-	// Events are the event types to receive (at most 20, not webhook.test); empty: every type.
+	// Events are the event types to receive (at most 20, not webhook.test; an unknown type is the
+	// API's 400); empty: every type, including types added later.
 	Events []EventType `json:"events,omitempty"`
 	// IncludeMembers makes an organization endpoint receive its members' events too (nil: true
 	// for an organization endpoint, false for a member's).
@@ -123,16 +129,18 @@ func (p *CreateWebhookEndpointParams) Validate() error {
 type UpdateWebhookEndpointParams struct {
 	// URL is the new URL ("" = unchanged).
 	URL string `json:"url,omitempty"`
-	// Events replaces the event types: nil leaves them unchanged, an empty non-nil slice
-	// ([]EventType{}) means every type.
+	// Events replaces the event types (at most 20, not webhook.test): nil leaves them unchanged,
+	// an empty non-nil slice ([]EventType{}) means every type.
 	Events []EventType `json:"events,omitzero"`
 	// IncludeMembers changes whether an organization endpoint receives its members' events.
 	IncludeMembers *bool `json:"includeMembers,omitempty"`
 	// Description is the new note; a pointer to "" clears it, nil leaves it unchanged.
 	Description *string `json:"description,omitempty"`
-	// PayloadVersion v2 moves an endpoint migrated from v1 to the event envelope (never back).
+	// PayloadVersion is the payload it receives: v2, the only version today (anything else is
+	// refused); "" leaves it unchanged.
 	PayloadVersion WebhookPayloadVersion `json:"payloadVersion,omitempty"`
-	// Enabled false pauses the endpoint; true enables it again.
+	// Enabled false pauses the endpoint (it receives nothing, deliveries in progress stop); true
+	// enables it again, also after it was disabled for failing.
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
@@ -151,15 +159,44 @@ func (p *UpdateWebhookEndpointParams) Validate() error {
 	return v.err()
 }
 
+// EndpointListParams pages Webhooks.Endpoints.List.
+type EndpointListParams struct {
+	// Limit is the page size (server default 20, max 100; 0 = default).
+	Limit int
+	// Cursor is the previous page's NextCursor, verbatim; "" for the first page.
+	Cursor string
+}
+
+// Validate checks the params.
+func (p *EndpointListParams) Validate() error {
+	if p == nil {
+		return nil
+	}
+	var v validator
+	v.cursor(p.Cursor)
+	return v.err()
+}
+
+func (p *EndpointListParams) values() url.Values {
+	if p == nil {
+		return nil
+	}
+	q := url.Values{}
+	setPage(q, p.Limit, p.Cursor)
+	return q
+}
+
 // EventListParams filters Webhooks.Events.List.
 type EventListParams struct {
 	// Limit is the page size (server default 20, max 100; 0 = default).
 	Limit int
-	// Cursor is the previous page's NextCursor (evt_…); "" for the first page.
+	// Cursor is the previous page's NextCursor, verbatim (opaque: never an event id); "" for the
+	// first page.
 	Cursor string
-	// Type keeps only the events of this type.
+	// Type keeps only the events of this type. Not checked against the SDK's known types (newer
+	// ones appear over time); an unknown type is the API's 400.
 	Type EventType
-	// IncludeMembers adds the members' events (organization space only).
+	// IncludeMembers adds the members' events (organization space only; 400 from a member's).
 	IncludeMembers bool
 }
 
@@ -169,7 +206,7 @@ func (p *EventListParams) Validate() error {
 		return nil
 	}
 	var v validator
-	oneOf(&v, "type", p.Type, knownEventTypes...)
+	v.cursor(p.Cursor)
 	return v.err()
 }
 

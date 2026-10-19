@@ -1,4 +1,5 @@
-// Command refunds lists the active refunds and, given a payment, starts a partial refund of it.
+// Command refunds lists the pending refunds, reads one, and, given a payment, starts a partial
+// refund of it.
 //
 //	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [PAYMENT_UUID=pay@…] go run ./examples/refunds
 //
@@ -21,14 +22,30 @@ func main() {
 	defer cancel()
 
 	// docs:start refunds-list
-	refunds, err := client.Refunds.List(ctx, nil) // the refunds waiting for an answer
+	// The active ones: pending, waiting for an answer (Status empty: every status).
+	page, err := client.Refunds.List(ctx, &qbitflow.RefundListParams{
+		Status: []qbitflow.RefundStatus{qbitflow.RefundStatusPending},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, r := range refunds {
-		fmt.Println(r.UUID, r.TxUUID, r.Status, r.Reason, r.AmountUSD)
+	for _, r := range page.Items {
+		fmt.Println(r.UUID, r.TxUUID, r.InitiatedBy, r.Reason, r.Amount, r.Currency.Symbol)
 	}
 	// docs:end refunds-list
+
+	if len(page.Items) > 0 {
+		refundUUID := page.Items[0].UUID
+
+		// docs:start refunds-get
+		refund, err := client.Refunds.Get(ctx, refundUUID) // refund@…
+		if err != nil {
+			log.Fatal(err)
+		}
+		// pending, approved, rejected or cancelled (a merchant's draft dropped before it was sent).
+		fmt.Println(refund.UUID, refund.Status, refund.RefundPercent+"%", refund.Amount, refund.Currency.Symbol)
+		// docs:end refunds-get
+	}
 
 	paymentUUID := os.Getenv("PAYMENT_UUID")
 	if paymentUUID == "" {
@@ -37,15 +54,15 @@ func main() {
 	}
 
 	// docs:start refunds-create
-	refund, err := client.Refunds.Initiate(ctx, &qbitflow.InitiateRefundParams{
+	refund, err := client.Refunds.Create(ctx, &qbitflow.CreateRefundParams{
 		TxUUID:        paymentUUID, // pay@… (or a bill's sub-hist@…)
-		RefundPercent: new(50.0),   // of what the customer paid; nil = 100
+		RefundPercent: "50",        // a percent string, of what the customer paid; "" = "100"
 		Reason:        "Damaged item",
 	})
 	if err != nil {
 		log.Fatal(err) // 409 refund_already_exists: one refund per transaction
 	}
-	// Pending: no money moves until you sign the transfer in the dashboard (refund.completed).
+	// Pending: no money moves until you sign the transfer in the dashboard (refund.approved).
 	fmt.Println(refund.UUID, refund.Status)
 	// docs:end refunds-create
 }

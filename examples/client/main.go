@@ -62,5 +62,5 @@ func fromEnv(ctx context.Context) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("from the environment: role %s, on behalf of %q\n", me.Role, me.OnBehalfOf)
+	fmt.Printf("from the environment: role %s, on behalf of %q\n", me.Role, me.OnBehalfOfUserUUID)
 }

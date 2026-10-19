@@ -6,51 +6,53 @@ import (
 	"net/http"
 )
 
-// List returns the refunds awaiting the merchant's answer (respondedAt null)
-// (GET /transaction/refunds/all; not paginated). From the
-// organization's space the members' refunds are included by default (IncludeMembers false
-// leaves them out); UserUUID reads one member's; Held filters on held transactions. Limit and
-// Cursor are not sent. params may be nil.
-func (s *RefundsService) List(ctx context.Context, params *RefundListParams, opts ...RequestOption) ([]Refund, error) {
+// List returns one page of the space's refunds (GET /refunds; newest first, page size 20 by
+// default, at most 100). params.Status keeps the given statuses (RefundStatusPending: the ones
+// awaiting an answer; empty: every status); params.TxUUID the refund of one transaction. From
+// the organization's space the members' refunds are included by default (IncludeMembers false
+// leaves them out); UserUUID reads one member's; Held filters on held transactions. params may
+// be nil. Iterate walks every page.
+func (s *RefundsService) List(ctx context.Context, params *RefundListParams, opts ...RequestOption) (*Page[Refund], error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
 	}
-	return s.client.call[[]Refund](ctx, endpoint{method: http.MethodGet, path: "/transaction/refunds/all", query: params.values(false)}, opts)
+	return s.client.callRef[Page[Refund]](ctx, endpoint{method: http.MethodGet, path: "/refunds", query: params.values()}, opts)
 }
 
-// ListInactive returns one page of the answered refunds, approved or rejected (respondedAt set)
-// (GET /transaction/refunds/all/inactive; page size 10 by default, at most 50), with List's
-// filters. params may be nil.
-func (s *RefundsService) ListInactive(ctx context.Context, params *RefundListParams, opts ...RequestOption) (*Page[Refund], error) {
-	if err := params.Validate(); err != nil {
-		return nil, err
-	}
-	return s.client.callRef[Page[Refund]](ctx, endpoint{method: http.MethodGet, path: "/transaction/refunds/all/inactive", query: params.values(true)}, opts)
-}
-
-// IterateInactive walks every refund ListInactive returns, fetching the pages lazily and
-// keeping the filters and the page size. An error ends the sequence.
-func (s *RefundsService) IterateInactive(ctx context.Context, params *RefundListParams, opts ...RequestOption) iter.Seq2[Refund, error] {
+// Iterate walks every refund List returns, fetching the pages lazily and keeping the filters
+// and the page size. An error ends the sequence.
+func (s *RefundsService) Iterate(ctx context.Context, params *RefundListParams, opts ...RequestOption) iter.Seq2[Refund, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Refund], error) {
 		p.Cursor = cursor
-		return s.ListInactive(ctx, &p, opts...)
+		return s.List(ctx, &p, opts...)
 	})
 }
 
-// Initiate starts a refund of a payment (pay@…) or a bill (sub-hist@…) of the space
-// (POST /transaction/refunds/initiate, 201). It sends an Idempotency-Key and is retried on
-// transient failures. It creates a pending refund: no money moves until the merchant signs the
-// transfer in the dashboard. RefundPercent (default 100) applies to everything the customer
-// paid, network fee included, rounded down.
+// Get returns a refund by its id (GET /refunds/:uuid; refund@… or the bare UUID). Another
+// space's refund is a *NotFoundError.
+func (s *RefundsService) Get(ctx context.Context, uuid string, opts ...RequestOption) (*Refund, error) {
+	if err := checkPathTxID("uuid", uuid); err != nil {
+		return nil, err
+	}
+	return s.client.callRef[Refund](ctx, endpoint{method: http.MethodGet, path: pathf("/refunds/%s", uuid)}, opts)
+}
+
+// Create starts a refund of a payment (pay@…) or a bill (sub-hist@…) of the space
+// (POST /refunds, 201). It sends an Idempotency-Key and is retried on transient failures. It
+// creates a pending refund, a draft that blocks nothing: no money moves until the merchant signs
+// the transfer in the dashboard, and a new refund of the same transaction replaces it.
+// RefundPercent (default "100") applies to everything the customer paid, network fee included,
+// rounded down.
 //
 // Errors: 404 for a transaction outside the space; 400 validation_failed (refundPercent, or a
 // refund rounding to nothing); 409 refund_already_exists (details.refundUuid: one refund per
-// transaction) or held_funds_released; a member's key needs the members.refunds policy (403
-// policy_disabled).
-func (s *RefundsService) Initiate(ctx context.Context, params *InitiateRefundParams, opts ...RequestOption) (*Refund, error) {
+// transaction, whatever it became; only an unsent draft gives way) or held_funds_released (a
+// held payment already released to its member); a member's key needs the members.refunds policy
+// (403 policy_disabled).
+func (s *RefundsService) Create(ctx context.Context, params *CreateRefundParams, opts ...RequestOption) (*Refund, error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
 	}
-	return s.client.callRef[Refund](ctx, endpoint{method: http.MethodPost, path: "/transaction/refunds/initiate", body: params, idempotent: true}, opts)
+	return s.client.callRef[Refund](ctx, endpoint{method: http.MethodPost, path: "/refunds", body: params, idempotent: true}, opts)
 }

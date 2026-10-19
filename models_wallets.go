@@ -5,55 +5,57 @@ import (
 	"time"
 )
 
-// Wallet is a wallet of a space on one chain, with its token wallets.
+// Wallet is a space's receiving address on one chain (Currency, its native coin), with the
+// currencies it accepts on that chain (TokenWallets). Its mode is the space's. Wallets are added
+// and removed in the dashboard.
 type Wallet struct {
 	// UUID is the wallet's id.
 	UUID string `json:"uuid"`
 	// CreatedAt is when it was added.
 	CreatedAt time.Time `json:"createdAt"`
-	// PublicKey is the wallet's address.
-	PublicKey string `json:"publicKey"`
+	// Address is the wallet's address on its chain (EVM: 0x…, Solana: base58).
+	Address string `json:"address"`
 	// Test is true in test mode.
 	Test bool `json:"test"`
 	// UserUUID is the member whose wallet it is; "" for the organization's own.
 	UserUUID string `json:"userUuid,omitempty"`
-	// TokenWallets are the tokens enabled on it.
+	// TokenWallets are the currencies it accepts on its chain; empty when none.
 	TokenWallets []TokenWallet `json:"tokenWallets"`
-	// CurrencyID is the chain's native coin.
-	CurrencyID uint64 `json:"currencyId"`
-	// Currency is that native coin.
+	// Currency is the chain, by its native coin.
 	Currency Currency `json:"currency"`
 }
 
-// TokenWallet is a token enabled on a wallet.
+// TokenWallet is a currency a wallet accepts on its chain: a token (USDC on Base) or the chain's
+// native coin.
 type TokenWallet struct {
 	// UUID is the token wallet's id.
 	UUID string `json:"uuid"`
-	// CreatedAt is when it was enabled.
+	// CreatedAt is when the wallet started accepting it.
 	CreatedAt time.Time `json:"createdAt"`
-	// TokenID is the token's currency id.
-	TokenID uint64 `json:"tokenId"`
-	// Token is the token's currency.
-	Token Currency `json:"token"`
+	// Currency is the currency accepted.
+	Currency Currency `json:"currency"`
 	// WalletUUID is the wallet it belongs to.
 	WalletUUID string `json:"walletUuid"`
-	// Balance is its balance; set only by Wallets.List with WithBalances.
+	// Balance is what the wallet holds of the currency, read on its chain now: set only by
+	// Wallets.List with WithBalances, and nil when the chain couldn't be read.
 	Balance *Balance `json:"balance,omitempty"`
 }
 
-// Balance is a token wallet's balance.
+// Balance is what a wallet holds of a currency, read on its chain now. Amount, AmountMinUnits
+// and AmountUSD (its value at today's price; "" when QBitFlow has no price it can trust right
+// now) come from TokenAmount.
+//
+//	{"currency": {…}, "amount": "12.5", "amountMinUnits": "12500000", "amountUsd": "12.5"}
 type Balance struct {
-	// Currency is the token (e.g. "SOL:USDC").
-	Currency string `json:"currency"`
-	// Balance is the balance in the token (a decimal string).
-	Balance string `json:"balance"`
-	// BalanceUSD is the same in USD.
-	BalanceUSD float64 `json:"balanceUsd"`
+	// Currency is the currency held.
+	Currency Currency `json:"currency"`
+
+	TokenAmount
 }
 
 // WalletListParams are Wallets.List's options.
 type WalletListParams struct {
-	// WithBalances adds each token wallet's balance.
+	// WithBalances adds each token wallet's balance (read on-chain: slower).
 	WithBalances bool
 }
 
@@ -69,14 +71,15 @@ func (p *WalletListParams) values() url.Values {
 	return q
 }
 
-// SupportedCurrenciesParams are Wallets.ListSupportedCurrencies' options.
-type SupportedCurrenciesParams struct {
-	// UserUUID reads a member's (organization key); "" for the request's space.
+// AcceptedCurrenciesParams are Wallets.ListAcceptedCurrencies' options.
+type AcceptedCurrenciesParams struct {
+	// UserUUID reads a member's (an organization key; 403 otherwise, also with On-Behalf-Of); ""
+	// for the request's space.
 	UserUUID string
 }
 
 // Validate checks the params.
-func (p *SupportedCurrenciesParams) Validate() error {
+func (p *AcceptedCurrenciesParams) Validate() error {
 	if p == nil {
 		return nil
 	}
@@ -85,7 +88,7 @@ func (p *SupportedCurrenciesParams) Validate() error {
 	return v.err()
 }
 
-func (p *SupportedCurrenciesParams) values() url.Values {
+func (p *AcceptedCurrenciesParams) values() url.Values {
 	if p == nil {
 		return nil
 	}
@@ -94,10 +97,12 @@ func (p *SupportedCurrenciesParams) values() url.Values {
 	return q
 }
 
-// CurrencyListParams are Currencies.ListAvailable's and ListMain's options.
+// CurrencyListParams are Currencies.List's options.
 type CurrencyListParams struct {
-	// Test lists the testnet currencies (whatever the key's mode).
+	// Test lists the test networks' currencies (whatever the key's mode); false: mainnet.
 	Test bool
+	// Main lists only the chains' native coins (ETH, BASE, SOL), no tokens.
+	Main bool
 }
 
 // Validate checks the params (nothing to check: present for uniformity).
@@ -109,5 +114,6 @@ func (p *CurrencyListParams) values() url.Values {
 	}
 	q := url.Values{}
 	setBool(q, "test", p.Test)
+	setBool(q, "main", p.Main)
 	return q
 }

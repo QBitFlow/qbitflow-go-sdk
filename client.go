@@ -18,31 +18,33 @@ const (
 // Client is the QBitFlow API client. Create it with NewClient and share it: it is safe for
 // concurrent use. Each service field groups the methods of one API area.
 type Client struct {
-	// Products manages the products (GET/POST/PUT/DELETE /product…).
+	// Products manages the products (/products…).
 	Products *ProductsService
-	// Customers manages the customers (/customer…).
+	// Customers manages the customers (/customers…).
 	Customers *CustomersService
-	// CheckoutSessions creates checkout sessions and reads or expires them (/transaction/session-checkout…).
+	// CheckoutSessions creates checkout sessions and reads or expires them (/checkout-sessions…).
 	CheckoutSessions *CheckoutSessionsService
-	// Payments reads the one-time payments and the combined payment feed (/transaction/payment…).
+	// Payments reads the one-time payments (/payments…).
 	Payments *PaymentsService
-	// Failures reads the failed payment attempts (/transaction/failures).
+	// Transactions reads the feed of payments and bills together (/transactions).
+	Transactions *TransactionsService
+	// Failures reads the failed payment attempts (/payment-failures).
 	Failures *FailuresService
-	// Subscriptions reads, bills and cancels subscriptions (/transaction/subscription…).
+	// Subscriptions reads, updates, bills and cancels subscriptions (/subscriptions…, /bills…).
 	Subscriptions *SubscriptionsService
-	// Refunds lists and initiates refunds (/transaction/refunds…).
+	// Refunds lists, reads and creates refunds (/refunds…).
 	Refunds *RefundsService
 	// Members manages the organization's members and their held funds (organization key).
 	Members *MembersService
 	// Invitations invites members (organization key).
 	Invitations *InvitationsService
-	// Wallets reads the wallets and the currencies they accept (/wallet…).
+	// Wallets reads the wallets and the currencies they accept (/wallets…).
 	Wallets *WalletsService
 	// Accounting exports the accounting events (/accounting/export).
 	Accounting *AccountingService
 	// Webhooks verifies webhooks and manages the endpoints (Endpoints) and the event log (Events).
 	Webhooks *WebhooksService
-	// Currencies reads the currency catalog (/utils…, public).
+	// Currencies reads the currency catalog (/currencies…, public).
 	Currencies *CurrenciesService
 
 	t *transport
@@ -126,6 +128,7 @@ func newClient(t *transport, onBehalfOf string, onBehalfOfErr error) *Client {
 	c.Customers = &CustomersService{client: c}
 	c.CheckoutSessions = &CheckoutSessionsService{client: c}
 	c.Payments = &PaymentsService{client: c}
+	c.Transactions = &TransactionsService{client: c}
 	c.Failures = &FailuresService{client: c}
 	c.Subscriptions = &SubscriptionsService{client: c}
 	c.Refunds = &RefundsService{client: c}
@@ -144,7 +147,9 @@ func newClient(t *transport, onBehalfOf string, onBehalfOfErr error) *Client {
 
 // OnBehalfOf returns a client that acts in a member's space: every request sends
 // On-Behalf-Of: userUUID (a member's userUuid; organization key only). It shares this
-// client's connections and configuration; "" returns one at the organization level.
+// client's connections and configuration; "" returns one at the organization level (the header
+// is then omitted: it is never sent blank). Acting for a member, the role is user: the admin
+// methods (Members, Invitations, Wallets.ListForMember) answer 403.
 //
 // An invalid UUID (or the nil UUID) is reported lazily, so calls can chain: every request of
 // the returned client fails with a *ValidationError.

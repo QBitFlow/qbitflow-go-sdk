@@ -6,10 +6,12 @@ import (
 	"time"
 )
 
-// Typing rule (types.md §1): a field the API always sends is a value; an optional string is
-// a string ("" = absent); any other optional or nullable field is a pointer (nil = absent or
-// null); lists are slices (nil when absent). Money amounts in a token's min units, and a few
-// USD prices, are decimal strings, never parsed. Timestamps keep the offset the API sends.
+// Typing rule (types.md §1): a field the API always sends is a value; an optional string is a
+// string ("" = absent); any other optional field is a pointer (nil = absent); lists are slices
+// and merchant metadata a map[string]string (both nil-safe). The API never sends null: an
+// optional field without a value is absent. Money, token amounts and fee rates are decimal
+// strings ("12.5", "10004200", "0.99"), never parsed into floats: convert token amounts with
+// FormatAmount and ParseAmount. Timestamps are RFC 3339 instants in UTC.
 
 // Duration is a length of time as the API writes it: a value in the largest exact unit
 // ({1, months} = 30 days). Value 0 means none (a unit is then optional).
@@ -21,64 +23,95 @@ type Duration struct {
 	Unit DurationUnit `json:"unit,omitempty"`
 }
 
-// Currency is a currency (token or native coin) of the catalog.
+// Currency is a currency of the catalog: a chain's native coin (ETH, SOL; its chain is itself)
+// or a token on a chain (USDC on Base). It is the one currency object of every response
+// (Currencies.List, Payment.Currency, Member.AcceptedCurrencies, …).
 type Currency struct {
-	// ID is the currency's id (GET /utils/currency/id/:id).
+	// ID is the currency's id (Currencies.Get): a public catalog, unique across test and live.
 	ID uint64 `json:"id"`
-	// Name is its full name (e.g. "USD Coin").
-	Name string `json:"name"`
-	// Symbol is its symbol (e.g. "USDC").
+	// Code is what requests name it by: CHAIN:TOKEN for a token ("BASE:USDC"), the chain's
+	// symbol for its native coin ("ETH").
+	Code string `json:"code"`
+	// Symbol is its symbol ("USDC", "ETH").
 	Symbol string `json:"symbol"`
-	// Decimals is its number of decimals (6 for USDC).
+	// Name is its full name ("USD Coin", "Ethereum").
+	Name string `json:"name"`
+	// Chain is the chain it is on, by its native coin's symbol: ETH, BASE or SOL.
+	Chain Chain `json:"chain"`
+	// Decimals is the decimals of its on-chain amounts: min units = amount × 10^Decimals (6 for
+	// USDC). FormatAmount converts with it.
 	Decimals uint8 `json:"decimals"`
-	// Address is the token's contract address (or mint); "" for a chain's native coin.
-	Address string `json:"address"`
-	// MainCurrencyID is the chain's native coin, for a token; nil for a native coin.
+	// Address is a token's contract address (EVM) or mint (Solana); "" (absent) on a native coin.
+	Address string `json:"address,omitempty"`
+	// MainCurrencyID is a token's chain, by its native coin's id; nil (absent) on a native coin.
 	MainCurrencyID *uint64 `json:"mainCurrencyId,omitempty"`
-	// MainCurrency is that native coin; nil for a native coin.
-	MainCurrency *Currency `json:"mainCurrency"`
-	// Test is true for a testnet currency.
+	// Test is true for a test network's currency, false for a live one.
 	Test bool `json:"test"`
 }
 
-// CustomerSummary is a customer as a payment, bill or refund names it (merchant API reads only;
-// absent from webhooks).
+// TokenAmount is an amount of a token (or of a chain's native coin, when its field says so) as
+// responses write it: the exact amount in the token's units and its on-chain integer, always
+// together, and its USD value when a price is known. Its currency is the resource's.
+//
+//	{"amount": "12.5", "amountMinUnits": "12500000", "amountUsd": "12.5"}
+type TokenAmount struct {
+	// Amount is the amount in the token's units, exact: AmountMinUnits / 10^decimals, a decimal
+	// string ("12.5").
+	Amount string `json:"amount"`
+	// AmountMinUnits is the on-chain integer, in the token's smallest unit, a string of digits
+	// ("12500000").
+	AmountMinUnits string `json:"amountMinUnits"`
+	// AmountUSD is its value in USD, a decimal string; "" (absent) when no price was known.
+	AmountUSD string `json:"amountUsd,omitempty"`
+}
+
+// CustomerSummary is a customer as a transaction row names it (a payment, a bill, a
+// subscription, a refund): who paid, even once the merchant deleted the customer. Merchant API
+// reads only: absent from webhooks.
 type CustomerSummary struct {
 	// UUID is the customer (Customers.Get).
 	UUID string `json:"uuid"`
-	// Name is the first name.
-	Name string `json:"name"`
-	// LastName is the last name, when given.
+	// FirstName is the first name.
+	FirstName string `json:"firstName"`
+	// LastName is the last name; "" (absent) when not given.
 	LastName string `json:"lastName,omitempty"`
 	// Email is the email, lowercase.
 	Email string `json:"email"`
-	// Reference is the merchant's reference of the customer, when it has one.
+	// Reference is the merchant's reference of the customer; "" (absent) without one.
 	Reference string `json:"reference,omitempty"`
-	// Deleted is true when the merchant deleted the customer (it still names its rows).
-	Deleted *bool `json:"deleted,omitempty"`
+	// Deleted is true when the merchant deleted the customer: it still names its rows, but
+	// Customers.Get answers 404.
+	Deleted bool `json:"deleted"`
 }
 
-// RefundSummary is a transaction's refund, as its payment or bill shows it.
+// RefundSummary is a payment's or bill's refund, as the payment shows it (Refunds.Get has the
+// rest of the refund with the same id).
 type RefundSummary struct {
 	// UUID is the refund (refund@…).
 	UUID string `json:"uuid"`
-	// Status is pending, approved or rejected.
+	// Status is pending, approved, rejected or cancelled.
 	Status RefundStatus `json:"status"`
 	// InitiatedBy is customer (a request) or merchant.
 	InitiatedBy RefundInitiator `json:"initiatedBy"`
-	// RefundPercent is the share of what the customer paid it sends back, in percent.
-	RefundPercent float64 `json:"refundPercent"`
-	// AmountMinUnits is what it sends back, in the currency's min units (a decimal string).
+	// RefundPercent is the share of what the customer paid it sends back, a percent string
+	// ("100": all of it).
+	RefundPercent string `json:"refundPercent"`
+	// Amount is what it sends back, in the currency's units (a decimal string); "" (absent) when
+	// its currency isn't known (a refund requested before refunds named it).
+	Amount string `json:"amount,omitempty"`
+	// AmountMinUnits is the same in the currency's smallest unit (a string of digits).
 	AmountMinUnits string `json:"amountMinUnits"`
-	// AmountUSD is the same in USD, at the payment's time.
-	AmountUSD float64 `json:"amountUsd"`
+	// AmountUSD is the same in USD, at the payment's time (a decimal string); "" (absent) when
+	// unknown.
+	AmountUSD string `json:"amountUsd,omitempty"`
 	// CreatedAt is when it was requested or started.
 	CreatedAt time.Time `json:"createdAt"`
-	// RespondedAt is when it was approved (confirmed) or denied; nil while pending.
-	RespondedAt *time.Time `json:"respondedAt"`
+	// RespondedAt is when it was approved (confirmed), rejected or cancelled; nil while pending.
+	RespondedAt *time.Time `json:"respondedAt,omitempty"`
 }
 
-// Attempt is a failed attempt to pay (or to send a refund): never final.
+// Attempt is how a session's (or a refund approval's) last attempt failed, while it waits for
+// another: never final.
 type Attempt struct {
 	// Status is failed.
 	Status AttemptStatus `json:"status"`
@@ -92,107 +125,112 @@ type Attempt struct {
 	At time.Time `json:"at"`
 }
 
-// PaymentMetadata is a payment's (or bill's) fees and split.
-type PaymentMetadata struct {
-	// FeePercent is QBitFlow's fee on the payment, in percent (1.5 = 1.5 %).
-	FeePercent float64 `json:"feePercent"`
-	// OrganizationFee is the organization's fee on its member's payment; nil when none.
+// Settlement is QBitFlow's record of how a payment or a bill settled, made once at confirmation:
+// its fee terms, how the contracts split what the payer paid, and the transaction that paid it.
+// Every fee record, export, held-funds total and refund reads it. Merchant only (API reads and
+// webhooks).
+type Settlement struct {
+	// FeePercent is QBitFlow's fee on the payment, a percent string ("0.99" = 0.99 %), deducted
+	// from the amount paid.
+	FeePercent string `json:"feePercent"`
+	// OrganizationFee is the organization's fee on its member's payment (a marketplace's
+	// commission), taken from what remains after QBitFlow's fee; nil (absent) when none.
 	OrganizationFee *OrganizationFee `json:"organizationFee,omitempty"`
-	// ReferralFee is the referrer's share of QBitFlow's fee; nil when none.
+	// ReferralFee is the referrer's share of QBitFlow's fee; nil (absent) when none.
 	ReferralFee *ReferralFee `json:"referralFee,omitempty"`
-	// TxMetadata is the transaction's network fees and block.
-	TxMetadata TxMetadata `json:"txMetadata"`
-	// TxAmounts is how the payment was split (QBitFlow, referrer, organization, merchant).
-	TxAmounts TxAmounts `json:"txAmounts"`
+	// Split is how the contracts split what the payer paid; nil (absent) on records made before
+	// the split was recorded. For a payment the organization held for its member, it is the split
+	// a direct payment would have had (the organization's fee withheld, not paid on-chain).
+	Split *Split `json:"split,omitempty"`
+	// Transaction is the transaction that paid it; nil (absent) before its confirmation.
+	Transaction *SettlementTransaction `json:"transaction,omitempty"`
 }
 
-// OrganizationFee is the organization's fee on a member's payment (a marketplace commission).
+// OrganizationFee is the organization's fee on its member's payment or bill (a marketplace's
+// commission).
 type OrganizationFee struct {
-	// Organization is the address receiving the fee.
-	Organization string `json:"organization"`
-	// FeePercent is the fee, in percent, taken from what remains after QBitFlow's fee.
-	FeePercent float64 `json:"feePercent"`
+	// Address is the organization's wallet that receives the fee.
+	Address string `json:"address"`
+	// FeePercent is the fee, a percent string, taken from what remains after QBitFlow's fee.
+	FeePercent string `json:"feePercent"`
 }
 
-// ReferralFee is a referrer's share of QBitFlow's fee.
+// ReferralFee is the referrer's share of QBitFlow's fee on a payment or bill.
 type ReferralFee struct {
-	// Referrer is the address receiving the fee.
-	Referrer string `json:"referrer"`
-	// FeePercent is the referrer's share of the platform fee, in percent (20 = 20 % of it).
-	FeePercent float64 `json:"feePercent"`
-	// Deadline is when the referral stops being paid.
+	// Address is the referrer's wallet that receives the fee.
+	Address string `json:"address"`
+	// FeePercent is the referrer's share of the platform fee, a percent string ("20" = 20 % of it).
+	FeePercent string `json:"feePercent"`
+	// Deadline is until when the referrer earns its share.
 	Deadline time.Time `json:"deadline"`
 }
 
-// TxMetadata is a transaction's network fees and block.
-type TxMetadata struct {
-	// NetworkFees are the fees the transaction's sender paid, in the native coin's min units.
-	NetworkFees NetworkFees `json:"networkFees"`
-	// BlockData is the block that included the transaction.
-	BlockData BlockData `json:"blockData"`
-	// MainCurrencyPriceUSD is the native coin's USD price at the transaction's time, when recorded.
-	MainCurrencyPriceUSD *float64 `json:"mainCurrencyPriceUsd,omitempty"`
+// Split is how a payment or a bill was split, as the contracts paid it. Each part is an amount
+// of the payment's currency (USD values in proportion to the payment's, to 6 decimals):
+// Platform + Organization + Referral + Merchant = the payment's amount, exactly, in each unit.
+type Split struct {
+	// Platform is QBitFlow's fee (the referrer's share not included).
+	Platform TokenAmount `json:"platform"`
+	// Organization is the organization's fee; nil (absent) without one.
+	Organization *TokenAmount `json:"organization,omitempty"`
+	// Referral is the referrer's share of QBitFlow's fee; nil (absent) without one.
+	Referral *TokenAmount `json:"referral,omitempty"`
+	// Merchant is what the merchant (the member, for a member's payment) received, net of every
+	// fee.
+	Merchant TokenAmount `json:"merchant"`
+	// NetworkFee is the network fee the payer paid on top of the amount, in the payment's
+	// currency; nil (absent) on records made before it was recorded ("0" once recorded as none).
+	NetworkFee *TokenAmount `json:"networkFee,omitempty"`
 }
 
-// BlockData is the block that included a transaction.
-type BlockData struct {
-	// Number is the block number (or slot).
-	Number string `json:"number"`
-	// Timestamp is the block's time, in unix seconds.
-	Timestamp uint64 `json:"timestamp"`
+// SettlementTransaction is the transaction that paid (or refunded, or released): where and when
+// it landed, and what it cost its sender in the chain's native coin.
+type SettlementTransaction struct {
+	// BlockNumber is the block (Ethereum, Base) or slot (Solana) it landed in, a string of digits.
+	BlockNumber string `json:"blockNumber"`
+	// BlockTime is when its block was produced (UTC); nil (absent) only on records made before it
+	// was recorded.
+	BlockTime *time.Time `json:"blockTime,omitempty"`
+	// GasUsed is the gas it consumed (Ethereum, Base); nil (absent) on Solana.
+	GasUsed *uint64 `json:"gasUsed,omitempty"`
+	// Fee is what the transaction cost its sender, in the chain's native coin (ETH, SOL): its gas
+	// and, on Base, its L1 data fee; its AmountUSD at NativePriceUSD.
+	Fee TokenAmount `json:"fee"`
+	// L1Fee is the part of Fee that paid Base's L1 data fee, in the native coin; nil (absent) off
+	// Base.
+	L1Fee *TokenAmount `json:"l1Fee,omitempty"`
+	// NativePriceUSD is the USD price of the chain's native coin when the transaction was
+	// recorded (a decimal string); "" (absent) when no price was available.
+	NativePriceUSD string `json:"nativePriceUsd,omitempty"`
 }
 
-// NetworkFees are a transaction's network fees, in the native coin's min units.
-type NetworkFees struct {
-	// Amount is what the sender paid: its gas and, on Base, its L1 data fee (a decimal string).
-	Amount string `json:"amount"`
-	// UnitsConsumed is the gas used.
-	UnitsConsumed uint64 `json:"unitsConsumed"`
-	// L1Fee is the part of Amount that paid Base's L1 data fee; "" on other networks.
-	L1Fee string `json:"l1Fee,omitempty"`
+// TransferSettlement is what a refund or a held-funds release records of its transfer: the
+// transaction only (a transfer pays no fee and has no split).
+type TransferSettlement struct {
+	// Transaction is the transfer's transaction; nil (absent) before it was confirmed.
+	Transaction *SettlementTransaction `json:"transaction,omitempty"`
 }
 
-// TxAmounts is how a payment was split, in USD and in the token's min units.
-type TxAmounts struct {
-	// USD is the split in USD at the transaction's time.
-	USD TxAmountsUSD `json:"usd"`
-	// MinUnits is the split in the token's min units, exactly as paid.
-	MinUnits TxAmountsMinUnits `json:"minUnits"`
-}
-
-// TxAmountsMinUnits is a payment's split in the token's min units (decimal strings).
-type TxAmountsMinUnits struct {
-	// Platform is QBitFlow's fee (the referrer's share included).
-	Platform string `json:"platform"`
-	// Organization is the organization's fee.
-	Organization string `json:"organization"`
-	// Referral is the referrer's share.
-	Referral string `json:"referral"`
-	// Merchant is what the merchant received.
-	Merchant string `json:"merchant"`
-	// NetworkFee is the network fee the payer paid on top; "" when not recorded.
-	NetworkFee string `json:"networkFee,omitempty"`
-}
-
-// TxAmountsUSD is a payment's split in USD.
-type TxAmountsUSD struct {
-	// Platform is QBitFlow's fee.
-	Platform float64 `json:"platform"`
-	// Organization is the organization's fee; nil when none.
-	Organization *float64 `json:"organization,omitempty"`
-	// Referral is the referrer's share; nil when none.
-	Referral *float64 `json:"referral,omitempty"`
-	// Merchant is what the merchant received.
-	Merchant float64 `json:"merchant"`
-	// NetworkFee is the network fee the payer paid on top; nil when not recorded.
-	NetworkFee *float64 `json:"networkFee,omitempty"`
+// FeeLine is an amount a checkout adds to its product's price, shown to the customer and paid
+// with it, a subscription's with every bill (Payment.Fees, Subscription.Fees,
+// Transaction.Fees, PaymentSessionData.Fees).
+type FeeLine struct {
+	// Type is custom (the merchant's line) or processingFee (QBitFlow's fee, which the merchant
+	// has the customer pay).
+	Type FeeLineType `json:"type"`
+	// Label is the line's name, as the checkout shows it ("Processing fee" for the processing fee).
+	Label string `json:"label"`
+	// Description is more about the line, as the merchant wrote it; "" (absent) without one.
+	Description string `json:"description,omitempty"`
+	// AmountUSD is the line's amount in USD, a decimal string with at most 2 decimals ("4.99").
+	AmountUSD string `json:"amountUsd"`
 }
 
 // ReadParams are the options of the reads by id that can reach a member's row (Payments.Get,
 // Subscriptions.Get, Subscriptions.GetBill).
 type ReadParams struct {
 	// IncludeMembers reads a member's row from the organization's space (organization key
-	// without On-Behalf-Of).
+	// without On-Behalf-Of; 400 from a member's space).
 	IncludeMembers bool
 }
 

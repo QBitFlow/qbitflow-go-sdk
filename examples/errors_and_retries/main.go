@@ -63,18 +63,22 @@ func main() {
 	// docs:end errors-handling
 
 	// 1. Client-side validation: nothing is sent.
-	_, err = client.Products.Create(ctx, &qbitflow.CreateProductParams{Name: "x", Price: -1})
+	_, err = client.Products.Create(ctx, &qbitflow.CreateProductParams{Name: "x", PriceUSD: "-1"})
 	describe("invalid params", err)
 
 	// 2. A 404 from the API.
-	_, err = client.CheckoutSessions.GetStatus(ctx, "pay@019eca82-5680-7b00-8000-00000000dead")
+	_, err = client.CheckoutSessions.Get(ctx, "pay@019eca82-5680-7b00-8000-00000000dead")
 	describe("unknown session", err)
 
 	// 3. An idempotent create with your own key: the same key replays the first result instead
 	//    of creating a second customer, even from another process after a crash. Reusing the key
 	//    with another body is a 422 (*IdempotencyError).
 	idempotencyKey := "signup-" + time.Now().Format("20060102-150405")
-	params := &qbitflow.CreateCustomerParams{Name: "Ada", Email: "ada+" + idempotencyKey + "@example.com"}
+	params := &qbitflow.CreateCustomerParams{
+		FirstName: "Ada",
+		Email:     "ada+" + idempotencyKey + "@example.com",
+		Reference: "crm-" + idempotencyKey,
+	}
 	first, err := client.Customers.Create(ctx, params, qbitflow.WithIdempotencyKey(idempotencyKey), qbitflow.WithRequestID("signup-42"))
 	if err != nil {
 		describe("create", err)
@@ -84,13 +88,14 @@ func main() {
 	if err == nil {
 		fmt.Printf("same customer both times: %v (%s)\n", first.UUID == again.UUID, first.UUID)
 	}
-	params.Name = "Grace"
+	params.FirstName = "Grace"
 	_, err = client.Customers.Create(ctx, params, qbitflow.WithIdempotencyKey(idempotencyKey))
 	describe("same key, other body", err)
 
-	// 4. A unique value taken twice: a 409 unique_violation, details.field naming it.
-	_, err = client.Customers.Create(ctx, &qbitflow.CreateCustomerParams{Name: "Ada", Email: first.Email})
-	describe("email taken", err)
+	// 4. A unique value taken twice: a 409 unique_violation, details.field naming it (a reference
+	//    is unique per space; an email is not).
+	_, err = client.Customers.Create(ctx, &qbitflow.CreateCustomerParams{FirstName: "Ada", Email: first.Email, Reference: first.Reference})
+	describe("reference taken", err)
 
 	_ = client.Customers.Delete(ctx, first.UUID) // clean up
 
@@ -114,7 +119,7 @@ func checkoutOnce(ctx context.Context) {
 	session, err := client.CheckoutSessions.CreatePayment(ctx, &qbitflow.CreatePaymentSessionParams{
 		ProductName: "T-shirt",
 		Description: "Blue, size M",
-		Price:       4.99,
+		PriceUSD:    "4.99",
 		Reference:   orderID,
 		SuccessURL:  "https://shop.example.com/orders/success?uuid=" + qbitflow.PlaceholderUUID,
 		CancelURL:   "https://shop.example.com/orders/cancel",

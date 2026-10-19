@@ -21,7 +21,7 @@ const (
 	EventIDHeader = "QBitFlow-Event-Id"
 	// EventTypeHeader carries the event's type.
 	EventTypeHeader = "QBitFlow-Event-Type"
-	// WebhookVersionHeader carries the payload version (v1 or v2).
+	// WebhookVersionHeader carries the payload version (v2, the only one).
 	WebhookVersionHeader = "QBitFlow-Webhook-Version"
 )
 
@@ -213,7 +213,7 @@ func ParseEvent(rawBody []byte) (*Event, error) {
 		return nil, v
 	}
 	if e.Version != WebhookPayloadVersionV2 {
-		return nil, newFieldError("version", "must be v2: the endpoint is still on v1, move it to v2 in the dashboard")
+		return nil, newFieldError("version", "must be v2 (unsupported payload version)")
 	}
 	return &e, nil
 }

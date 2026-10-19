@@ -1,6 +1,6 @@
 // Command subscriptions opens a subscription checkout session with a trial, lists active
-// subscriptions, reads one and its bills, checks access to it, and, on request, bills it now
-// (test mode) or cancels it at the end of its paid period.
+// subscriptions, reads one and its bills, tags it with metadata, checks access to it, and, on
+// request, bills it now (test mode) or cancels it at the end of its paid period.
 //
 //	QBITFLOW_API_KEY=sk_… [QBITFLOW_BASE_URL=…] [SUBSCRIPTION_UUID=sub@…] [TEST_BILL=1] [CANCEL=1] go run ./examples/subscriptions
 //
@@ -58,19 +58,31 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("  bill %s: %.2f USD\n", bill.UUID, bill.Amount)
+		fmt.Printf("  bill %s: %s USD, paid until %v\n", bill.UUID, bill.AmountUSD, bill.PeriodEnd)
 	}
+
+	// docs:start subscriptions-update
+	// Metadata is merged into the subscription's: "" deletes a key, keys not named are kept.
+	// It is the only thing a merchant edits on a subscription; webhooks carry it.
+	updated, err := client.Subscriptions.Update(ctx, subscriptionUUID, &qbitflow.UpdateSubscriptionParams{
+		Metadata: map[string]string{"plan": "pro", "coupon": ""},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(updated.Metadata["plan"])
+	// docs:end subscriptions-update
 
 	checkAccess(ctx, client, subscriptionUUID)
 
 	if os.Getenv("TEST_BILL") == "1" {
 		// docs:start subscriptions-test-bill
 		// Test mode only: runs the next billing now, with live's statuses and webhooks.
-		state, err := client.Subscriptions.ExecuteTestBilling(ctx, subscriptionUUID)
+		bill, err := client.Subscriptions.TestBill(ctx, subscriptionUUID)
 		if err != nil {
-			log.Fatal(err) // 409 payment_not_due before NextBillingDate; 400 for a live subscription
+			log.Fatal(err) // 409 payment_not_due before NextBillingAt; 400 test_mode_only for a live one
 		}
-		fmt.Println(state.Stage, state.Outcome, state.FailureCode)
+		fmt.Println(bill.BillUUID, bill.Stage, bill.Outcome, bill.FailureCode) // sub-hist@…
 		// docs:end subscriptions-test-bill
 	}
 
@@ -102,7 +114,7 @@ func openCheckout(ctx context.Context, client *qbitflow.Client) {
 	session, err := client.CheckoutSessions.CreateSubscription(ctx, &qbitflow.CreateSubscriptionSessionParams{
 		ProductName: "T-shirt",
 		Description: "Blue, size M",
-		Price:       4.99, // USD per period
+		PriceUSD:    "4.99", // USD per period, a decimal string
 		Frequency:   &qbitflow.Duration{Value: 1, Unit: qbitflow.DurationUnitMonths},
 		TrialPeriod: &qbitflow.Duration{Value: 7, Unit: qbitflow.DurationUnitDays},
 		Reference:   "order-1043",

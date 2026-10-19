@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -34,29 +35,29 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 		"Customers.Get":                {"uuid", func() error { return drop(c.Customers.Get(ctx, "pay@"+uuidA)) }},
 		"Customers.Update":             {"uuid", func() error { return drop(c.Customers.Update(ctx, "", &UpdateCustomerParams{})) }},
 		"Customers.Delete":             {"uuid", func() error { return c.Customers.Delete(ctx, "x") }},
-		"Customers.GetByEmail":         {"email", func() error { return drop(c.Customers.GetByEmail(ctx, "")) }},
 		"Customers.GetByReference":     {"reference", func() error { return drop(c.Customers.GetByReference(ctx, "")) }},
-		"CheckoutSessions.GetStatus":   {"uuid", func() error { return drop(c.CheckoutSessions.GetStatus(ctx, "")) }},
+		"Customers.GetByReference bad": {"reference", func() error { return drop(c.Customers.GetByReference(ctx, "a b")) }},
+		"Products.GetByReference long": {"reference", func() error { return drop(c.Products.GetByReference(ctx, strings.Repeat("r", 101))) }},
+		"CheckoutSessions.Get":         {"uuid", func() error { return drop(c.CheckoutSessions.Get(ctx, "")) }},
 		"CheckoutSessions.Expire":      {"uuid", func() error { return drop(c.CheckoutSessions.Expire(ctx, "cs_123")) }},
 		"Payments.Get":                 {"uuid", func() error { return drop(c.Payments.Get(ctx, "pay@123", nil)) }},
-		"Payments.GetByReference":      {"reference", func() error { return drop(c.Payments.GetByReference(ctx, "")) }},
+		"Payments.GetByReference":      {"reference", func() error { return drop(c.Payments.GetByReference(ctx, "order/1")) }},
 		"Subscriptions.Get":            {"uuid", func() error { return drop(c.Subscriptions.Get(ctx, "bad@"+uuidA, nil)) }},
 		"Subscriptions.GetByReference": {"reference", func() error { return drop(c.Subscriptions.GetByReference(ctx, "")) }},
 		"Subscriptions.ListBills":      {"uuid", func() error { return drop(c.Subscriptions.ListBills(ctx, "", nil)) }},
 		"Subscriptions.GetBill":        {"billUuid", func() error { return drop(c.Subscriptions.GetBill(ctx, "1", nil)) }},
-		"Subscriptions.GetPublicHistory": {"subscriptionUuid", func() error {
-			return drop(c.Subscriptions.GetPublicHistory(ctx, ""))
-		}},
-		"Subscriptions.Cancel":             {"uuid", func() error { return drop(c.Subscriptions.Cancel(ctx, "", &CancelSubscriptionParams{Immediate: &yes})) }},
-		"Subscriptions.ExecuteTestBilling": {"uuid", func() error { return drop(c.Subscriptions.ExecuteTestBilling(ctx, "sub")) }},
-		"Members.Get":                      {"userUuid", func() error { return drop(c.Members.Get(ctx, "")) }},
-		"Members.Update":                   {"userUuid", func() error { return drop(c.Members.Update(ctx, "1", &UpdateMemberParams{})) }},
-		"Members.Remove":                   {"userUuid", func() error { return c.Members.Remove(ctx, "") }},
-		"Members.Trust":                    {"userUuid", func() error { return drop(c.Members.Trust(ctx, "x")) }},
-		"Members.GetHeldFunds":             {"userUuid", func() error { return drop(c.Members.GetHeldFunds(ctx, "")) }},
-		"Invitations.Revoke":               {"uuid", func() error { return drop(c.Invitations.Revoke(ctx, "")) }},
-		"Wallets.ListForMember":            {"userUuid", func() error { return drop(c.Wallets.ListForMember(ctx, "1")) }},
-		"Webhooks.Endpoints.Get":           {"uuid", func() error { return drop(c.Webhooks.Endpoints.Get(ctx, "")) }},
+		"Subscriptions.Update":         {"uuid", func() error { return drop(c.Subscriptions.Update(ctx, "", &UpdateSubscriptionParams{})) }},
+		"Subscriptions.Cancel":         {"uuid", func() error { return drop(c.Subscriptions.Cancel(ctx, "", &CancelSubscriptionParams{Immediate: &yes})) }},
+		"Subscriptions.TestBill":       {"uuid", func() error { return drop(c.Subscriptions.TestBill(ctx, "sub")) }},
+		"Refunds.Get":                  {"uuid", func() error { return drop(c.Refunds.Get(ctx, "refund@x")) }},
+		"Members.Get":                  {"userUuid", func() error { return drop(c.Members.Get(ctx, "")) }},
+		"Members.Update":               {"userUuid", func() error { return drop(c.Members.Update(ctx, "1", &UpdateMemberParams{})) }},
+		"Members.Remove":               {"userUuid", func() error { return c.Members.Remove(ctx, "") }},
+		"Members.Trust":                {"userUuid", func() error { return drop(c.Members.Trust(ctx, "x")) }},
+		"Members.GetHeldFunds":         {"userUuid", func() error { return drop(c.Members.GetHeldFunds(ctx, "")) }},
+		"Invitations.Revoke":           {"uuid", func() error { return c.Invitations.Revoke(ctx, "") }},
+		"Wallets.ListForMember":        {"userUuid", func() error { return drop(c.Wallets.ListForMember(ctx, "1")) }},
+		"Webhooks.Endpoints.Get":       {"uuid", func() error { return drop(c.Webhooks.Endpoints.Get(ctx, "")) }},
 		"Webhooks.Endpoints.Update": {"uuid", func() error {
 			return drop(c.Webhooks.Endpoints.Update(ctx, "x", &UpdateWebhookEndpointParams{}))
 		}},
@@ -78,29 +79,38 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 		"Customers.Update nil":                  {"", func() error { return drop(c.Customers.Update(ctx, uuidA, nil)) }},
 		"CheckoutSessions.CreatePayment nil":    {"", func() error { return drop(c.CheckoutSessions.CreatePayment(ctx, nil)) }},
 		"CheckoutSessions.CreateSubscription 0": {"", func() error { return drop(c.CheckoutSessions.CreateSubscription(ctx, nil)) }},
-		"Refunds.Initiate nil":                  {"", func() error { return drop(c.Refunds.Initiate(ctx, nil)) }},
+		"Refunds.Create nil":                    {"", func() error { return drop(c.Refunds.Create(ctx, nil)) }},
+		"Subscriptions.Update nil":              {"", func() error { return drop(c.Subscriptions.Update(ctx, subID, nil)) }},
 		"Members.Update nil":                    {"", func() error { return drop(c.Members.Update(ctx, memberUUID, nil)) }},
 		"Invitations.Create nil":                {"", func() error { return drop(c.Invitations.Create(ctx, nil)) }},
 		"Webhooks.Endpoints.Create nil":         {"", func() error { return drop(c.Webhooks.Endpoints.Create(ctx, nil)) }},
 		"Webhooks.Endpoints.Update nil":         {"", func() error { return drop(c.Webhooks.Endpoints.Update(ctx, uuidA, nil)) }},
 
 		// Invalid params.
-		"Products.Create price": {"price", func() error { return drop(c.Products.Create(ctx, &CreateProductParams{Name: "Pro", Price: -1})) }},
-		"Products.Update name":  {"name", func() error { return drop(c.Products.Update(ctx, uuidA, &UpdateProductParams{Name: "<b>"})) }},
+		"Products.Create price": {"priceUsd", func() error { return drop(c.Products.Create(ctx, &CreateProductParams{Name: "Pro", PriceUSD: "-1"})) }},
+		"Products.Create metadata": {"metadata.k", func() error {
+			return drop(c.Products.Create(ctx, &CreateProductParams{Name: "Pro", PriceUSD: "9.99", Metadata: map[string]string{"k": "a\nb"}}))
+		}},
+		"Products.List cursor":    {"cursor", func() error { return drop(c.Products.List(ctx, &ProductListParams{Cursor: strings.Repeat("c", 201)})) }},
+		"Products.List reference": {"reference", func() error { return drop(c.Products.List(ctx, &ProductListParams{Reference: "a b"})) }},
+		"Products.Update name":    {"name", func() error { return drop(c.Products.Update(ctx, uuidA, &UpdateProductParams{Name: "<b>"})) }},
 		"Customers.Create email": {"email", func() error {
-			return drop(c.Customers.Create(ctx, &CreateCustomerParams{Name: "Ada", Email: "ada"}))
+			return drop(c.Customers.Create(ctx, &CreateCustomerParams{FirstName: "Ada", Email: "ada"}))
 		}},
 		"Customers.Update phone": {"phoneNumber", func() error {
 			return drop(c.Customers.Update(ctx, uuidA, &UpdateCustomerParams{PhoneNumber: ptr("call me")}))
 		}},
+		"Customers.Update lastName": {"lastName", func() error {
+			return drop(c.Customers.Update(ctx, uuidA, &UpdateCustomerParams{LastName: ptr("<b>")}))
+		}},
 		"Customers.List email": {"email", func() error { return drop(c.Customers.List(ctx, &CustomerListParams{Email: "x"})) }},
 		"CheckoutSessions.CreatePayment fee amount": {"fees.items[0].amountUsd", func() error {
 			return drop(c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA,
-				Fees: &CheckoutFees{Items: []FeeItem{{Label: "Shipping", AmountUSD: 4.999}}}}))
+				Fees: &CheckoutFees{Items: []FeeItem{{Label: "Shipping", AmountUSD: "4.999"}}}}))
 		}},
 		"CheckoutSessions.CreateSubscription fee label": {"fees.items[0].label", func() error {
 			return drop(c.CheckoutSessions.CreateSubscription(ctx, &CreateSubscriptionSessionParams{ProductUUID: uuidA,
-				Fees: &CheckoutFees{Items: []FeeItem{{Label: "", AmountUSD: 2}}}}))
+				Fees: &CheckoutFees{Items: []FeeItem{{Label: "", AmountUSD: "2"}}}}))
 		}},
 		"CheckoutSessions.CreatePayment mixed": {"productUuid", func() error {
 			return drop(c.CheckoutSessions.CreatePayment(ctx, &CreatePaymentSessionParams{ProductUUID: uuidA, ProductReference: "pro"}))
@@ -111,29 +121,43 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 		"Payments.List exclusive": {"userUuid", func() error {
 			return drop(c.Payments.List(ctx, &PaymentListParams{IncludeMembers: true, UserUUID: memberUUID}))
 		}},
-		"Payments.ListCombined source": {"source", func() error {
-			return drop(c.Payments.ListCombined(ctx, &CombinedPaymentListParams{Source: "bills"}))
+		"Transactions.List type": {"type", func() error {
+			return drop(c.Transactions.List(ctx, &TransactionListParams{Type: "subscriptionHistory"}))
 		}},
 		"Failures.List kind": {"kind", func() error { return drop(c.Failures.List(ctx, &FailureListParams{Kind: "refund"})) }},
-		"Subscriptions.List status": {"status", func() error {
-			return drop(c.Subscriptions.List(ctx, &SubscriptionListParams{Status: "lowOnFunds"}))
+		"Subscriptions.List reference": {"reference", func() error {
+			return drop(c.Subscriptions.List(ctx, &SubscriptionListParams{Reference: "a/b"}))
+		}},
+		"Subscriptions.Update metadata": {"metadata", func() error {
+			return drop(c.Subscriptions.Update(ctx, subID, &UpdateSubscriptionParams{Metadata: map[string]string{"bad key": "v"}}))
 		}},
 		"Refunds.List userUuid": {"userUuid", func() error { return drop(c.Refunds.List(ctx, &RefundListParams{UserUUID: "1"})) }},
-		"Refunds.ListInactive exclusive": {"userUuid", func() error {
-			return drop(c.Refunds.ListInactive(ctx, &RefundListParams{IncludeMembers: &yes, UserUUID: memberUUID}))
+		"Refunds.List exclusive": {"userUuid", func() error {
+			return drop(c.Refunds.List(ctx, &RefundListParams{IncludeMembers: &yes, UserUUID: memberUUID}))
 		}},
-		"Refunds.Initiate percent": {"refundPercent", func() error {
-			return drop(c.Refunds.Initiate(ctx, &InitiateRefundParams{TxUUID: payID, RefundPercent: ptr(0.0)}))
+		"Refunds.List status": {"status[1]", func() error {
+			return drop(c.Refunds.List(ctx, &RefundListParams{Status: []RefundStatus{RefundStatusPending, "open"}}))
+		}},
+		"Refunds.List txUuid": {"txUuid", func() error { return drop(c.Refunds.List(ctx, &RefundListParams{TxUUID: "pay-1"})) }},
+		"Refunds.Create percent": {"refundPercent", func() error {
+			return drop(c.Refunds.Create(ctx, &CreateRefundParams{TxUUID: payID, RefundPercent: "0"}))
 		}},
 		"Members.Update fee": {"organizationFeePercent", func() error {
-			return drop(c.Members.Update(ctx, memberUUID, &UpdateMemberParams{OrganizationFeePercent: 51}))
+			return drop(c.Members.Update(ctx, memberUUID, &UpdateMemberParams{OrganizationFeePercent: "51"}))
+		}},
+		"Members.Update fee required": {"organizationFeePercent", func() error {
+			return drop(c.Members.Update(ctx, memberUUID, &UpdateMemberParams{}))
+		}},
+		"Members.List cursor": {"cursor", func() error { return drop(c.Members.List(ctx, &MemberListParams{Cursor: strings.Repeat("c", 201)})) }},
+		"Invitations.Create fee": {"organizationFeePercent", func() error {
+			return drop(c.Invitations.Create(ctx, &CreateInvitationParams{Email: "a@b.co", OrganizationFeePercent: "7.5%"}))
 		}},
 		"Invitations.Create email": {"email", func() error { return drop(c.Invitations.Create(ctx, &CreateInvitationParams{})) }},
 		"Invitations.List status": {"status", func() error {
 			return drop(c.Invitations.List(ctx, &InvitationListParams{Status: "open"}))
 		}},
-		"Wallets.ListSupportedCurrencies": {"userUuid", func() error {
-			return drop(c.Wallets.ListSupportedCurrencies(ctx, &SupportedCurrenciesParams{UserUUID: "x"}))
+		"Wallets.ListAcceptedCurrencies": {"userUuid", func() error {
+			return drop(c.Wallets.ListAcceptedCurrencies(ctx, &AcceptedCurrenciesParams{UserUUID: "x"}))
 		}},
 		"Accounting.ExportJSON order": {"to", func() error { return drop(c.Accounting.ExportJSON(ctx, "2026-09-30", "2026-09-01")) }},
 		"Accounting.ExportCSV date":   {"from", func() error { return drop(c.Accounting.ExportCSV(ctx, "2026-02-30", "2026-03-01")) }},
@@ -143,8 +167,11 @@ func TestServiceValidationBeforeRequest(t *testing.T) {
 		"Webhooks.Endpoints.Update test event": {"events[0]", func() error {
 			return drop(c.Webhooks.Endpoints.Update(ctx, uuidA, &UpdateWebhookEndpointParams{Events: []EventType{EventTypeWebhookTest}}))
 		}},
-		"Webhooks.Events.List type": {"type", func() error {
-			return drop(c.Webhooks.Events.List(ctx, &EventListParams{Type: "payment.failed"}))
+		"Webhooks.Endpoints.List cursor": {"cursor", func() error {
+			return drop(c.Webhooks.Endpoints.List(ctx, &EndpointListParams{Cursor: strings.Repeat("c", 201)}))
+		}},
+		"Webhooks.Events.List cursor": {"cursor", func() error {
+			return drop(c.Webhooks.Events.List(ctx, &EventListParams{Cursor: strings.Repeat("c", 201)}))
 		}},
 	}
 
@@ -189,7 +216,7 @@ func TestVerifyRemoteErrors(t *testing.T) {
 			var ve *ValidationError
 			return errors.As(err, &ve) && ve.StatusCode == 400 && !errors.As(err, new(*WebhookSignatureError))
 		}},
-		{"other bad request", 400, `{"error":"bad","code":"bad_request"}`, func(err error) bool {
+		{"other bad request", 400, `{"error":"bad","code":"sender_is_receiver"}`, func(err error) bool {
 			return errors.As(err, new(*BadRequestError)) && !errors.As(err, new(*WebhookSignatureError))
 		}},
 		{"not found", 404, `{"error":"not found","code":"not_found"}`, func(err error) bool {
@@ -262,39 +289,44 @@ func uuidItem(i int) string { return fmt.Sprintf(`{"uuid":"id%d"}`, i) }
 func iterCases() []iterCase {
 	no := false
 	return []iterCase{
-		{"Customers.Iterate", "/customer/all", "email=a%40b.co&limit=2&verified=false", uuidItem,
+		{"Products.Iterate", "/products", "includeHidden=true&limit=2", uuidItem,
+			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
+				return collect(c.Products.Iterate(ctx, &ProductListParams{Limit: 2, IncludeHidden: true}),
+					func(v Product) string { return v.UUID }, stopAfter)
+			}},
+		{"Customers.Iterate", "/customers", "email=a%40b.co&limit=2&verified=false", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
 				return collect(c.Customers.Iterate(ctx, &CustomerListParams{Limit: 2, Email: "a@b.co", Verified: &no}),
 					func(v Customer) string { return v.UUID }, stopAfter)
 			}},
-		{"Payments.Iterate", "/transaction/payments", "createdAfter=" + afterQ + "&limit=2", uuidItem,
+		{"Payments.Iterate", "/payments", "createdAfter=" + afterQ + "&limit=2", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
 				return collect(c.Payments.Iterate(ctx, &PaymentListParams{Limit: 2, CreatedAfter: &after}),
 					func(v Payment) string { return v.UUID }, stopAfter)
 			}},
-		{"Payments.IterateCombined", "/transaction/payments/combined", "source=payment", uuidItem,
+		{"Transactions.Iterate", "/transactions", "type=payment", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
-				return collect(c.Payments.IterateCombined(ctx, &CombinedPaymentListParams{Source: CombinedPaymentSourcePayment}),
-					func(v CombinedPayment) string { return v.UUID }, stopAfter)
+				return collect(c.Transactions.Iterate(ctx, &TransactionListParams{Type: TransactionKindPayment}),
+					func(v Transaction) string { return v.UUID }, stopAfter)
 			}},
-		{"Failures.Iterate", "/transaction/failures", "category=reverted", uuidItem,
+		{"Failures.Iterate", "/payment-failures", "category=reverted", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
 				return collect(c.Failures.Iterate(ctx, &FailureListParams{Category: FailureCategoryReverted}),
 					func(v Failure) string { return v.UUID }, stopAfter)
 			}},
-		{"Subscriptions.Iterate", "/transaction/subscriptions", "includeMembers=true&status=active", uuidItem,
+		{"Subscriptions.Iterate", "/subscriptions", "includeMembers=true&status=active", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
 				return collect(c.Subscriptions.Iterate(ctx, &SubscriptionListParams{IncludeMembers: true, Status: SubscriptionStatusActive}),
 					func(v Subscription) string { return v.UUID }, stopAfter)
 			}},
-		{"Subscriptions.IterateBills", "/transaction/subscription/" + subID + "/bills", "limit=100", uuidItem,
+		{"Subscriptions.IterateBills", "/subscriptions/" + subID + "/bills", "limit=100", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
 				return collect(c.Subscriptions.IterateBills(ctx, subID, &BillListParams{Limit: 100}),
 					func(v Bill) string { return v.UUID }, stopAfter)
 			}},
-		{"Refunds.IterateInactive", "/transaction/refunds/all/inactive", "held=false", uuidItem,
+		{"Refunds.Iterate", "/refunds", "held=false&status=approved&status=rejected", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
-				return collect(c.Refunds.IterateInactive(ctx, &RefundListParams{Held: &no}),
+				return collect(c.Refunds.Iterate(ctx, &RefundListParams{Held: &no, Status: []RefundStatus{RefundStatusApproved, RefundStatusRejected}}),
 					func(v Refund) string { return v.UUID }, stopAfter)
 			}},
 		{"Members.Iterate", "/members", "limit=1", func(i int) string { return fmt.Sprintf(`{"userUuid":"id%d"}`, i) },
@@ -306,6 +338,11 @@ func iterCases() []iterCase {
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
 				return collect(c.Invitations.Iterate(ctx, &InvitationListParams{Status: InvitationStatusExpired}),
 					func(v Invitation) string { return v.UUID }, stopAfter)
+			}},
+		{"Webhooks.Endpoints.Iterate", "/webhooks/endpoints", "limit=2", uuidItem,
+			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
+				return collect(c.Webhooks.Endpoints.Iterate(ctx, &EndpointListParams{Limit: 2}),
+					func(v WebhookEndpoint) string { return v.UUID }, stopAfter)
 			}},
 		{"Webhooks.Events.Iterate", "/webhooks/events", "type=payment.completed",
 			func(i int) string {
@@ -327,9 +364,9 @@ func TestServiceIterators(t *testing.T) {
 			ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 				switch r.URL.Query().Get("cursor") {
 				case "":
-					jsonReply(w, 200, `{"items":[`+ic.item(0)+`,`+ic.item(1)+`],"nextCursor":"id1"}`)
-				case "id1":
-					jsonReply(w, 200, `{"items":[`+ic.item(2)+`],"nextCursor":null}`)
+					jsonReply(w, 200, `{"items":[`+ic.item(0)+`,`+ic.item(1)+`],"hasMore":true,"nextCursor":"djF8aWQx"}`)
+				case "djF8aWQx":
+					jsonReply(w, 200, `{"items":[`+ic.item(2)+`],"hasMore":false}`)
 				default:
 					jsonReply(w, 400, `{"error":"bad cursor","code":"validation_failed"}`)
 				}
@@ -355,7 +392,7 @@ func TestServiceIterators(t *testing.T) {
 				if q.Encode() != ic.filters {
 					t.Errorf("page %d: filters %q, want %q", i, q.Encode(), ic.filters)
 				}
-				if want := []string{"", "id1"}[i]; cursor != want {
+				if want := []string{"", "djF8aWQx"}[i]; cursor != want {
 					t.Errorf("page %d: cursor %q, want %q", i, cursor, want)
 				}
 			}
@@ -373,7 +410,7 @@ func TestServiceIterators(t *testing.T) {
 func TestIteratorErrors(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 		if r.URL.Query().Get("cursor") == "" {
-			jsonReply(w, 200, `{"items":[{"uuid":"id0"}],"nextCursor":"id0"}`)
+			jsonReply(w, 200, `{"items":[{"uuid":"id0"}],"hasMore":true,"nextCursor":"djF8aWQw"}`)
 			return
 		}
 		jsonReply(w, 401, `{"error":"unauthorized","code":"unauthorized"}`)
@@ -402,7 +439,7 @@ func TestIteratorErrors(t *testing.T) {
 	// Resuming from a cursor starts there (the first page is never re-requested).
 	ts2 := pagedServer(t, "")
 	c2, _ := newTestClient(t, ts2)
-	ids, err = collect(c2.Customers.Iterate(ctx, &CustomerListParams{Cursor: "c3"}), func(cu Customer) string { return cu.UUID }, 0)
+	ids, err = collect(c2.Customers.Iterate(ctx, &CustomerListParams{Cursor: "djF8YzM"}), func(cu Customer) string { return cu.UUID }, 0)
 	if err != nil || !slices.Equal(ids, []string{"c4"}) || len(ts2.recorded()) != 1 {
 		t.Errorf("resume: %v %v", ids, err)
 	}

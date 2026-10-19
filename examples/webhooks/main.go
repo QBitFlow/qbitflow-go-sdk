@@ -29,8 +29,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, e := range page.Items { // newest first
+	for _, e := range page.Items { // newest first, each exactly as delivered
 		fmt.Println(e.ID, e.Type, e.CreatedAt.Format(time.RFC3339))
+	}
+	if page.HasMore {
+		fmt.Println("more: pass", page.NextCursor, "as Cursor") // opaque, never an event id
 	}
 	// docs:end events-list
 
