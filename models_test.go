@@ -107,7 +107,7 @@ var modelFixtures = map[string]struct {
 		`"totalUsd":"-1.0933"}`, strict[HeldFunds]},
 	"MemberHeldFunds": {`{"userUuid":"m-1","totalUsd":"98.5","count":2,"oldestAt":"2026-09-28T12:00:00Z"}`, strict[MemberHeldFunds]},
 	"HeldFundsReleased": {`{"uuid":"transfer@1",` + fxTransfer + `,"received":true,"type":"heldFundsRelease","settlement":{"transaction":` + fxTx + `},` +
-		`"ledgers":[{"txUuid":"sub-hist@1","type":"bill","description":"Subscription bill sub-hist@1","amountUsd":"10","currency":` + fxCurrency + `,` +
+		`"ledgers":[{"txUuid":"pay@1","type":"payment","description":"Payment pay@1","amountUsd":"10","currency":` + fxCurrency + `,` +
 		`"owed":"9.901","owedMinUnits":"9901000","owedUsd":"9.901","createdAt":"2026-10-01T12:00:00Z"}]}`, strict[HeldFundsReleased]},
 	"Wallet": {`{"uuid":"w-1","createdAt":"2026-10-01T12:00:00Z","address":"0xpk","test":false,"userUuid":"m-1","tokenWallets":[` +
 		`{"uuid":"tw-1","createdAt":"2026-10-01T12:00:00Z","currency":` + fxCurrency + `,"walletUuid":"w-1",` +

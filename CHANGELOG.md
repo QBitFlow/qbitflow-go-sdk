@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.0.0] - 2026-10-19
 
 The SDK for **QBitFlow API v2**, aligned with the final API v2 contract (api-hub `docs/api` @
-`fab875c`) and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
+`b97ca6c`) and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
 (same services, methods, errors, retries, validation and webhook verification). A major release:
 the module path, the client, the routes and most names change.
 [MIGRATION-v3.md](MIGRATION-v3.md) maps every 2.x method and type to its replacement.
@@ -112,9 +112,9 @@ but never published; its changes are part of 3.0.0).
 -   **Enum values** follow the API's lowerCamelCase (`pastDue`, `trialExpired`);
     `TransactionTypeOneTimePayment` → `TransactionTypePayment`,
     `TransactionTypeExecuteSubscriptionPayment` → `TransactionTypeExecuteSubscription`, the PAYG
-    values are `createPaygSubscription` / `cancelPaygSubscription`. `LedgerEntryType` and
-    `AccountingEventType` `subscriptionHistory` → `bill` (`LedgerEntryTypeBill`,
-    `AccountingEventTypeBill`). `RefundStatus` keeps `failed` (declared, never set). `WebhookPayloadVersionV1` is
+    values are `createPaygSubscription` / `cancelPaygSubscription`. `AccountingEventType`
+    `subscriptionHistory` → `bill` (`AccountingEventTypeBill`); `LedgerEntryType` is `payment` or
+    `refund` only (a held seller sells no subscription, so no bill is ever a held-funds line). `RefundStatus` keeps `failed` (declared, never set). `WebhookPayloadVersionV1` is
     removed: v2 is the only payload.
 -   **Pagination**: `GetAll…(limit, cursor)` → `List(ctx, *…ListParams)` returning a `*Page[T]`
     `{Items, HasMore, NextCursor}`: `HasMore` is a field (no `HasMore()` method), `NextCursor` an
@@ -207,6 +207,12 @@ but never published; its changes are part of 3.0.0).
     `Amount`, its `Currency` and, once approved, its `Settlement`.
 -   `Members` (`List`, `Get`, `Update`, `Remove`, `Trust`, `ListHeldFunds`, `GetHeldFunds`,
     `GetOwnHeldFunds`) and `Invitations` (`Create`, `List`, `Revoke`) for marketplaces.
+    `CreateInvitationParams.SendEmail` (`nil` = emailed): `new(false)` creates the invitation
+    without emailing it, to share its `Link` yourself.
+-   `MerchantNotReadyReason` (`Details["reason"]` of a `409 merchant_not_ready`): `noWallet`,
+    `organizationNoWallet`, `noTokenWallet`, and `fundsHeld`, a subscription checkout of a member
+    whose funds the organization holds (a held member sells one-time payments only, until
+    `Members.Trust`).
 -   `Wallets` (`List` with balances, `ListForMember`, `ListAcceptedCurrencies`),
     `Accounting.ExportCSV`, `Currencies.Get`.
 -   `TokenAmount` (`Amount`, `AmountMinUnits`, `AmountUSD`), the shape of every token amount.

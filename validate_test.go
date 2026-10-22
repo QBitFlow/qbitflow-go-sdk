@@ -555,6 +555,8 @@ func TestUpdateSemantics(t *testing.T) {
 		{UpdateMemberParams{OrganizationFeePercent: "0"}, `{"organizationFeePercent":"0"}`},
 		{CreateInvitationParams{Email: "a@b.co"}, `{"email":"a@b.co","role":"user","holdFunds":false}`},
 		{CreateInvitationParams{Email: "a@b.co", HoldFunds: true, OrganizationFeePercent: "2.5", RedirectURL: "https://x.io"}, `{"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5","redirectUrl":"https://x.io"}`},
+		{CreateInvitationParams{Email: "a@b.co", SendEmail: ptr(false)}, `{"email":"a@b.co","role":"user","holdFunds":false,"sendEmail":false}`},
+		{CreateInvitationParams{Email: "a@b.co", SendEmail: ptr(true)}, `{"email":"a@b.co","role":"user","holdFunds":false,"sendEmail":true}`},
 		{CreateProductParams{Name: "Pro", PriceUSD: "10"}, `{"name":"Pro","priceUsd":"10"}`},
 		{CreateProductParams{Name: "Pro", PriceUSD: "10.50", Subscription: &SubscriptionTermsParams{Frequency: &Duration{1, DurationUnitMonths}, TrialPeriod: &Duration{}, MinPeriods: ptr(uint32(0))}},
 			`{"name":"Pro","priceUsd":"10.50","subscription":{"frequency":{"value":1,"unit":"months"},"trialPeriod":{"value":0},"minPeriods":0}}`},

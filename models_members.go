@@ -95,8 +95,8 @@ type Member struct {
 
 // HeldFunds is what the organization holds for a member in one mode (held funds).
 type HeldFunds struct {
-	// Ledgers are the lines not settled yet, oldest first: the payments and bills held
-	// (positive), and the refunds sent of them (negative, type refund). Empty when nothing is held.
+	// Ledgers are the lines not settled yet, oldest first: the payments held (positive), and the
+	// refunds sent of them (negative, type refund). Empty when nothing is held.
 	Ledgers []LedgerEntry `json:"ledgers"`
 	// TotalUSD is what the organization owes the member, in USD, a decimal string: the sum of the
 	// lines' OwedUSD. A release pays it, converted at the release's price. "0" or negative when
@@ -104,29 +104,28 @@ type HeldFunds struct {
 	TotalUSD string `json:"totalUsd"`
 }
 
-// LedgerEntry is a line of a member's held funds: a payment or a bill made to them while the
-// organization held their funds (it adds what the organization owes them), or a refund of one
-// of them (it takes off what the refund sent back to the customer).
+// LedgerEntry is a line of a member's held funds: a payment made to them while the organization
+// held their funds (it adds what the organization owes them), or a refund of one (it takes off
+// what the refund sent back to the customer).
 type LedgerEntry struct {
-	// TxUUID is the line's transaction: the payment (pay@…), the bill (sub-hist@…) or the refund
-	// (refund@…).
+	// TxUUID is the line's transaction: the payment (pay@…) or the refund (refund@…).
 	TxUUID string `json:"txUuid"`
-	// Type is payment, bill or refund.
+	// Type is payment or refund.
 	Type LedgerEntryType `json:"type"`
 	// Description says what the line is, in words ("Payment pay@…").
 	Description string `json:"description"`
-	// RefundedTxUUID is, on a refund line, the payment or bill it refunds; "" on the others.
+	// RefundedTxUUID is, on a refund line, the payment it refunds; "" on the others.
 	RefundedTxUUID string `json:"refundedTxUuid,omitempty"`
-	// AmountUSD is what the customer paid (a payment or bill), or what a refund sent back
+	// AmountUSD is what the customer paid (a payment), or what a refund sent back
 	// (positive: OwedUSD is its negative), in USD, a decimal string.
 	AmountUSD string `json:"amountUsd"`
-	// Settlement is a payment's or bill's fees and split (the member was owed
+	// Settlement is a payment's fees and split (the member was owed
 	// Settlement.Split.Merchant); nil on a refund line.
 	Settlement *Settlement `json:"settlement,omitempty"`
 	// Currency is the currency paid (and refunded).
 	Currency Currency `json:"currency"`
 	// Owed is what the line counts for in a release, in the currency's units, exact: a payment's
-	// or bill's merchant share, or minus what a refund sent back (negative). In
+	// merchant share, or minus what a refund sent back (negative). In
 	// heldFunds.released: what it counted for in that release.
 	Owed string `json:"owed"`
 	// OwedMinUnits is the same in the currency's smallest unit (negative for a refund).
@@ -144,7 +143,7 @@ type MemberHeldFunds struct {
 	// TotalUSD is what the organization owes them, in USD, a decimal string ("0" or negative when
 	// refunds cancel out the payments).
 	TotalUSD string `json:"totalUsd"`
-	// Count is their lines not settled: payments and bills held, refunds of them.
+	// Count is their lines not settled: payments held, refunds of them.
 	Count int `json:"count"`
 	// OldestAt is their oldest line not settled: how long the organization has held funds for them.
 	OldestAt time.Time `json:"oldestAt"`
@@ -237,8 +236,8 @@ type Invitation struct {
 type CreatedInvitation struct {
 	Invitation
 
-	// Link is the link to accept it, also emailed to the person: share it in your own onboarding
-	// if you prefer.
+	// Link is the link to accept it, also emailed to the person unless SendEmail was false: share
+	// it in your own onboarding if you prefer.
 	Link string `json:"link"`
 }
 
@@ -256,6 +255,10 @@ type CreateInvitationParams struct {
 	// RedirectURL is where the person goes once they accepted (with ?invitationUuid=<uuid>): a
 	// convenience, confirm with the member.joined event.
 	RedirectURL string
+	// SendEmail is whether QBitFlow emails the link to the person (nil = true). new(false) sends
+	// no invitation email: share the returned Link yourself. Signing up through the link still
+	// emails the person a confirmation.
+	SendEmail *bool
 }
 
 // MarshalJSON writes the invitation's body, with role "user".
@@ -266,7 +269,8 @@ func (p CreateInvitationParams) MarshalJSON() ([]byte, error) {
 		HoldFunds              bool   `json:"holdFunds"`
 		OrganizationFeePercent string `json:"organizationFeePercent,omitempty"`
 		RedirectURL            string `json:"redirectUrl,omitempty"`
-	}{p.Email, RoleUser, p.HoldFunds, p.OrganizationFeePercent, p.RedirectURL})
+		SendEmail              *bool  `json:"sendEmail,omitempty"`
+	}{p.Email, RoleUser, p.HoldFunds, p.OrganizationFeePercent, p.RedirectURL, p.SendEmail})
 }
 
 // Validate checks the params (behaviour §8).
