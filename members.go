@@ -97,11 +97,11 @@ func (s *MembersService) GetOwnHeldFunds(ctx context.Context, opts ...RequestOpt
 }
 
 // Create invites someone to join the organization as a member in the key's mode
-// (POST /invitations, 201) and returns the invitation with its link (also emailed). The SDK
-// always sends role "user": the team is invited from the dashboard. It sends an
-// Idempotency-Key and is retried on transient failures. Organization key only; rate limited
-// (50 an hour per organization: beyond, a *RateLimitError at once, the wait being over the SDK's
-// 60 s retry cap).
+// (POST /invitations, 201) and returns the invitation with its link (also emailed, unless
+// SendEmail is false). The SDK always sends role "user": the team is invited from the
+// dashboard. It sends an Idempotency-Key and is retried on transient failures. Organization key
+// only; rate limited (50 an hour per organization, emailed or not: beyond, a *RateLimitError at
+// once, the wait being over the SDK's 60 s retry cap).
 //
 // The person exists in the organization once they accepted: act on the member.joined webhook
 // (MemberJoined.InvitationUUID). Errors: 409 already_joined for someone already a member in

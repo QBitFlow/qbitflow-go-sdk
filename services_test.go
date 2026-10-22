@@ -558,10 +558,10 @@ func routeCases(t *testing.T) []routeCase {
 
 		// Invitations.
 		{name: "Invitations.Create", method: "POST", path: "/invitations", idempotent: true, status: 201,
-			body: `{"email":"seller@example.com","role":"user","holdFunds":true,"organizationFeePercent":"2.5","redirectUrl":"https://shop.example/welcome"}`,
+			body: `{"email":"seller@example.com","role":"user","holdFunds":true,"organizationFeePercent":"2.5","redirectUrl":"https://shop.example/welcome","sendEmail":false}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Invitations.Create(ctx, &CreateInvitationParams{Email: "seller@example.com", HoldFunds: true,
-					OrganizationFeePercent: "2.5", RedirectURL: "https://shop.example/welcome"}, o...)
+					OrganizationFeePercent: "2.5", RedirectURL: "https://shop.example/welcome", SendEmail: new(false)}, o...)
 			},
 			reply: fx("CreatedInvitation"),
 			check: func(t *testing.T, v any) {

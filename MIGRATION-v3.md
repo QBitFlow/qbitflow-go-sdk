@@ -331,7 +331,7 @@ cancel an order on it.
 | `RefundStatus` | `pending` (a customer's request), `approved`, `rejected`; `failed` is declared, never set |
 | `CombinedPayment.Source` `"subscription_history"` | `Transaction.Type` `TransactionKindBill` (`bill`) |
 | `AccountingEvent.Type` (a string) | `AccountingEventType` constants (`subscription_history` → `AccountingEventTypeBill`, `bill`) |
-| ledger lines `subscription_history` | `LedgerEntryTypeBill` (`bill`) |
+| — | `LedgerEntryType` (held-funds lines): `LedgerEntryTypePayment`, `LedgerEntryTypeRefund` (a held seller sells no subscription: no bill line) |
 
 ## 10. Errors
 

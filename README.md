@@ -417,7 +417,7 @@ fmt.Println("Redirect the customer to", session.Link)
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `CheckoutSessions.Get`.
 - **Errors to expect:** `409 merchant_not_ready` (`Details["reason"]`) when the space's wallets
-  accept no currency; `409 unique_violation` when another payment or open session holds the
+  accept no currency, or for a subscription of a member whose funds you hold (`fundsHeld`); `409 unique_violation` when another payment or open session holds the
   `Reference`; `400 validation_failed` above `"5"` USD in test mode, fees included
   (`Details["max"]`, a string), and at `"0.25"` or less for a live subscription (`Details["min"]`);
   `404` for an unknown product or customer; `410 merchant_closed` for a removed member's space.
@@ -957,7 +957,9 @@ fmt.Println("invitation", created.UUID, "link:", created.Link)
 
 `HoldFunds` is required (always sent); the fee is a percent string with at most 2 decimals
 (`"0"` to `"50"`). The answer is a `CreatedInvitation`: the invitation's fields and its `Link`
-(only here). An organization sends at most 50 invitations an hour (`429`, raised at once).
+(only here). `SendEmail: new(false)` creates the invitation without emailing it: share `Link` in
+your own onboarding (signing up through it still emails the person a confirmation). An
+organization sends at most 50 invitations an hour, emailed or not (`429`, raised at once).
 
 **2. Wait for `member.joined`.** The seller exists once they accepted: store the event's
 `UserUUID` and match `InvitationUUID` to your invitation. Never trust the redirect's
@@ -994,6 +996,11 @@ if err != nil {
 }
 fmt.Println(session.Link)
 ```
+
+While you hold a seller's funds (`Member.TrustedAt` nil), they sell **one-time payments only**: a
+subscription checkout in their space answers `409 merchant_not_ready` with `Details["reason"]`
+`fundsHeld` (`qbitflow.MerchantNotReadyReasonFundsHeld`) until you trust them (`Members.Trust`),
+and their subscription products' links open nothing.
 
 **4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
 default; the event's `UserUUID` names the seller. Use it as `OnBehalfOf` for follow-up reads.

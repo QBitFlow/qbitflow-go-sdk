@@ -39,7 +39,7 @@ type Refund struct {
 	// InitiatedBy is customer (requested by the customer, the merchant answers) or merchant (sent
 	// by the merchant without a request, from the dashboard: recorded once confirmed, approved).
 	InitiatedBy RefundInitiator `json:"initiatedBy"`
-	// Held is true when the refunded payment or bill was paid to the organization's wallet, which
+	// Held is true when the refunded payment was paid to the organization's wallet, which
 	// holds the seller's funds: the organization decides the refund and sends it from its wallet.
 	// Once sent, it is a negative line of the seller's held funds.
 	Held bool `json:"held"`

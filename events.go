@@ -198,7 +198,7 @@ type HeldFundsReleased struct {
 	Type TransferType `json:"type"`
 	// Settlement is the transfer's transaction: its block and what it cost its sender.
 	Settlement TransferSettlement `json:"settlement"`
-	// Ledgers are the lines it settled, oldest first: the payments and bills it paid (positive)
+	// Ledgers are the lines it settled, oldest first: the payments it paid (positive)
 	// and the refunds of them it took off (negative, type refund), each with what it counted for
 	// (Owed, OwedMinUnits, OwedUSD).
 	Ledgers []LedgerEntry `json:"ledgers"`

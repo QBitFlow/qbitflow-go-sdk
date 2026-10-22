@@ -212,13 +212,13 @@ const (
 	TransferTypeExternal         TransferType = "external"
 )
 
-// LedgerEntryType is a held-funds line's kind.
+// LedgerEntryType is a held-funds line's kind. A held member sells no subscription, so no bill
+// is ever a line.
 type LedgerEntryType string
 
 // Ledger entry types.
 const (
 	LedgerEntryTypePayment LedgerEntryType = "payment" // A payment made to the member while the organization held their funds
-	LedgerEntryTypeBill    LedgerEntryType = "bill"    // A subscription bill paid to the member while held
 	LedgerEntryTypeRefund  LedgerEntryType = "refund"  // A refund the organization sent of one of them
 )
 
@@ -348,4 +348,5 @@ const (
 	MerchantNotReadyReasonNoWallet             MerchantNotReadyReason = "noWallet"
 	MerchantNotReadyReasonOrganizationNoWallet MerchantNotReadyReason = "organizationNoWallet"
 	MerchantNotReadyReasonNoTokenWallet        MerchantNotReadyReason = "noTokenWallet"
+	MerchantNotReadyReasonFundsHeld            MerchantNotReadyReason = "fundsHeld" // A subscription checkout of a member whose funds the organization holds: one-time payments only until Members.Trust
 )
