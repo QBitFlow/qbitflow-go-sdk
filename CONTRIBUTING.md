@@ -1,62 +1,63 @@
 # Contributing to the QBitFlow Go SDK
 
-## Gates
+Thanks for helping. Bug reports and pull requests are welcome on
+[GitHub](https://github.com/QBitFlow/qbitflow-go-sdk). For a security issue, don't open an issue:
+follow [SECURITY.md](SECURITY.md).
 
-Run them from the repo root before committing; all must pass, offline (unset the `QBITFLOW_*`
-variables):
+## Requirements
+
+Go 1.27 or later (the SDK uses generic methods). No other tool is needed for the gates below.
+
+## Gates you can run
+
+Run them from the repository root before opening a pull request; they need no network, no API key
+and no QBitFlow account, and CI runs the same ones:
 
 ```bash
 go build ./...
 go vet ./...
-test -z "$($(go env GOROOT)/bin/gofmt -l .)"   # the toolchain's gofmt, not the one on PATH
-go test -count=1 ./...
+go vet -tags integration ./...
+test -z "$($(go env GOROOT)/bin/gofmt -l .)"   # the toolchain's gofmt (a PATH gofmt older than 1.27 skips generic methods)
 go test -race -count=1 ./...
 ```
 
-The live checks are opt-in: see [Testing](README.md#testing).
+`go test ./...` runs the offline suite against in-process stub servers. Unset any `QBITFLOW_*`
+variables you may have exported so the suite stays offline.
+
+Two checks are skipped automatically on your machine; you don't need them for a pull request:
+
+- **The snippet check** (`TestSnippets`) is part of the maintainers' conformance suite: it
+  compares the examples' snippet regions and the README's embedded blocks with the website's
+  snippet catalog, and skips outside the maintainers' workspace.
+- **The live checks** (`integration_test.go`, build tag `integration`) run only with
+  `QBITFLOW_API_KEY` and `QBITFLOW_BASE_URL` set. If you have a test-mode key, you may run the
+  read-only group: `go test -tags integration -run LiveReadOnly -v .` ([Testing](README.md#testing)
+  describes the write group).
+
+## Code
+
+- Keep the public surface documented: every exported identifier has a doc comment.
+- Add or update tests with every change; behaviour is pinned by the offline suite.
+- No new dependencies outside the standard library.
+- Update the [README](README.md) when behaviour changes, and describe the change in the pull
+  request (maintainers write the [CHANGELOG](CHANGELOG.md) entry).
 
 ## Website snippets
 
-> **Website snippets.** The code on qbitflow.app/docs and in this README comes from `// docs:start <id>` … `// docs:end <id>` regions in `examples/`. Every change keeps them true:
-> - **New public capability:** add a region, an id in the hub's `snippets/catalog.json` (the same id across all SDKs), and the manifest entry, plus the README block via `scripts/embed-snippets.mjs`.
-> - **Changed capability:** update the region's code. Never hand-edit an embedded README block: re-run the script.
-> - **Ids are a public contract with the website.** Never rename or remove one silently. To retire an id, keep it until the website no longer uses it, and note it in the CHANGELOG.
-> - **Before committing:** the examples run, the manifest check passes, and `embed-snippets --check` passes.
-> - **Unsupported ids:** an id the SDK can't support goes under `unsupported` with a reason. Never write placeholder code.
+The code on [qbitflow.app/docs](https://qbitflow.app/docs) and in the README's Go blocks comes from
+regions of the programs in [`examples/`](examples):
 
-### The convention
-
-- **Regions.** In a program under `examples/`, wrap the code the docs show between two marker
-  lines, exactly `// docs:start <id>` and `// docs:end <id>` (one space each side; indentation
-  before them is fine, the extractor dedents). One region per id; regions never overlap or nest.
-  The ids come from the hub's `snippets/catalog.json`, whose `shows` and `routes` say what each
-  region does.
-- **Regions read on their own.** They assume a ready `*qbitflow.Client` named `client` and a
-  `ctx` (except `client-init` and `client-on-behalf-of`); an id they need but don't create comes
-  from a variable defined just outside the region (`paymentUUID`, `subscriptionUUID`,
-  `sessionUUID`, `memberUUID`). They use the catalog's shared example values (`conventions`), the
-  `qbitflow.PlaceholderUUID` constant in success URLs, and no real keys: those come from
-  `QBITFLOW_API_KEY` and `QBITFLOW_WEBHOOK_SECRET`. Setup (env lookups, flags, main wiring) stays
-  outside. Errors: `log.Fatal(err)`, as in the rest of the examples.
-- **The programs stay runnable**: each one reads its configuration from the environment (see
-  [Examples](README.md#examples)) and builds with the gates.
-- **The manifest**, `examples/snippets.manifest.json`, maps every catalog id to the file holding
-  its region (`snippets`), or to the reason this SDK can't support it (`unsupported`), in the
-  catalog's order, and pins the hub commit of the catalog it follows (`catalog`).
-- **The README** embeds regions between `<!-- docs:snippet <id> -->` and
-  `<!-- /docs:snippet -->` lines. The script fills them: never edit what is between them.
-
-### Running the script
-
-From a hub checkout (this repo sits in its `sdk/qbitflow-go-sdk`):
-
-```bash
-node ../../scripts/embed-snippets.mjs .          # rewrites the README's embedded blocks
-node ../../scripts/embed-snippets.mjs --check .  # changes nothing; exits 1 on any drift
-```
-
-With the hub elsewhere: `node "$QBITFLOW_HUB_DIR/scripts/embed-snippets.mjs" --check .`.
-
-`go test ./...` runs the same check (`TestSnippets` in `snippets_test.go`). It finds the hub at
-`QBITFLOW_HUB_DIR` when set (and fails if that is not a hub), else at `../..`; without a hub or
-`node`, it is skipped.
+- **Regions.** A region is the code between two marker lines, exactly `// docs:start <id>` and
+  `// docs:end <id>`. One region per id; regions never overlap or nest. The ids are shared with
+  the website and the other QBitFlow SDKs: never rename or remove one.
+- **Regions read on their own.** They assume a ready `*qbitflow.Client` named `client` and a `ctx`
+  (except `client-init` and `client-on-behalf-of`); an id they need but don't create comes from a
+  variable defined just outside the region (`paymentUUID`, `subscriptionUUID`, `sessionUUID`,
+  `memberUUID`). They use no real keys (those come from `QBITFLOW_API_KEY` and
+  `QBITFLOW_WEBHOOK_SECRET`), and handle errors with `log.Fatal(err)`.
+- **The programs stay runnable** and build with the gates.
+- **The manifest**, [`examples/snippets.manifest.json`](examples/snippets.manifest.json), maps each
+  id to the file holding its region, or to the reason the SDK can't support it (`unsupported`).
+- **The README** embeds regions between `<!-- docs:snippet <id> -->` and `<!-- /docs:snippet -->`
+  lines. A maintainer's script fills them: never edit what is between them by hand. If your change
+  edits a region, say so in the pull request and a maintainer regenerates the README blocks.
