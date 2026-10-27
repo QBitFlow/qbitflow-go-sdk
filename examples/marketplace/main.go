@@ -125,7 +125,7 @@ func sellAs(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 
 	// docs:start client-on-behalf-of
 	// A client acting in the member's space (organization key): every request sends
-	// On-Behalf-Of. It shares the connections and settings of client.
+	// On-Behalf-Of. It shares the connections and configuration of client.
 	seller := client.OnBehalfOf(memberUUID)
 	products, err := seller.Products.List(ctx, nil)
 	if err != nil {

@@ -9,7 +9,7 @@ checkouts, one-time payments, subscriptions, refunds, marketplaces with commissi
 funds, accounting exports and signed webhooks. Customers pay from their own wallets, on Ethereum,
 Base and Solana, straight to yours.
 
-- **API v2**, every integrator route: 15 services, 58 routes, one `qbitflow` package.
+- **API v2**, every integrator route: 14 services, 53 public routes, one `qbitflow` package.
 - **No dependencies** beyond the standard library.
 - **Typed errors** matched with `errors.As`, each carrying the API's code, request id and field errors.
 - **Safe retries**: reads and creates are retried on network errors, 5xx and 429, and every create
@@ -27,6 +27,7 @@ Base and Solana, straight to yours.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Services at a glance](#services-at-a-glance)
 - [Integration recipes](#integration-recipes)
 - [Authentication and acting for a member](#authentication-and-acting-for-a-member)
 - [Checkout sessions](#checkout-sessions)
@@ -36,7 +37,6 @@ Base and Solana, straight to yours.
 - [Refunds](#refunds)
 - [Marketplaces](#marketplaces)
 - [Wallets](#wallets)
-- [Settings](#settings)
 - [Accounting export](#accounting-export)
 - [Webhooks](#webhooks)
 - [Currencies](#currencies)
@@ -137,6 +137,33 @@ Then fulfil the order when the [`payment.completed` webhook](#webhooks) arrives 
 - **Enums** are named string types with constants (`qbitflow.SubscriptionStatusActive`). A value
   this SDK does not know yet is kept as is: give every `switch` a `default` branch.
 - **Times** are `time.Time` (the API sends RFC 3339 in UTC; any offset is accepted).
+
+## Services at a glance
+
+Every method takes `ctx` first and request options last; `it` marks a paginated list with an
+`Iterate` twin (`IterateBills` for `ListBills`). The SDK calls **53 public routes**.
+
+| Service | Methods (route) |
+|---|---|
+| `client` | `Me` (`GET /me`), `OnBehalfOf(userUUID)` (a derived client, no request) |
+| `Products` | `List` it (`GET /products`), `Create`, `Get`, `GetByReference` (the list's `?reference=` filter), `Update` (`PATCH`), `Delete` |
+| `Customers` | `List` it (`GET /customers`), `Create`, `Get`, `GetByReference`, `Update` (`PATCH`), `Delete` |
+| `CheckoutSessions` | `CreatePayment` (`POST /checkout-sessions/payment`), `CreateSubscription` (`POST /checkout-sessions/subscription`), `Get`, `Expire` (`POST …/:uuid/expire`), `WaitForCompletion` (polls `Get`) |
+| `Payments` | `List` it (`GET /payments`), `Get`, `GetByReference` |
+| `Transactions` | `List` it (`GET /transactions`: payments and bills) |
+| `Failures` | `List` it (`GET /payment-failures`) |
+| `Subscriptions` | `List` it, `Get`, `GetByReference`, `Update` (metadata), `ListBills` it, `GetBill` (`GET /bills/:uuid`), `Cancel`, `TestBill` (test mode) |
+| `Refunds` | `List` it, `Get` (read only) |
+| `Members` (organization key) | `List` it, `Get`, `Update`, `Remove`, `Trust`, `ListHeldFunds`, `GetHeldFunds`, `GetOwnHeldFunds` (`GET /held-funds`) |
+| `Invitations` (organization key) | `Create`, `List` it, `Revoke` |
+| `Wallets` | `List`, `ListForMember`, `ListAcceptedCurrencies` |
+| `Accounting` | `ExportJSON`, `ExportCSV` (`GET /accounting/export`), `ExportJSONRange`, `ExportCSVRange` (any range, in 92-day windows) |
+| `Webhooks` | `Verify`, `ConstructEvent`, `ParseEvent` (local, no request), `VerifyRemote` (`POST /webhooks/verify`); `Endpoints`: `List` it, `Create`, `Get`, `Update`, `Delete`; `Events`: `List` it, `Get` |
+| `Currencies` (public) | `List`, `Get` |
+
+Without a client, the package-level `VerifyWebhook`, `VerifyWebhookRequest`, `ConstructEvent`,
+`ParseEvent`, `SignWebhook` (for tests) and `NewWebhookRouter` cover webhook receivers, and
+`FormatAmount` / `ParseAmount` convert token amounts.
 
 ## Integration recipes
 
@@ -326,7 +353,7 @@ answer 403.
 <!-- docs:snippet client-on-behalf-of -->
 ```go
 // A client acting in the member's space (organization key): every request sends
-// On-Behalf-Of. It shares the connections and settings of client.
+// On-Behalf-Of. It shares the connections and configuration of client.
 seller := client.OnBehalfOf(memberUUID)
 products, err := seller.Products.List(ctx, nil)
 if err != nil {
@@ -419,11 +446,12 @@ fmt.Println("Redirect the customer to", session.Link)
   them as they are, never URL-encoded. In live mode both
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `CheckoutSessions.Get`.
-- **Redirect URLs are the organization's.** Left empty, they come from the space's
-  `checkout.defaults` setting, which the organization's team sets (also for a member's space). A
-  member's own key sending `SuccessURL` or `CancelURL` gets a `403 forbidden` whose
-  `Details["field"]` names it (`successUrl` first), and nothing is created; an organization key
-  acting for the member (`OnBehalfOf`) may send them.
+- **Redirect URLs and members.** Left empty, they come from the space's checkout defaults, set in
+  the dashboard. A member's own key may send `SuccessURL` and `CancelURL` while its organization's
+  `members.checkoutRedirects` policy allows it (the default). With the policy off, it gets a
+  `403 policy_disabled` (a `*qbitflow.PermissionDeniedError`) with `Details["policy"]`
+  (`members.checkoutRedirects`) and `Details["field"]` (`successUrl` first, else `cancelUrl`), and
+  nothing is created. An organization key acting for the member (`OnBehalfOf`) may always send them.
 - **Errors to expect:** `409 merchant_not_ready` (`Details["reason"]`) when the space's wallets
   accept no currency, or for a subscription of a member whose funds you hold (`fundsHeld`); `409 unique_violation` when another payment or open session holds the
   `Reference`; `400 validation_failed` above `"5"` USD in test mode, fees included
@@ -640,9 +668,8 @@ if err != nil {
 fmt.Println(customer.UUID == byReference.UUID)
 ```
 
-`Customers.Get`, `List` / `Iterate` (by `Email`, `Reference` or `Verified`) and `Delete` (`204`)
-complete the set. A customer you create is `Verified`; one QBitFlow created from the email a payer
-typed at checkout is not, and a checkout never links a typed email to a verified customer. A checkout given `CustomerUUID` or `CustomerReference` asks the customer
+`Customers.Get`, `List` / `Iterate` (by `Email` or `Reference`) and `Delete` (`204`) complete the
+set. A checkout given `CustomerUUID` or `CustomerReference` asks the customer
 nothing (`CustomerReference` is kept on the payment, and links your customer with that reference
 if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
 says (the full details by default).
@@ -937,7 +964,7 @@ one refund per transaction, whatever it became: `Payment.Refundable` / `NotRefun
 whether one would be accepted now.
 
 A refund is `pending` (a customer's request waiting for your answer), `approved` or `rejected`
-(both final); `failed` is declared but never set. `InitiatedBy` is `customer` or `merchant`.
+(both final). `InitiatedBy` is `customer` or `merchant`.
 
 ## Marketplaces
 
@@ -1110,38 +1137,6 @@ for _, w := range wallets {
 `Wallets.ListAcceptedCurrencies` the currencies a space's checkouts accept now (`UserUUID`: a
 member's, organization key): none means its checkouts answer `409 merchant_not_ready`.
 
-## Settings
-
-A space's **settings** (branding, checkout defaults, refund rules, email choices) and, for an
-organization, the **policies** that say what its members may do themselves. Defaults live in the
-API: an untouched space has none stored. `Settings.Definitions` lists every key with its `Type`
-(`boolean`, `integer`, `enum` or `object`), bounds and default, and `Settings.List` the value each
-key has in the request's space, its `Source` (`SettingSourceOwn`, `SettingSourceOrganization` or
-`SettingSourceDefault`) and whether this key may change it (`Editable`). Both are bounded lists
-(slices).
-
-```go
-s, err := client.Settings.Set(ctx, "refunds.windowDays", 14)
-if err != nil {
-	log.Fatal(err)
-}
-fmt.Println(s.Key, string(s.Value), s.Source) // refunds.windowDays 14 own
-
-err = client.Settings.Reset(ctx, "refunds.windowDays") // inherits the organization's value, or the default
-```
-
-- `Set(ctx, key, value)` gives the space its own value and returns the key's `SettingValue`. The
-  value is typed by the key: a `bool`, an integer, an enum string, or an object (a struct or map,
-  whose unknown fields the API refuses); `nil` is refused. A wrong type, range or value is a
-  `*ValidationError` naming `value` or `value.<field>`, an unknown key a `*NotFoundError`. `Reset`
-  removes the own value (204). The key is 1 to 100 characters. Neither is retried.
-- An organization key writes every setting, a member's key its own: `403 forbidden` for the
-  others, and `403 policy_disabled` (`Details["policy"]`) when a policy has turned the key off for
-  members. A key writes its own mode only. **A policy (`members.*`) is changed from the dashboard
-  only**: with an API key, `Set` and `Reset` answer `403 forbidden`.
-- A value is the space's own, else the organization's, else the default; an own value replaces the
-  organization's as a whole. `Value` is raw JSON (`json.RawMessage`): decode it with `encoding/json`.
-
 ## Accounting export
 
 Every payment, bill, refund and fee between two dates (`YYYY-MM-DD`, both included), as JSON rows
@@ -1291,7 +1286,8 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 ```
 <!-- /docs:snippet -->
 
-`VerifyWebhook` only verifies; `ParseEvent` parses a body already verified. In a `net/http`
+`VerifyWebhook` only verifies; `ParseEvent` parses a body already verified. A client has the
+same three as methods (`client.Webhooks.Verify`, `ConstructEvent`, `ParseEvent`). In a `net/http`
 handler, `body, err := qbitflow.VerifyWebhookRequest(r, secret)` reads the request's body (at most
 1 MiB) and checks its signature in one call, then `qbitflow.ParseEvent(body)` parses it.
 
@@ -1308,8 +1304,8 @@ handler, `body, err := qbitflow.VerifyWebhookRequest(r, secret)` reads the reque
 - **Members' events** carry the member in `Event.UserUUID`: read their resources with
   `client.OnBehalfOf(event.UserUUID)`.
 - **No fixed source IPs**: verify the signature, never allow-list addresses.
-- **v2 only.** Every endpoint receives the v2 envelope (`QBitFlow-Webhook-Version: v2`); a body of
-  another version is refused by `ParseEvent` (`*ValidationError`).
+- **v2 events only.** A body that is not a v2 event (v1 payloads are retired) is refused by
+  `ParseEvent` with a `*ValidationError`.
 - **Headers:** `QBitFlow-Signature`, `QBitFlow-Event-Id` and `QBitFlow-Event-Type`
   (`qbitflow.SignatureHeader`, `EventIDHeader`, `EventTypeHeader`).
 - Not holding the secret? `client.Webhooks.VerifyRemote(ctx, endpointUUID, rawBody, header)` has the
@@ -1472,7 +1468,7 @@ Every error the SDK returns is one of the types below, matched with `errors.As`.
 | `*ValidationError` | 400 `validation_failed`, or input the SDK refused **before sending** (`StatusCode` 0) | `FieldErrors`: each failing input by its wire name, dotted when nested (`frequency.unit`) |
 | `*BadRequestError` | any other 400 | `foreign_key_violation` (`Details["field"]`), `test_mode_only`, `sender_is_receiver` |
 | `*AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
-| `*PermissionDeniedError` | 403 | `forbidden` (`Details["field"]` when a member's key sends a checkout's `successUrl` / `cancelUrl`), `policy_disabled` (`Details["policy"]`), `plan_required` |
+| `*PermissionDeniedError` | 403 | `forbidden` (no details: the key's role or the resource doesn't allow it; also a bad `On-Behalf-Of`), `policy_disabled`: a member's key doing what its organization's member policy doesn't allow (`Details["policy"]`, e.g. `members.subscriptions`; plus `Details["field"]` when the policy governs a request field: `successUrl` / `cancelUrl` under `members.checkoutRedirects`) |
 | `*NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `GetByReference` that found nothing (code `not_found`, the list's `RequestID`) |
 | `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `*GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
@@ -1523,7 +1519,8 @@ for a `*RateLimitError`.
 
 **Client-side validation.** Each params type has a `Validate` method, run before every request:
 names and texts (lengths in characters, no markup characters), references
-(`A-Z a-z 0-9 . _ : @ -`, 1 to 100, on creates and on the `Reference` filters and `GetByReference`),
+(`A-Z a-z 0-9 . _ : @ -`, 1 to 100, never exactly `.` or `..`; on creates, `ProductReference`,
+`CustomerReference`, the `Reference` filters and `GetByReference`),
 emails (the customers' `Email` filter too), phone numbers, absolute `http(s)` URLs, USD amounts
 (decimal strings with at most 2 decimals, above 0, at most 1,000,000), percents (decimal strings,
 at most 2 decimals: `OrganizationFeePercent` 0 to 50),
@@ -1652,7 +1649,7 @@ Runnable programs in [`examples/`](examples) (`QBITFLOW_API_KEY=sk_… go run ./
 | [`checkout`](examples/checkout) | a payment checkout (and one with fees), its status, `WaitForCompletion`, expiry | |
 | [`catalog`](examples/catalog) | a product, the products, a checkout for a product, a page of customers | |
 | [`payments`](examples/payments) | a filtered page of payments, the iterator, exact amounts, a payment by id and by reference | `PAYMENT_UUID` |
-| [`refunds`](examples/refunds) | the pending refunds, a partial refund | `PAYMENT_UUID` |
+| [`refunds`](examples/refunds) | the pending refunds, one refund by id | |
 | [`subscriptions`](examples/subscriptions) | a subscription checkout with a trial, a subscription, its bills, its metadata, `HasAccess`, a test bill, cancel at period end | `SUBSCRIPTION_UUID`, `TEST_BILL=1`, `CANCEL=1` |
 | [`marketplace`](examples/marketplace) | members, invitations, sell `OnBehalfOf`, wallets, held funds, fee, trust, removal | `INVITE=1`, `REVOKE=1`, `MEMBER_UUID`, `FEE=1`, `TRUST=1`, `REMOVE=1` |
 | [`accounting`](examples/accounting) | a yearly export, as JSON and CSV | |
@@ -1667,18 +1664,26 @@ these programs (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Testing
 
+The offline gates, as CI runs them (no network, no key):
+
 ```bash
-go build ./... && go vet ./... && test -z "$($(go env GOROOT)/bin/gofmt -l .)" && go test ./... && go test -race ./...
+go build ./... && go vet ./... && test -z "$($(go env GOROOT)/bin/gofmt -l .)" && go test -race -count=1 ./...
 ```
 
-`go test ./...` runs the offline suite against stub servers. The live checks are behind a build
-tag and need an API key **and** an explicit base URL:
+`go test ./...` runs the offline suite against in-process stub servers: requests, retries,
+decoding, validation, webhook signatures and events. The snippet check (`TestSnippets`) belongs to
+the maintainers' conformance suite and skips itself outside their workspace.
+
+The live checks are behind the `integration` build tag and need an API key **and** an explicit
+base URL (a key without a base URL fails; neither skips them):
 
 ```bash
 QBITFLOW_API_KEY=sk_… QBITFLOW_BASE_URL=https://… go test -tags integration -run Live -v .
 ```
 
-The read-only checks only read; the write checks also need `QBITFLOW_LIVE_WRITES=1` and a test-mode key (`QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a disposable server only).
+The read-only group only reads. The write group also needs `QBITFLOW_LIVE_WRITES=1` and a
+test-mode key (`QBITFLOW_ALLOW_LIVE_MODE_WRITES=1` allows a live-mode key, for a disposable server
+only); it deletes what it creates. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
@@ -1687,9 +1692,9 @@ This project is licensed under the MPL-2.0 License: see the [LICENSE](LICENSE) f
 
 ## Support
 
-- 📖 [Documentation](https://qbitflow.app/docs)
-- 📧 [Email Support](mailto:support@qbitflow.app)
-- 🐛 [Issue Tracker](https://github.com/QBitFlow/qbitflow-go-sdk/issues)
+- [Documentation](https://qbitflow.app/docs)
+- [Email support](mailto:support@qbitflow.app)
+- [Issue tracker](https://github.com/QBitFlow/qbitflow-go-sdk/issues) (not for security issues)
 
 ## Changelog
 
