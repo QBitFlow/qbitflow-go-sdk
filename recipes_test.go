@@ -463,7 +463,7 @@ func TestNewClientFromEnv(t *testing.T) {
 		t.Setenv("QBITFLOW_BASE_URL", "")
 		t.Setenv("QBITFLOW_ON_BEHALF_OF", "")
 		c, err := NewClientFromEnv()
-		if err != nil || c.t.baseURL != DefaultBaseURL || c.t.apiKey != testAPIKey || c.onBehalfOf != "" {
+		if err != nil || c.t.baseURL != DefaultBaseURL || *c.t.apiKey != testAPIKey || c.onBehalfOf != "" {
 			t.Fatalf("%+v %v", c, err)
 		}
 	})

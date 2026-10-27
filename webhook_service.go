@@ -52,8 +52,9 @@ func (s *WebhookEndpointsService) List(ctx context.Context, params *EndpointList
 func (s *WebhookEndpointsService) Iterate(ctx context.Context, params *EndpointListParams, opts ...RequestOption) iter.Seq2[WebhookEndpoint, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[WebhookEndpoint], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 
@@ -122,8 +123,9 @@ func (s *WebhookEventsService) List(ctx context.Context, params *EventListParams
 func (s *WebhookEventsService) Iterate(ctx context.Context, params *EventListParams, opts ...RequestOption) iter.Seq2[Event, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Event], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 

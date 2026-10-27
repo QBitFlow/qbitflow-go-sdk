@@ -184,21 +184,8 @@ type TransactionType string
 
 // Transaction types.
 const (
-	TransactionTypePayment                 TransactionType = "payment"
-	TransactionTypeTransfer                TransactionType = "transfer"
-	TransactionTypeTokenTransfer           TransactionType = "tokenTransfer"
-	TransactionTypeCreateSubscription      TransactionType = "createSubscription"
-	TransactionTypeCancelSubscription      TransactionType = "cancelSubscription"
-	TransactionTypeForceCancelSubscription TransactionType = "forceCancelSubscription"
-	TransactionTypeExecuteSubscription     TransactionType = "executeSubscription"
-	TransactionTypeCreatePaygSubscription  TransactionType = "createPaygSubscription"
-	TransactionTypeCancelPaygSubscription  TransactionType = "cancelPaygSubscription"
-	TransactionTypeIncreaseAllowance       TransactionType = "increaseAllowance"
-	TransactionTypeUpdateMaxAmount         TransactionType = "updateMaxAmount"
-	TransactionTypeRefund                  TransactionType = "refund"
-	TransactionTypeFaucet                  TransactionType = "faucet"
-	TransactionTypeClaimFunds              TransactionType = "claimFunds"
-	TransactionTypeReleaseHeldFunds        TransactionType = "releaseHeldFunds"
+	TransactionTypePayment            TransactionType = "payment"
+	TransactionTypeCreateSubscription TransactionType = "createSubscription"
 )
 
 // TransferType is a transfer's kind (HeldFundsReleased.Type: heldFundsRelease).
@@ -206,10 +193,7 @@ type TransferType string
 
 // Transfer types.
 const (
-	TransferTypeAccountClaim     TransferType = "accountClaim"     // v1: funds held for a user, paid when they claimed their account
 	TransferTypeHeldFundsRelease TransferType = "heldFundsRelease" // The funds an organization held for a member, paid out to them
-	TransferTypeInternal         TransferType = "internal"
-	TransferTypeExternal         TransferType = "external"
 )
 
 // LedgerEntryType is a held-funds line's kind. A held member sells no subscription, so no bill
@@ -319,16 +303,15 @@ const (
 	DurationUnitYears   DurationUnit = "years"
 )
 
-// Role is what a credential (or an invitation) may do in a space. An API key is admin
-// (organization key) or user (a member's key, or On-Behalf-Of).
+// Role is what a credential (or an invitation) may do in a space. An API key is at most admin:
+// admin (organization key) or user (a member's key, or On-Behalf-Of). Another value the API may
+// send is kept as is.
 type Role string
 
 // Roles.
 const (
-	RoleOwner  Role = "owner"
-	RoleAdmin  Role = "admin"
-	RoleUser   Role = "user"
-	RoleHandle Role = "handle"
+	RoleAdmin Role = "admin" // An organization key; an invitation to the team
+	RoleUser  Role = "user"  // A member's key, or On-Behalf-Of; a member's invitation
 )
 
 // Credential is what authenticated a request (Me.Credential).
@@ -336,8 +319,7 @@ type Credential string
 
 // Credentials.
 const (
-	CredentialAPIKey  Credential = "apiKey"  // An API key (X-API-Key)
-	CredentialSession Credential = "session" // A signed-in person's access token
+	CredentialAPIKey Credential = "apiKey" // An API key (X-API-Key)
 )
 
 // MerchantNotReadyReason is details.reason of a 409 merchant_not_ready.
@@ -349,4 +331,23 @@ const (
 	MerchantNotReadyReasonOrganizationNoWallet MerchantNotReadyReason = "organizationNoWallet"
 	MerchantNotReadyReasonNoTokenWallet        MerchantNotReadyReason = "noTokenWallet"
 	MerchantNotReadyReasonFundsHeld            MerchantNotReadyReason = "fundsHeld" // A subscription checkout of a member whose funds the organization holds: one-time payments only until Members.Trust
+)
+
+// SettingKind is what a setting definition is.
+type SettingKind string
+
+// Setting kinds.
+const (
+	SettingKindSetting SettingKind = "setting" // A value of a space; members inherit the organization's
+	SettingKindPolicy  SettingKind = "policy"  // The organization's rule for its members
+)
+
+// SettingSource is where a space's value of a key comes from.
+type SettingSource string
+
+// Setting sources.
+const (
+	SettingSourceOwn          SettingSource = "own"          // The space's own value
+	SettingSourceOrganization SettingSource = "organization" // Inherited from the organization
+	SettingSourceDefault      SettingSource = "default"      // Nobody set it
 )

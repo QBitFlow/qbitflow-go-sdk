@@ -69,9 +69,6 @@ type PaymentSessionData struct {
 	SuccessURL string `json:"successUrl,omitempty"`
 	// CancelURL is the merchant's page for a customer who leaves the checkout (placeholders filled).
 	CancelURL string `json:"cancelUrl,omitempty"`
-	// RedirectURL is the merchant's success page on the hosted page's copy only: absent from
-	// checkout.expired.
-	RedirectURL string `json:"redirectUrl,omitempty"`
 	// OrganizationName is the merchant's organization, as the checkout shows it.
 	OrganizationName string `json:"organizationName"`
 	// UserName is the member the checkout pays (a marketplace's seller), by name; "" on the
@@ -129,9 +126,12 @@ type CreatePaymentSessionParams struct {
 	// SuccessURL is where the customer goes after paying, through QBitFlow's page for the payment
 	// (PlaceholderUUID: the session's id; PlaceholderTransactionType: payment or
 	// createSubscription). Default: the space's checkout.defaults setting. https only in live
-	// mode. Reaching it is no proof of payment: fulfil on payment.completed.
+	// mode. Reaching it is no proof of payment: fulfil on payment.completed. Organization
+	// credentials only: a member's own key sending it is a 403 forbidden (details.field
+	// "successUrl"); an organization key acting On-Behalf-Of the member may.
 	SuccessURL string `json:"successUrl,omitempty"`
 	// CancelURL is where the customer goes after a cancelled or failed payment (same placeholders).
+	// Organization credentials only, as SuccessURL (403 forbidden, details.field "cancelUrl").
 	CancelURL string `json:"cancelUrl,omitempty"`
 	// CustomerUUID is one of the space's customers (unknown: 404); the checkout then asks the
 	// customer nothing.
@@ -167,8 +167,9 @@ type CheckoutFees struct {
 	// cent. QBitFlow's fee is also taken on that line, so this gross-up leaves you at least the
 	// price and your lines, as if no fee were taken ($100 + $20 VAT at 0.99 % → a $1.20 fee,
 	// $121.20 charged, $120.00 kept). A marketplace's organization fee is not passed on.
-	// nil: the space's checkout.customerPaysProcessingFee setting decides (off by default; set in
-	// the dashboard); false turns it off for this checkout.
+	// nil: the space's checkout.customerPaysProcessingFee setting decides (off by default; set by
+	// the organization's team in the dashboard, also for a member's space); false turns it off for
+	// this checkout.
 	ProcessingFee *bool `json:"processingFee,omitempty"`
 	// Items are up to 10 lines of your own, shown in this order before the processing fee.
 	Items []FeeItem `json:"items,omitempty"`
@@ -283,9 +284,12 @@ type CreateSubscriptionSessionParams struct {
 	// 2 decimals, at most 1,000,000. The API caps it at "5" in test mode and requires more than
 	// "0.25" for a live subscription (inline or its product's; details.min).
 	PriceUSD string `json:"priceUsd,omitempty"`
-	// SuccessURL is where the customer goes after subscribing (placeholders as for CreatePayment).
+	// SuccessURL is where the customer goes after subscribing (placeholders and default as for
+	// CreatePayment). Organization credentials only: a member's own key sending it is a 403
+	// forbidden (details.field "successUrl"); an organization key acting On-Behalf-Of may.
 	SuccessURL string `json:"successUrl,omitempty"`
-	// CancelURL is where the customer goes after a cancelled or failed checkout.
+	// CancelURL is where the customer goes after a cancelled or failed checkout. Organization
+	// credentials only, as SuccessURL (403 forbidden, details.field "cancelUrl").
 	CancelURL string `json:"cancelUrl,omitempty"`
 	// CustomerUUID is one of the space's customers.
 	CustomerUUID string `json:"customerUuid,omitempty"`

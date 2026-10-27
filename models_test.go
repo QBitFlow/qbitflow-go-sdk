@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ const (
 	fxAttempt    = `{"status":"failed","code":"insufficient_funds","message":"Not enough USDC","txHash":"0xa","at":"2026-10-01T12:00:00Z"}`
 	fxTx         = `{"blockNumber":"52468103","blockTime":"2026-10-01T11:59:58Z","gasUsed":95000,"fee":{"amount":"0.00000114","amountMinUnits":"1140000000000","amountUsd":"0.005144"},"l1Fee":{"amount":"0.0000001","amountMinUnits":"100000000000","amountUsd":"0.00045"},"nativePriceUsd":"4512.37"}`
 	fxSettlement = `{"feePercent":"0.99","organizationFee":{"address":"0xorg","feePercent":"10"},` +
-		`"referralFee":{"address":"0xref","feePercent":"20","deadline":"2027-01-01T00:00:00Z"},` +
+		`"referralFee":{"address":"0xref","feePercent":"20"},` +
 		`"split":{"platform":{"amount":"0.0792","amountMinUnits":"79200","amountUsd":"0.0792"},` +
 		`"organization":{"amount":"0.9901","amountMinUnits":"990100","amountUsd":"0.9901"},` +
 		`"referral":{"amount":"0.0198","amountMinUnits":"19800","amountUsd":"0.0198"},` +
@@ -47,7 +48,7 @@ const (
 	fxSession = `"uuid":"sub@1","reference":"order-1044","productUuid":"p-1","productReference":"tshirt","productName":"T-shirt",` +
 		`"description":"Blue, size M","priceUsd":"3.99","fees":[{"type":"custom","label":"Shipping","description":"Standard","amountUsd":"0.75"},` +
 		`{"type":"processingFee","label":"Processing fee","amountUsd":"0.07"}],"amountUsd":"4.81","successUrl":"https://x/ok","cancelUrl":"https://x/ko",` +
-		`"redirectUrl":"https://x/thanks","organizationName":"Shop","userName":"Ada","test":true,"txType":"createSubscription",` +
+		`"organizationName":"Shop","userName":"Ada","test":true,"txType":"createSubscription",` +
 		`"availableCurrencies":[` + fxCurrency + `,` + fxNative + `],"metadata":{"orderId":"order-1044"},` +
 		`"createdAt":"2026-10-01T12:00:00Z","expiresAt":"2026-10-01T13:00:00Z"`
 )
@@ -60,7 +61,7 @@ var modelFixtures = map[string]struct {
 	"Currency/native": {fxNative, strict[Currency]},
 	"Payment": {`{"uuid":"pay@1",` + fxTransfer + `,"reference":"order-1","priceUsd":"8.5","fees":` + fxFees + `,"productName":"Pro",` +
 		`"productDescription":"Lifetime","metadata":{"orderId":"order-1","crm:customer":"C-5521"},"productUuid":"p-1","customerUuid":"c-1",` +
-		`"customerReference":"crm-1","note":"thanks","customer":` + fxSummary + `,"settlement":` + fxSettlement + `,` + fxPaid + `,` + fxRefunding + `,` +
+		`"customerReference":"crm-1","customer":` + fxSummary + `,"settlement":` + fxSettlement + `,` + fxPaid + `,` + fxRefunding + `,` +
 		`"checkoutOpenedAt":"2026-10-01T11:00:00Z"}`, strict[Payment]},
 	"PaymentCompleted": {`{"uuid":"pay@1",` + fxTransfer + `,"priceUsd":"10","fees":[],"productName":"Pro","metadata":{},"settlement":` + fxSettlement + `,` +
 		`"managementPageLink":"https://qbitflow.app/user/s/manage?uuid=pay@1"}`, strict[PaymentCompleted]},
@@ -112,6 +113,9 @@ var modelFixtures = map[string]struct {
 	"Wallet": {`{"uuid":"w-1","createdAt":"2026-10-01T12:00:00Z","address":"0xpk","test":false,"userUuid":"m-1","tokenWallets":[` +
 		`{"uuid":"tw-1","createdAt":"2026-10-01T12:00:00Z","currency":` + fxCurrency + `,"walletUuid":"w-1",` +
 		`"balance":{"currency":` + fxCurrency + `,"amount":"12.5","amountMinUnits":"12500000","amountUsd":"12.5"}}],"currency":` + fxNative + `}`, strict[Wallet]},
+	"SettingValue": {`{"key":"refunds.windowDays","kind":"setting","value":30,"source":"own","editable":true}`, strict[SettingValue]},
+	"SettingDefinition": {`{"key":"refunds.windowDays","category":"refunds","kind":"setting","description":"Days a customer may request a refund","type":"integer",` +
+		`"enum":["a","b"],"min":1,"max":365,"default":30,"membersEdit":"never"}`, strict[SettingDefinition]},
 	"Invitation": {`{"uuid":"i-1","test":false,"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5",` +
 		`"redirectUrl":"https://x.io/welcome","expiresAt":"2026-10-08T12:00:00Z","acceptedByUserUuid":"m-1","acceptedAt":"2026-10-02T12:00:00Z",` +
 		`"revokedAt":"2026-10-03T12:00:00Z","createdAt":"2026-10-01T12:00:00Z","status":"accepted"}`, strict[Invitation]},
@@ -133,7 +137,7 @@ var modelFixtures = map[string]struct {
 		`"data":{"uuid":"pay@1"},"deliveries":[{"endpointUuid":"e-1","url":"https://x.io/hook","delivered":true,"attempts":[{"uuid":"a-1",` +
 		`"eventId":"evt_1","eventType":"payment.completed","endpointUuid":"e-1","attempt":2,"delivered":false,"skipped":true,"statusCode":500,` +
 		`"error":"500 Internal Server Error","durationMs":120,"attemptedAt":"2026-10-01T12:00:01Z"}]}]}`, strict[EventDetail]},
-	"Me": {`{"credential":"apiKey","apiKeyUuid":"k-1","userUuid":"u-1","role":"user","onBehalfOfUserUuid":"m-1","space":{"uuid":"s-1",` +
+	"Me": {`{"credential":"apiKey","apiKeyUuid":"k-1","role":"user","onBehalfOfUserUuid":"m-1","space":{"uuid":"s-1",` +
 		`"organizationUuid":"o-1","organizationName":"Shop","userUuid":"m-1","test":true,"role":"admin",` +
 		`"member":{"userUuid":"m-1","firstName":"Ada","lastName":"L","email":"a@b.co"},"organizationFeePercent":"7.5",` +
 		`"trustedAt":"2026-10-01T12:00:00Z","createdAt":"2026-09-01T12:00:00Z"}}`, strict[Me]},
@@ -331,14 +335,84 @@ func TestModelValues(t *testing.T) {
 		me.Space.Member == nil || me.Space.Member.FirstName != "Ada" || me.Space.TrustedAt == nil {
 		t.Errorf("me %+v", me)
 	}
-	// The session-only fields (user, spaces, reauthenticatedUntil) are not modelled: ignored.
-	if me2, err := decodeJSON[Me]([]byte(`{"credential":"apiKey","spaces":[],"user":{"uuid":"u"}}`)); err != nil || me2.Credential != CredentialAPIKey {
+	// The fields no API key needs (the session's user, spaces, reauthenticatedUntil; the staff
+	// console's space.staffView) are not modelled: ignored.
+	if me2, err := decodeJSON[Me]([]byte(`{"credential":"apiKey","spaces":[],"user":{"uuid":"u"},"space":{"uuid":"s","staffView":false}}`)); err != nil || me2.Credential != CredentialAPIKey {
 		t.Errorf("me with session fields %+v %v", me2, err)
+	}
+}
+
+// TestOutOfScopeWireValuesDecode: the server may still send what no API key sees (a session's
+// userUuid, credential session, role handle, a qbf.cash payment's note, the hosted page's
+// redirectUrl, transaction and transfer types no SDK field carries). The SDK does not model
+// them, yet decoding succeeds: the fields are ignored and the enum values stay raw strings.
+func TestOutOfScopeWireValuesDecode(t *testing.T) {
+	me, err := decodeJSON[Me]([]byte(`{"credential":"session","userUuid":"u-1","space":{"uuid":"s","role":"handle","test":false}}`))
+	if err != nil || me.Credential != Credential("session") || me.Space == nil || me.Space.Role != Role("handle") {
+		t.Errorf("me %+v %v", me, err)
+	}
+
+	// An API key is at most admin: a session's "owner" role is not modelled, kept raw.
+	for _, raw := range []string{`{"credential":"apiKey","role":"owner","space":{"uuid":"s","role":"owner"}}`} {
+		owner, err := decodeJSON[Me]([]byte(raw))
+		if err != nil || owner.Role != Role("owner") || owner.Space == nil || owner.Space.Role != Role("owner") {
+			t.Errorf("me with role owner %+v %v", owner, err)
+		}
+	}
+	inv, err := decodeJSON[Invitation]([]byte(`{"uuid":"i-1","role":"owner"}`))
+	if err != nil || inv.Role != Role("owner") {
+		t.Errorf("invitation with role owner %+v %v", inv, err)
+	}
+
+	p, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","note":"thanks","productName":"Tip","metadata":{}}`))
+	if err != nil || p.UUID != "pay@1" {
+		t.Errorf("payment with note %+v %v", p, err)
+	}
+	completed := &Event{Type: EventTypePaymentCompleted, Version: "v2",
+		Data: json.RawMessage(`{"uuid":"pay@1","note":"thanks","productName":"Tip","metadata":{},"fees":[]}`)}
+	if pc, err := completed.PaymentCompleted(); err != nil || pc.UUID != "pay@1" {
+		t.Errorf("payment.completed with note %+v %v", pc, err)
+	}
+
+	for _, txType := range []string{"payment", "faucet"} {
+		expired := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{"uuid":"pay@2","txType":"` + txType +
+			`","redirectUrl":"https://shop.example.com/thanks","organizationName":"Shop","priceUsd":"1","amountUsd":"1","fees":[],` +
+			`"availableCurrencies":[],"metadata":{}}`)}
+		ce, err := expired.CheckoutExpired()
+		if err != nil || ce.Payment == nil || ce.Payment.TxType != TransactionType(txType) || ce.Payment.UUID != "pay@2" {
+			t.Errorf("checkout.expired %s with redirectUrl %+v %v", txType, ce, err)
+		}
+	}
+
+	released := &Event{Type: EventTypeHeldFundsReleased, Version: "v2",
+		Data: json.RawMessage(`{"uuid":"t-1","type":"accountClaim","received":true,"ledgers":[]}`)}
+	if hf, err := released.HeldFundsReleased(); err != nil || hf.Type != TransferType("accountClaim") {
+		t.Errorf("heldFunds.released accountClaim %+v %v", hf, err)
 	}
 
 	page := fixture[Page[CustomerSummary]](t, "Page")
 	if !page.HasMore || page.NextCursor != "djF8MDE5Y2FkZmQ" || len(page.Items) != 1 {
 		t.Errorf("page %+v", page)
+	}
+}
+
+// TestReferralFeeDeadlineIgnored: settlement.referralFee.deadline is internal since API 2.0.0
+// (docs 66db9a1). ReferralFee is {address, feePercent}; a deadline the server still sends is
+// ignored on decode, never an error.
+func TestReferralFeeDeadlineIgnored(t *testing.T) {
+	for f := range reflect.TypeFor[ReferralFee]().Fields() {
+		if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); name == "deadline" || f.Name == "Deadline" {
+			t.Errorf("ReferralFee still models deadline (%s)", f.Name)
+		}
+	}
+	p, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","settlement":{"feePercent":"0.99",` +
+		`"referralFee":{"address":"0xref","feePercent":"20","deadline":"2027-01-01T00:00:00Z"}}}`))
+	if err != nil || p.Settlement.ReferralFee == nil || *p.Settlement.ReferralFee != (ReferralFee{Address: "0xref", FeePercent: "20"}) {
+		t.Errorf("referralFee with a deadline: %+v %v", p.Settlement.ReferralFee, err)
+	}
+	// A deadline of the wrong type is ignored too (the key is not read at all).
+	if _, err := decodeJSON[Payment]([]byte(`{"settlement":{"referralFee":{"address":"0xref","feePercent":"20","deadline":42}}}`)); err != nil {
+		t.Errorf("referralFee with a numeric deadline: %v", err)
 	}
 }
 
@@ -361,6 +435,26 @@ func TestModelOptionalFields(t *testing.T) {
 	if err != nil || ref.Reason != "" || ref.MerchantMessage != "" || ref.RespondedAt != nil || ref.TxHash != "" || ref.PaidUSD != "" ||
 		ref.AmountUSD != "" || ref.Settlement != nil || ref.Approval != nil {
 		t.Errorf("pending refund %+v %v", ref, err)
+	}
+	// confirmedAt is absent on records made before it was recorded (bills and transactions too).
+	bill, err := decodeJSON[Bill]([]byte(`{"uuid":"sub-hist@1","amount":"10","settlement":{"feePercent":"0.99"}}`))
+	if err != nil || bill.ConfirmedAt != nil {
+		t.Errorf("bill without confirmedAt %+v %v", bill, err)
+	}
+	tx, err := decodeJSON[Transaction]([]byte(`{"type":"payment","uuid":"pay@1","amount":"10","fees":[]}`))
+	if err != nil || tx.ConfirmedAt != nil {
+		t.Errorf("transaction without confirmedAt %+v %v", tx, err)
+	}
+	// A skipped delivery attempt (a member's endpoint while members.webhooks is off): no
+	// statusCode, an error.
+	detail, err := decodeJSON[EventDetail]([]byte(`{"id":"evt_1","type":"payment.completed","version":"v2","data":{},` +
+		`"deliveries":[{"endpointUuid":"e-1","url":"https://x.io","delivered":false,"attempts":[{"uuid":"a-1","attempt":2,` +
+		`"delivered":false,"skipped":true,"error":"members.webhooks policy is off","durationMs":0,"attemptedAt":"2026-10-01T12:00:01Z"}]}]}`))
+	if err != nil || len(detail.Deliveries) != 1 || len(detail.Deliveries[0].Attempts) != 1 {
+		t.Fatalf("skipped attempt %+v %v", detail, err)
+	}
+	if a := detail.Deliveries[0].Attempts[0]; !a.Skipped || a.Delivered || a.StatusCode != nil || a.Error == "" {
+		t.Errorf("skipped attempt %+v", a)
 	}
 	// Lenient on absence and null (behaviour §6): zero values, never an error.
 	nulls, err := decodeJSON[Product]([]byte(`{"uuid":"p-1","description":null,"metadata":null,"subscription":null,"priceUsd":null}`))

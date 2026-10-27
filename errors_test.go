@@ -35,7 +35,7 @@ func TestErrorMapping(t *testing.T) {
 		{422, "idempotency_key_reused", (*IdempotencyError)(nil)},
 		{422, "something_else", (*APIError)(nil)},
 		{413, "request_too_large", (*APIError)(nil)},
-		{405, "", (*APIError)(nil)},
+		{405, "method_not_allowed", (*APIError)(nil)},
 		{429, "rate_limit_exceeded", (*RateLimitError)(nil)},
 		{500, "internal", (*ServerError)(nil)},
 		{503, "network_unavailable", (*ServerError)(nil)},
@@ -74,7 +74,7 @@ func TestErrorDetailsAndFields(t *testing.T) {
 		"code": "validation_failed",
 		"details": {"errors": [
 			{"field": "name", "message": "name must be at least 2 characters"},
-			{"field": "frequency.unit", "message": "frequency.unit is required"},
+			{"field": "frequency.unit", "message": "frequency.unit is required", "reason": "reserved"},
 			"garbage",
 			{"other": 1}
 		], "max": 5},

@@ -36,7 +36,7 @@ type QBitFlowError interface {
 }
 
 // APIError is the payload every SDK error carries, and the error returned as is for an HTTP
-// error without a more specific type (e.g. 413 request_too_large).
+// error without a more specific type (e.g. 413 request_too_large, 405 method_not_allowed).
 //
 // Every typed error (*NotFoundError, *RateLimitError, …) embeds it and unwraps to it, so
 // errors.As(err, &apiErr) with a *APIError target matches any SDK error. StatusCode is 0 when
@@ -106,7 +106,7 @@ type ValidationError struct{ *APIError }
 // Unwrap returns the embedded *APIError.
 func (e *ValidationError) Unwrap() error { return e.APIError }
 
-// BadRequestError is any other 400 (bad_request, foreign_key_violation, …).
+// BadRequestError is any other 400 (foreign_key_violation, test_mode_only, sender_is_receiver, …).
 type BadRequestError struct{ *APIError }
 
 // Unwrap returns the embedded *APIError.
@@ -131,7 +131,8 @@ type NotFoundError struct{ *APIError }
 func (e *NotFoundError) Unwrap() error { return e.APIError }
 
 // ConflictError is a 409 (unique_violation with details.field, tx_already_sent,
-// merchant_not_ready with details.reason, held_funds_pending, already_joined, payment_not_due, conflict, idempotency_key_in_use, …).
+// merchant_not_ready with details.reason, held_funds_pending, already_joined, payment_not_due,
+// subscription_already_stopped_or_inactive, idempotency_key_in_use, conflict, …).
 type ConflictError struct{ *APIError }
 
 // Unwrap returns the embedded *APIError.

@@ -12,9 +12,6 @@ type Me struct {
 	Credential Credential `json:"credential"`
 	// APIKeyUUID is the key's id.
 	APIKeyUUID string `json:"apiKeyUuid,omitempty"`
-	// UserUUID is who signed in, for a session; "" for an API key (a key acts for its space, not
-	// for the person who created it).
-	UserUUID string `json:"userUuid,omitempty"`
 	// Role is what the request may do in the space: admin (an organization key) or user (a
 	// member's key, or an organization key acting On-Behalf-Of a member).
 	Role Role `json:"role,omitempty"`
@@ -38,7 +35,8 @@ type MeSpace struct {
 	UserUUID string `json:"userUuid,omitempty"`
 	// Test is the space's mode: true for test, false for live.
 	Test bool `json:"test"`
-	// Role is the caller's own role in the organization: owner, admin, user or handle.
+	// Role is the key's own role in the organization: admin (an organization key, also while it
+	// acts On-Behalf-Of a member) or user (a member's key).
 	Role Role `json:"role"`
 	// Member names the member whose space it is; nil for the organization's own space.
 	Member *MeMember `json:"member,omitempty"`
@@ -242,23 +240,24 @@ type CreatedInvitation struct {
 }
 
 // CreateInvitationParams invites a member (Invitations.Create). The SDK always sends role
-// "user": team invitations are made from the dashboard.
+// "user": team invitations are made from the dashboard (MarshalJSON adds it; the tags name the
+// fields as sent).
 type CreateInvitationParams struct {
 	// Email is required: the person to invite, at most 254 characters.
-	Email string
+	Email string `json:"email"`
 	// HoldFunds is required (always sent): true holds the member's payments until the
 	// organization trusts them (Members.Trust); false pays them directly.
-	HoldFunds bool
+	HoldFunds bool `json:"holdFunds"`
 	// OrganizationFeePercent is the organization's fee on their payments, a percent string from
 	// "0" to "50" with at most 2 decimals ("" = "0").
-	OrganizationFeePercent string
+	OrganizationFeePercent string `json:"organizationFeePercent,omitempty"`
 	// RedirectURL is where the person goes once they accepted (with ?invitationUuid=<uuid>): a
 	// convenience, confirm with the member.joined event.
-	RedirectURL string
+	RedirectURL string `json:"redirectUrl,omitempty"`
 	// SendEmail is whether QBitFlow emails the link to the person (nil = true). new(false) sends
 	// no invitation email: share the returned Link yourself. Signing up through the link still
 	// emails the person a confirmation.
-	SendEmail *bool
+	SendEmail *bool `json:"sendEmail,omitempty"`
 }
 
 // MarshalJSON writes the invitation's body, with role "user".

@@ -45,7 +45,8 @@ type requestOptionFunc func(*requestConfig)
 func (f requestOptionFunc) applyRequest(c *requestConfig) { f(c) }
 
 // WithBaseURL sets the API root (default https://api.qbitflow.app/v2). It must be an absolute
-// http(s) URL; a trailing slash is stripped.
+// http(s) URL with a host, without credentials (user:pass@), query or fragment; a trailing slash
+// is stripped. A bad URL is a *ValidationError, whose message never quotes it.
 func WithBaseURL(baseURL string) ClientOption {
 	return clientOptionFunc(func(c *clientConfig) error {
 		trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
@@ -53,13 +54,17 @@ func WithBaseURL(baseURL string) ClientOption {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return newFieldError("baseUrl", "must be an absolute http or https URL")
 		}
+		if u.User != nil || strings.ContainsAny(trimmed, "?#") {
+			return newFieldError("baseUrl", "must not carry credentials (user:pass@), a query or a fragment")
+		}
 		c.baseURL = trimmed
 		return nil
 	})
 }
 
-// WithTimeout bounds each HTTP attempt (default 30 s); a retried call may take longer in
-// total. Use the context for an overall deadline. It must be positive.
+// WithTimeout bounds each HTTP attempt (default 30 s), from sending the request to the last
+// byte of the answer's body; a retried call may take longer in total. Use the context for an
+// overall deadline. It must be positive.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return clientOptionFunc(func(c *clientConfig) error {
 		if timeout <= 0 {

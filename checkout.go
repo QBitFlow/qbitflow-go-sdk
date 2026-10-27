@@ -13,7 +13,7 @@ import (
 const (
 	// PlaceholderUUID becomes the session's (and its transaction's) id: pay@… or sub@….
 	PlaceholderUUID = "{{UUID}}"
-	// PlaceholderTransactionType becomes the session's transaction type (payment, createSubscription…).
+	// PlaceholderTransactionType becomes the session's transaction type (payment or createSubscription).
 	PlaceholderTransactionType = "{{TRANSACTION_TYPE}}"
 )
 
@@ -43,7 +43,9 @@ type WaitOptions struct {
 // Send the customer to Link. The Payment exists, with the same id, once the customer's
 // transaction is confirmed: fulfil on the payment.completed webhook (or Get "completed"), give
 // up on checkout.expired. SuccessURL and CancelURL may carry PlaceholderUUID and
-// PlaceholderTransactionType, filled in on redirect.
+// PlaceholderTransactionType, filled in on redirect. Only the organization gives them: with a
+// member's own key they are a 403 (the organization's checkout.defaults setting applies); an
+// organization key acting On-Behalf-Of the member may send them.
 //
 // Fees (optional) adds lines to the price (a tax, shipping, QBitFlow's processing fee): the
 // customer pays the price plus every line (the payment's AmountUSD), and the network fee on top
@@ -52,7 +54,9 @@ type WaitOptions struct {
 // Errors: 400 validation_failed (test mode caps the amount, fees included, at "5", details.max;
 // live mode needs https URLs); 404 for an unknown product or customer; 409 unique_violation on
 // reference; 409 merchant_not_ready (details.reason) when the space's wallets accept no
-// currency; 410 merchant_closed for a removed member's or a closed organization's space.
+// currency; 410 merchant_closed for a removed member's or a closed organization's space; 403
+// forbidden with details.field "successUrl" or "cancelUrl" (successUrl first) when a member's
+// key sends either.
 func (s *CheckoutSessionsService) CreatePayment(ctx context.Context, params *CreatePaymentSessionParams, opts ...RequestOption) (*CreatedCheckoutSession, error) {
 	if err := params.Validate(); err != nil {
 		return nil, err

@@ -21,8 +21,9 @@ func (s *MembersService) List(ctx context.Context, params *MemberListParams, opt
 func (s *MembersService) Iterate(ctx context.Context, params *MemberListParams, opts ...RequestOption) iter.Seq2[Member, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Member], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 
@@ -128,8 +129,9 @@ func (s *InvitationsService) List(ctx context.Context, params *InvitationListPar
 func (s *InvitationsService) Iterate(ctx context.Context, params *InvitationListParams, opts ...RequestOption) iter.Seq2[Invitation, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Invitation], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 

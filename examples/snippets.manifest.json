@@ -1,6 +1,6 @@
 {
   "sdk": "go",
-  "catalog": "6d57278cb43ae89e9936953cbcf0a794e6d2fbdd",
+  "catalog": "854ff97d5071499a81d73033392c05135cc09f5d",
   "snippets": {
     "client-init": "examples/client/main.go",
     "client-on-behalf-of": "examples/marketplace/main.go",

@@ -16,25 +16,30 @@ type Page[T any] struct {
 	NextCursor string `json:"nextCursor,omitempty"`
 }
 
-// iteratePages walks a cursor-paginated list lazily, one request per page, from cursor ("" =
-// the first page). fetch requests one page with the given cursor, keeping the caller's filters
-// and limit. The sequence stops when the caller stops, on the last page (HasMore false), or on
-// an error, which it yields as (zero, err) before stopping. Defensively, it also stops on a page
-// claiming more without a NextCursor, on one whose NextCursor is the cursor just requested (which
-// would loop on the same page forever), and on an empty page that claims more (the API never
-// answers one: a server fault, which could otherwise cycle between cursors).
+// iteratePages walks a cursor-paginated list lazily, one request per page, from start ("" =
+// the first page), anew on every range of the sequence. fetch requests one page with the given
+// cursor, keeping the caller's filters and limit. The sequence stops when the caller stops, on
+// the last page (HasMore false), or on an error, which it yields as (zero, err) before stopping.
+// Defensively, it also stops on a page claiming more without a NextCursor, on one whose
+// NextCursor is the cursor just requested (which would loop on the same page forever), and on an
+// empty page that claims more (the API never answers one: a server fault, which could otherwise
+// cycle between cursors).
 //
 // The Iterate methods are built on it:
 //
 //	func (s *CustomersService) Iterate(ctx context.Context, params *CustomerListParams, opts ...RequestOption) iter.Seq2[Customer, error] {
 //		p := derefOrZero(params)
 //		return iteratePages(p.Cursor, func(cursor string) (*Page[Customer], error) {
-//			p.Cursor = cursor
-//			return s.List(ctx, &p, opts...)
+//			page := p // a copy per request: ranges never share params
+//			page.Cursor = cursor
+//			return s.List(ctx, &page, opts...)
 //		})
 //	}
-func iteratePages[T any](cursor string, fetch func(cursor string) (*Page[T], error)) iter.Seq2[T, error] {
+func iteratePages[T any](start string, fetch func(cursor string) (*Page[T], error)) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
+		// Each range starts from start: ranging the sequence again (or from two goroutines)
+		// walks the list again, never from where another range stopped.
+		cursor := start
 		for {
 			page, err := fetch(cursor)
 			if err != nil {

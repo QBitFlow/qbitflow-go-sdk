@@ -141,6 +141,9 @@ func TestBodyEncodingFailures(t *testing.T) {
 		{CreateSubscriptionSessionParams{ProductUUID: memberUUID, Frequency: &Duration{1, "mon\xffths"}}, "frequency.unit"},
 		{map[string]any{"bad\xffkey": 1}, ""},
 		{CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{"payment.completed", "x\xff"}}, "events[1]"},
+		// A params type with its own MarshalJSON is still named by its wire names.
+		{&CreateInvitationParams{Email: "a\xff@b.co"}, "email"},
+		{&CreateInvitationParams{Email: "a@b.co", RedirectURL: "https://x.io/\xff"}, "redirectUrl"},
 	}
 	for i, tc := range cases {
 		_, err := c.send(context.Background(), endpoint{method: http.MethodPost, path: "/x", body: tc.body}, nil)

@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.0] - 2026-10-19
 
-The SDK for **QBitFlow API v2**, aligned with the final API v2 contract (api-hub `docs/api` @
-`b97ca6c`) and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
+The SDK for **QBitFlow API v2**, aligned with the API v2 contract as launched on 2026-10-24 and with the behaviour contract the Go, JavaScript, Python and PHP SDKs 3.0.0 share
 (same services, methods, errors, retries, validation and webhook verification). A major release:
 the module path, the client, the routes and most names change.
 [MIGRATION-v3.md](MIGRATION-v3.md) maps every 2.x method and type to its replacement.
@@ -30,8 +29,9 @@ but never published; its changes are part of 3.0.0).
 -   **The client.** `qbitflow.NewClient(apiKey, ...ClientOption) (*Client, error)` replaces `New`,
     `NewWithConfig`, `Config`, `SetBaseURL` and `SetTimeout`. Options: `WithBaseURL`,
     `WithTimeout` (now per attempt), `WithMaxRetries` (`0` disables retries), `WithHTTPClient`,
-    `WithOnBehalfOf`. The key must be non-blank and start with `sk_` (a `*ValidationError`
-    otherwise; nothing is sent). The services are the client's fields; the `New…Service`
+    `WithOnBehalfOf`. The key, trimmed, must start with `sk_` and be printable ASCII without
+    spaces (a `*ValidationError` otherwise, which never quotes the key; nothing is sent);
+    `WithBaseURL` takes an `http(s)` URL with a host and no credentials, query or fragment. The services are the client's fields; the `New…Service`
     constructors and the per-service `OnBehalfOf` methods are gone.
 -   **`context.Context` first and `...RequestOption` last on every method**
     (`WithOnBehalfOf`, `WithIdempotencyKey`, `WithRequestID`).
@@ -87,7 +87,9 @@ but never published; its changes are part of 3.0.0).
     `TokenAmount`; `Split.Platform` no longer includes the referrer's share),
     `SettlementTransaction` (`BlockNumber`, `BlockTime`, `GasUsed`, `Fee`, `L1Fee`,
     `NativePriceUSD`) and `TransferSettlement`. `OrganizationFee.Organization` and
-    `ReferralFee.Referrer` → `Address`.
+    `ReferralFee.Referrer` → `Address`; `ReferralFee` is `{Address, FeePercent}`: its
+    `ReferralID` and `Deadline` are removed (the API keeps them internal; a `deadline` key still
+    received is ignored).
 -   **`Metadata` is now your own data**: a `map[string]string` on `Product`, `Customer`,
     `Payment` (copied from its checkout, read-only), `Subscription`, `Transaction` and the
     `checkout.expired` session.
@@ -110,12 +112,15 @@ but never published; its changes are part of 3.0.0).
 -   **The currency object** gains `Code` (`BASE:USDC`) and `Chain`; `Address` is absent on a
     native coin; the nested `MainCurrency` is gone (`MainCurrencyID` stays).
 -   **Enum values** follow the API's lowerCamelCase (`pastDue`, `trialExpired`);
-    `TransactionTypeOneTimePayment` → `TransactionTypePayment`,
-    `TransactionTypeExecuteSubscriptionPayment` → `TransactionTypeExecuteSubscription`, the PAYG
-    values are `createPaygSubscription` / `cancelPaygSubscription`. `AccountingEventType`
+    `TransactionTypeOneTimePayment` → `TransactionTypePayment`. `TransactionType` keeps only
+    `payment` and `createSubscription`, the values a checkout's `TxType` takes: the other 2.x
+    constants (`Transfer`, `TokenTransfer`, `CancelSubscription`, `ExecuteSubscriptionPayment`,
+    the PAYG ones, `IncreaseAllowance`, `UpdateMaxAmount`, `Refund`, `Faucet`, `ClaimFunds`) are
+    removed (any other value stays a raw `TransactionType` string). `AccountingEventType`
     `subscriptionHistory` → `bill` (`AccountingEventTypeBill`); `LedgerEntryType` is `payment` or
     `refund` only (a held seller sells no subscription, so no bill is ever a held-funds line). `RefundStatus` keeps `failed` (declared, never set). `WebhookPayloadVersionV1` is
-    removed: v2 is the only payload.
+    removed: v2 is the only payload. `Role` is `RoleAdmin` or `RoleUser`: an API key is at most
+    `admin` (there is no `RoleOwner`; another value the API may send is kept as is).
 -   **Pagination**: `GetAll…(limit, cursor)` → `List(ctx, *…ListParams)` returning a `*Page[T]`
     `{Items, HasMore, NextCursor}`: `HasMore` is a field (no `HasMore()` method), `NextCursor` an
     opaque `string` (`""` on the last page). Iterators stop when `HasMore` is false. Bounded lists
@@ -173,7 +178,9 @@ but never published; its changes are part of 3.0.0).
     connections. `MeSpace` has `Role`, `TrustedAt`, `CreatedAt` and `OrganizationFeePercent`.
 -   `CheckoutSessions`: `CreatePayment`, `CreateSubscription` (with `ExpiresInMinutes`,
     `Metadata` and the `{{UUID}}` / `{{TRANSACTION_TYPE}}` redirect placeholders), `Get`,
-    `Expire`.
+    `Expire`. `SuccessURL` and `CancelURL` are the organization's to give: a member's own key
+    sending either gets a `403 forbidden` (`Details["field"]` names it); an organization key
+    acting `OnBehalfOf` the member may send them.
 -   Checkout fees: `CreatePaymentSessionParams.Fees` and `CreateSubscriptionSessionParams.Fees`
     (`*CheckoutFees`: up to 10 `FeeItem` lines of your own, `Label`, `Description`, `AmountUSD`,
     and `ProcessingFee *bool`, which has the customer pay QBitFlow's processing fee, grossed up so
@@ -270,6 +277,11 @@ but never published; its changes are part of 3.0.0).
         `{{TRANSACTION_TYPE}}` redirect placeholders.
 -   Examples: `checkout`, `subscriptions`, `marketplace`, `webhook_handler` (a `WebhookRouter`),
     `errors_and_retries`; `MIGRATION-v3.md`.
+-   `Settings` service: `Definitions` (every setting and policy the API knows, with its type,
+    bounds and default), `List` (the space's values, each with its `Source` and whether this key
+    may change it, `Editable`), `Set(key, value)` and `Reset(key)` (the space's own value; a
+    policy only from the dashboard); `SettingDefinition`, `SettingValue`, and the constants
+    `SettingKind` and `SettingSource`.
 
 ### Changed
 
@@ -287,8 +299,6 @@ but never published; its changes are part of 3.0.0).
     wrong JSON type is a `ServerError` (a JSON number where a decimal string is expected
     included). Unknown enum values are kept as is, decimal strings are never parsed. Every answer
     is a JSON object: a `null` body is a `ServerError`.
--   Redirects are never followed: a 3xx is a `ServerError` (2.1.0 replayed the request, API key
-    included, against the redirect's target).
 -   A 2xx with an empty or non-JSON body where a result is expected is a `ServerError`, not a
     zero-valued result.
 -   A request body JSON cannot represent (invalid UTF-8) is a `ValidationError`, and nothing is
@@ -328,12 +338,27 @@ but never published; its changes are part of 3.0.0).
 -   **Field validation errors were read from the wrong key** (a top-level `errors` list instead
     of the API's `details.errors`), so every field of a 400 came back empty. `FieldErrors` now
     names each failing input by the name sent, dotted when nested (`frequency.unit`).
--   User-supplied path segments and query values are escaped: an id containing `/`, `?`, `#`,
-    `%` or `&` no longer changes the request.
 -   Lengths are counted in characters (code points), as the API does, not in bytes: accented
     and CJK names are no longer refused locally.
 -   The webhook timestamp check is overflow-safe: a timestamp centuries away is refused instead
     of wrapping into the accepted window.
+
+### Security
+
+-   Redirects are never followed: a 3xx is a `ServerError`. 2.1.0 replayed the request, with its
+    `X-API-Key` header, against the redirect's target, whatever its host (`net/http` only strips
+    `Authorization` on a cross-domain redirect). The client given to `WithHTTPClient` is copied
+    with redirects turned off.
+-   User-supplied path segments and query values are escaped: an id containing `/`, `?`, `#`,
+    `%` or `&` no longer changes the request, and `.` / `..` path segments are refused.
+-   `NewClient` refuses an API key with a space, a line break, a control or a non-ASCII
+    character, and `WithBaseURL` a URL carrying credentials (`user:pass@`), a query or a
+    fragment, before anything is sent; neither error quotes the value.
+-   `WithTimeout` bounds each attempt through the last byte of the answer's body: a server
+    trickling its body cannot hold a call past it (a timed-out `*NetworkError`, retried like one).
+-   Printing a `Client` or a `WebhookRouter` with `fmt` (any verb, `%s` and `%+v` included, in a
+    log line or a debug dump) never shows the API key or the webhook secret; neither does an
+    error's message.
 
 The website snippet ids are unchanged (none renamed), except `refunds-create`: it is listed as unsupported
 (refunds are read only; the id stays in the website's catalog, marked retired).

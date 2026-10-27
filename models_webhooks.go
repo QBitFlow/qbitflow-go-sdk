@@ -86,7 +86,7 @@ type DeliveryAttempt struct {
 	// members.webhooks policy was off for them (never retried; not counted against the endpoint's
 	// health). Absent when false.
 	Skipped bool `json:"skipped,omitempty"`
-	// StatusCode is the endpoint's answer; nil when it didn't answer.
+	// StatusCode is the endpoint's answer; nil when it didn't answer or the attempt was Skipped.
 	StatusCode *int `json:"statusCode,omitempty"`
 	// Error is why it wasn't delivered.
 	Error string `json:"error,omitempty"`

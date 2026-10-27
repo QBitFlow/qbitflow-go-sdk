@@ -64,8 +64,6 @@ type Payment struct {
 	// CustomerReference is your reference of the customer, as the checkout was given it, whether
 	// or not QBitFlow has a customer with it.
 	CustomerReference string `json:"customerReference,omitempty"`
-	// Note is a qbf.cash tipper's message to the handle's owner.
-	Note string `json:"note,omitempty"`
 	// Customer names the customer, even once deleted (API reads only, never in webhooks).
 	Customer *CustomerSummary `json:"customer,omitempty"`
 	// Settlement is how it settled: its fees, its split and its transaction.
@@ -151,7 +149,8 @@ type Bill struct {
 	// then; nil on bills recorded before it was.
 	PeriodEnd *time.Time `json:"periodEnd,omitempty"`
 
-	// ConfirmedAt is when the chain confirmed it (its block's time).
+	// ConfirmedAt is when the chain confirmed it (its block's time); nil only on records made
+	// before it was recorded.
 	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
 	// Paid is everything the customer's wallet sent, in the currency's units (Amount plus the
 	// network fee): a refund's base.
@@ -235,7 +234,8 @@ type Transaction struct {
 	// Settlement is its fees, split and transaction, as on the Payment or the Bill.
 	Settlement Settlement `json:"settlement"`
 
-	// ConfirmedAt is when the chain confirmed it.
+	// ConfirmedAt is when the chain confirmed it (its block's time); nil only on records made
+	// before it was recorded.
 	ConfirmedAt *time.Time `json:"confirmedAt,omitempty"`
 	// Paid is everything the customer's wallet sent, in the currency's units.
 	Paid string `json:"paid,omitempty"`

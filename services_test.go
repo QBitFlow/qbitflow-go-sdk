@@ -613,6 +613,28 @@ func routeCases(t *testing.T) []routeCase {
 				}
 			}},
 
+		// Settings.
+		{name: "Settings.Definitions", method: "GET", path: "/settings/definitions",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Settings.Definitions(ctx, o...)
+			},
+			reply: bounded(fx("SettingDefinition"))},
+		{name: "Settings.List", method: "GET", path: "/settings",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Settings.List(ctx, o...)
+			},
+			reply: bounded(fx("SettingValue"))},
+		{name: "Settings.Set", method: "PUT", path: "/settings/refunds.windowDays", body: `{"value":30}`,
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return c.Settings.Set(ctx, "refunds.windowDays", 30, o...)
+			},
+			reply: fx("SettingValue")},
+		{name: "Settings.Reset", method: "DELETE", path: "/settings/refunds.windowDays",
+			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
+				return nil, c.Settings.Reset(ctx, "refunds.windowDays", o...)
+			},
+			status: 204},
+
 		// Accounting.
 		{name: "Accounting.ExportJSON", method: "GET", path: "/accounting/export", query: "format=json&from=2026-09-01&to=2026-09-30",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {

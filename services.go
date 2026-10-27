@@ -28,7 +28,7 @@ type FailuresService struct{ client *Client }
 // them, and runs a test bill.
 type SubscriptionsService struct{ client *Client }
 
-// RefundsService lists, reads and creates refunds.
+// RefundsService lists and reads refunds (a merchant sends refunds from the dashboard).
 type RefundsService struct{ client *Client }
 
 // MembersService manages the organization's members, their trust and their held funds
@@ -40,6 +40,9 @@ type InvitationsService struct{ client *Client }
 
 // WalletsService reads the wallets and the currencies a space accepts.
 type WalletsService struct{ client *Client }
+
+// SettingsService reads and writes the space's settings.
+type SettingsService struct{ client *Client }
 
 // AccountingService exports the accounting events.
 type AccountingService struct{ client *Client }

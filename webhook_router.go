@@ -90,7 +90,8 @@ type webhookRoute struct {
 // for is acknowledged (200). Register the handlers before serving; the router is then safe
 // for concurrent use.
 type WebhookRouter struct {
-	secret  string
+	// secret is behind a pointer so that no fmt verb ever prints it (see transport.apiKey).
+	secret  *string
 	verify  []VerifyOption
 	onError func(*Event, error)
 
@@ -104,7 +105,7 @@ type WebhookRouter struct {
 // Options: WithTolerance, WithClock, WithWebhookErrorHandler. An empty secret answers every
 // delivery 500 (so QBitFlow retries it once the secret is configured).
 func NewWebhookRouter(secret string, opts ...WebhookRouterOption) *WebhookRouter {
-	r := &WebhookRouter{secret: secret, routes: map[EventType]*webhookRoute{}}
+	r := &WebhookRouter{secret: &secret, routes: map[EventType]*webhookRoute{}}
 	for _, opt := range opts {
 		if opt != nil {
 			opt.applyWebhookRouter(r)
@@ -246,7 +247,11 @@ func (r *WebhookRouter) handle(ctx context.Context, rawBody []byte, signatureHea
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := VerifyWebhook(rawBody, signatureHeader, r.secret, r.verify...); err != nil {
+	secret := ""
+	if r.secret != nil {
+		secret = *r.secret
+	}
+	if err := VerifyWebhook(rawBody, signatureHeader, secret, r.verify...); err != nil {
 		if errors.As(err, new(*WebhookSignatureError)) {
 			return WebhookResult{Status: http.StatusBadRequest, Err: err}
 		}

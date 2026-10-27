@@ -273,7 +273,7 @@ func TestEventCheckoutExpired(t *testing.T) {
 	p := ce.Payment
 	if p.TxType != TransactionTypePayment || p.PriceUSD != "10" || p.AmountUSD != "10" || len(p.AvailableCurrencies) != 2 ||
 		p.AvailableCurrencies[0].Address != "" || p.AvailableCurrencies[1].Code != "BASE:USDC" || p.Metadata["orderId"] != "order-1043" ||
-		p.OrganizationName != "Example Shop" || p.ExpiresAt == nil || p.CreatedAt == nil || p.Reference != "order-1043" || p.RedirectURL != "" {
+		p.OrganizationName != "Example Shop" || p.ExpiresAt == nil || p.CreatedAt == nil || p.Reference != "order-1043" {
 		t.Errorf("payment session %+v", p)
 	}
 	if p.Fees == nil || len(p.Fees) != 0 {

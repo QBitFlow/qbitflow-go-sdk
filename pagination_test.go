@@ -238,3 +238,67 @@ func TestBoundedListsUnwrapItems(t *testing.T) {
 		t.Errorf("empty bounded list: %#v %v", wallets, err)
 	}
 }
+
+// An iterator ranged twice walks the whole list twice: each range starts from params.Cursor, never
+// from where the previous range stopped (regression: the cursor was shared by every range).
+func TestIterateRangedTwiceRestarts(t *testing.T) {
+	ts := pagedServer(t, "")
+	c, _ := newTestClient(t, ts)
+	seq := iterateCustomers(c, context.Background(), &CustomerListParams{Limit: 2})
+	for run := range 2 {
+		var got []string
+		for cust, err := range seq {
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, cust.UUID)
+		}
+		if want := []string{"c0", "c1", "c2", "c3", "c4"}; !slices.Equal(got, want) {
+			t.Errorf("range %d: items %v, want %v", run, got, want)
+		}
+	}
+	// A range stopped early does not move the next one's start either.
+	for range seq {
+		break
+	}
+	var got []string
+	for cust, err := range seq {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, cust.UUID)
+	}
+	if len(got) != 5 || got[0] != "c0" {
+		t.Errorf("after an early stop: items %v", got)
+	}
+}
+
+// The same iterator ranged from two goroutines at once: each walks the whole list, with no
+// shared state between them (run with -race).
+func TestIterateConcurrentRanges(t *testing.T) {
+	ts := pagedServer(t, "")
+	c, _ := newTestClient(t, ts)
+	seq := iterateCustomers(c, context.Background(), &CustomerListParams{Limit: 2})
+	counts := make([]int, 4)
+	done := make(chan struct{})
+	for i := range counts {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for _, err := range seq {
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				counts[i]++
+			}
+		}()
+	}
+	for range counts {
+		<-done
+	}
+	for i, n := range counts {
+		if n != 5 {
+			t.Errorf("range %d: %d items, want 5", i, n)
+		}
+	}
+}

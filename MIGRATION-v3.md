@@ -47,11 +47,13 @@ methods) and still has no dependencies.
 ## 2. Base URL and API keys
 
 - The default base URL is `https://api.qbitflow.app/v2`. If you set one, it must point at v2.
-- API v2 issues keys shaped `sk_<uuid>_<test|live>_<secret>`. **Keys issued before**
-  (`sk_<digits>_…`) **are refused by API v2** (`401`): create a new key in the dashboard. Treat a key
-  as opaque (the SDK only checks the `sk_` prefix).
-- `NewClient` refuses a blank key, or one not starting with `sk_`, with a `*ValidationError`
-  (2.x sent it and got a 401). It sends nothing: call `client.Me(ctx)` to check the key online,
+- API v2 issues keys shaped `sk_<test|live>_<uuid>_<secret>`. **Keys of an earlier shape**
+  (v1's `sk_<digits>_…`, or `sk_<uuid>_<test|live>_…`) **are refused by API v2** (`401`): create a
+  new key in the dashboard. Treat a key as opaque: the SDK never parses it.
+- `NewClient` refuses a blank key, one not starting with `sk_`, or one with a character other than
+  printable ASCII (a space, a line break, a control or non-ASCII character) with a
+  `*ValidationError` that never quotes the key (2.x sent it and got a 401).
+- `WithBaseURL` refuses a URL with credentials (`user:pass@`), a query or a fragment. It sends nothing: call `client.Me(ctx)` to check the key online,
   and assert its mode (`me.Space.Test`) at start-up.
 - A key belongs to one space and one mode. A removed member's keys answer 401.
 
@@ -273,11 +275,11 @@ library, or `FormatAmount` / `ParseAmount`, to compute with them.
 | — | `HeldFunds`, `LedgerEntry`, `MemberHeldFunds` | `TotalUSD`; each line's `AmountUSD`, `Settlement`, `Currency`, `Owed`, `OwedMinUnits`, `OwedUSD` |
 | — | `Invitation`, `CreatedInvitation` | `HoldFunds`, `OrganizationFeePercent` (a string); `CreatedInvitation` is flat: the invitation's fields and `Link` |
 | — | `Wallet`, `TokenWallet`, `Balance` | `Wallet.Address`, `Wallet.Currency`; `TokenWallet.Currency`; `Balance` = the `Currency` + `Amount`, `AmountMinUnits`, `AmountUSD` |
-| `UserRole` (`RoleAdmin`, `RoleUser`) | `Role` (+ `RoleOwner`, `RoleHandle`) | |
+| `UserRole` (`RoleAdmin`, `RoleUser`) | `Role` (`RoleAdmin`, `RoleUser`) | an API key is at most `admin`; another value is kept as is |
 | `AccountingEvent` | `AccountingEvent` | `PaymentID` → `TxUUID`; `RelatedPaymentID` → `RelatedTxUUID`; `PaymentReference` / `RelatedPaymentReference` → `Reference` / `RelatedReference`; `ProductID uint64` → `ProductUUID string`; `TokenSymbol` → `Currency` (always set, a native currency's too); every amount, USD amount and rate is a decimal string, the amounts in the currency's units (`"7.5"`, not `"7500000"`) with a `…MinUnits` twin; a fee that doesn't apply is `""` (absent), never `"0"`; network fees are never part of `NetAmount`; `Type` and `Chain` are typed; fields in the CSV's column order; + `UserUUID`, `ReferralFee*`, `CurrencyPriceUSD`, `NetworkFeesPaidBy` (`NetworkFeesPayer`), `NetworkFeesCurrency`, `NetworkFeesCurrencyDecimals`, `NetworkFeesCurrencyPriceUSD` |
 | `PaymentMetadata` | `Settlement` | `FeeBps` → `FeePercent` (a string); `TxAmounts` → `Split` (`Platform`, `Organization`, `Referral`, `Merchant`, `NetworkFee`, each a `TokenAmount`: `Amount`, `AmountMinUnits`, `AmountUSD`; `Platform` no longer includes the referrer's share); the transaction's block and fees → `Transaction` (`SettlementTransaction`: `BlockNumber`, `BlockTime`, `GasUsed`, `Fee`, `L1Fee`, `NativePriceUSD`) |
 | `OrganizationFee{OrganizationID, Organization, FeeBps}` | `OrganizationFee{Address, FeePercent}` | |
-| `ReferralFee{ReferralID, Referrer, FeeBps, Deadline}` | `ReferralFee{Address, FeePercent, Deadline}` | |
+| `ReferralFee{ReferralID, Referrer, FeeBps, Deadline}` | `ReferralFee{Address, FeePercent}` | `ReferralID` and `Deadline` are removed: the API keeps them internal (a `deadline` key still received is ignored) |
 | `Currency` | `Currency` | `Decimals int` → `uint8`; + `Code` (`BASE:USDC`), `Chain`; `Address` absent on a native coin; no nested `MainCurrency` |
 | `Duration{Value int, Unit}` | `Duration{Value uint32, Unit}` | `Value: 0` means none |
 | `CursorData[T]` | `Page[T]` | `Items`, `HasMore` (a field), `NextCursor` (a `string`, `""` on the last page) |
@@ -325,9 +327,7 @@ cancel an order on it.
 | 2.x | 3.0.0 |
 |---|---|
 | `TransactionTypeOneTimePayment` | `TransactionTypePayment` (`payment`) |
-| `TransactionTypeExecuteSubscriptionPayment` | `TransactionTypeExecuteSubscription` |
-| `TransactionTypeCreatePAYGSubscription`, `TransactionTypeCancelPAYGSubscription` (`createPAYGSubscription`…) | `TransactionTypeCreatePaygSubscription`, `TransactionTypeCancelPaygSubscription` (`createPaygSubscription`…) |
-| — | `TransactionTypeForceCancelSubscription`, `TransactionTypeReleaseHeldFunds` |
+| `TransactionTypeTransfer`, `TransactionTypeTokenTransfer`, `TransactionTypeCancelSubscription`, `TransactionTypeExecuteSubscriptionPayment`, `TransactionTypeCreatePAYGSubscription`, `TransactionTypeCancelPAYGSubscription`, `TransactionTypeIncreaseAllowance`, `TransactionTypeUpdateMaxAmount`, `TransactionTypeRefund`, `TransactionTypeFaucet`, `TransactionTypeClaimFunds` | removed: a checkout's `TxType`, the type's only use, is `payment` or `createSubscription` (any other value stays a raw `TransactionType` string) |
 | `RefundStatus` | `pending` (a customer's request), `approved`, `rejected`; `failed` is declared, never set |
 | `CombinedPayment.Source` `"subscription_history"` | `Transaction.Type` `TransactionKindBill` (`bill`) |
 | `AccountingEvent.Type` (a string) | `AccountingEventType` constants (`subscription_history` → `AccountingEventTypeBill`, `bill`) |
@@ -351,6 +351,7 @@ not a type switch:
 | 410 | `*GoneError` |
 | 422 `idempotency_key_reused` | `*IdempotencyError` (2.x mapped 422 to a validation error) |
 | 429 | `*RateLimitError` (`RetryAfter`, `Limit`, `PeriodSeconds`) |
+| any other 4xx (413 `request_too_large`, 405 `method_not_allowed`, …) | `*APIError` itself |
 | 5xx, unexpected 3xx, unusable 2xx | `*ServerError` |
 | no response | `*NetworkError` |
 | bad webhook signature | `*WebhookSignatureError` (`Reason`) |

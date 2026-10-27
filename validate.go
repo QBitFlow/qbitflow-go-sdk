@@ -440,6 +440,17 @@ func isIdempotencyKey(key string) bool {
 	return true
 }
 
+// isPrintableASCII reports whether s is made only of printable ASCII characters other than the
+// space (0x21–0x7E): what an API key may contain.
+func isPrintableASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] < 0x21 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
 // isRequestID reports whether id is a valid X-Request-Id: 1 to 128 of A-Z a-z 0-9 - _ . :.
 func isRequestID(id string) bool {
 	if len(id) < 1 || len(id) > 128 {

@@ -22,8 +22,9 @@ func (s *PaymentsService) List(ctx context.Context, params *PaymentListParams, o
 func (s *PaymentsService) Iterate(ctx context.Context, params *PaymentListParams, opts ...RequestOption) iter.Seq2[Payment, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Payment], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 
@@ -65,8 +66,9 @@ func (s *TransactionsService) List(ctx context.Context, params *TransactionListP
 func (s *TransactionsService) Iterate(ctx context.Context, params *TransactionListParams, opts ...RequestOption) iter.Seq2[Transaction, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Transaction], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 
@@ -85,7 +87,8 @@ func (s *FailuresService) List(ctx context.Context, params *FailureListParams, o
 func (s *FailuresService) Iterate(ctx context.Context, params *FailureListParams, opts ...RequestOption) iter.Seq2[Failure, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Failure], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }

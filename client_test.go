@@ -49,7 +49,7 @@ func TestNewClientDefaults(t *testing.T) {
 	for name, svc := range map[string]any{
 		"Products": c.Products, "Customers": c.Customers, "CheckoutSessions": c.CheckoutSessions,
 		"Payments": c.Payments, "Failures": c.Failures, "Subscriptions": c.Subscriptions,
-		"Refunds": c.Refunds, "Members": c.Members, "Invitations": c.Invitations, "Wallets": c.Wallets,
+		"Refunds": c.Refunds, "Members": c.Members, "Invitations": c.Invitations, "Wallets": c.Wallets, "Settings": c.Settings,
 		"Accounting": c.Accounting, "Webhooks": c.Webhooks, "Webhooks.Endpoints": c.Webhooks.Endpoints,
 		"Webhooks.Events": c.Webhooks.Events, "Currencies": c.Currencies,
 	} {
@@ -262,7 +262,7 @@ func TestMe(t *testing.T) {
 			"userUuid": "019eca82-5680-7b00-8000-0000000000b1",
 			"member": {"userUuid": "019eca82-5680-7b00-8000-0000000000b1", "firstName": "Ada", "lastName": "Lovelace", "email": "ada@example.com"},
 			"test": true,
-			"role": "owner",
+			"role": "admin",
 			"organizationFeePercent": "7.5",
 			"trustedAt": "2026-10-02T12:00:00Z",
 			"createdAt": "2026-10-01T12:00:00Z"
@@ -275,11 +275,11 @@ func TestMe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if me.Credential != CredentialAPIKey || me.Role != RoleUser || me.OnBehalfOfUserUUID != memberUUID || me.UserUUID != "" {
+	if me.Credential != CredentialAPIKey || me.Role != RoleUser || me.OnBehalfOfUserUUID != memberUUID {
 		t.Errorf("me = %+v", me)
 	}
 	if me.Space == nil || !me.Space.Test || me.Space.OrganizationName != "Example Shop" || me.Space.Member == nil || me.Space.Member.FirstName != "Ada" ||
-		me.Space.Role != RoleOwner || me.Space.OrganizationFeePercent != "7.5" || me.Space.TrustedAt == nil || me.Space.CreatedAt.IsZero() {
+		me.Space.Role != RoleAdmin || me.Space.OrganizationFeePercent != "7.5" || me.Space.TrustedAt == nil || me.Space.CreatedAt.IsZero() {
 		t.Errorf("space = %+v", me.Space)
 	}
 }

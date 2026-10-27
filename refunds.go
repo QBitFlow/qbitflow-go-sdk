@@ -24,8 +24,9 @@ func (s *RefundsService) List(ctx context.Context, params *RefundListParams, opt
 func (s *RefundsService) Iterate(ctx context.Context, params *RefundListParams, opts ...RequestOption) iter.Seq2[Refund, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Refund], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 

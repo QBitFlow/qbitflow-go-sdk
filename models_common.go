@@ -161,8 +161,6 @@ type ReferralFee struct {
 	Address string `json:"address"`
 	// FeePercent is the referrer's share of the platform fee, a percent string ("20" = 20 % of it).
 	FeePercent string `json:"feePercent"`
-	// Deadline is until when the referrer earns its share.
-	Deadline time.Time `json:"deadline"`
 }
 
 // Split is how a payment or a bill was split, as the contracts paid it. Each part is an amount

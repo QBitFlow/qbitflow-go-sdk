@@ -9,7 +9,7 @@ checkouts, one-time payments, subscriptions, refunds, marketplaces with commissi
 funds, accounting exports and signed webhooks. Customers pay from their own wallets, on Ethereum,
 Base and Solana, straight to yours.
 
-- **API v2**, every integrator route: 14 services, 54 routes, one `qbitflow` package.
+- **API v2**, every integrator route: 15 services, 58 routes, one `qbitflow` package.
 - **No dependencies** beyond the standard library.
 - **Typed errors** matched with `errors.As`, each carrying the API's code, request id and field errors.
 - **Safe retries**: reads and creates are retried on network errors, 5xx and 429, and every create
@@ -36,6 +36,7 @@ Base and Solana, straight to yours.
 - [Refunds](#refunds)
 - [Marketplaces](#marketplaces)
 - [Wallets](#wallets)
+- [Settings](#settings)
 - [Accounting export](#accounting-export)
 - [Webhooks](#webhooks)
 - [Currencies](#currencies)
@@ -302,14 +303,16 @@ if err != nil {
 
 Every request sends your API key in `X-API-Key`. Keys are created in the QBitFlow dashboard; each
 belongs to one **space** (your organization's, or one of its members') and one **mode** (test or
-live). `NewClient` only checks the key's shape (non-blank, starting with `sk_`) and sends nothing:
+live). `NewClient` only checks the key's shape (after trimming: starting with `sk_`, printable
+ASCII without spaces; its error never quotes the key) and sends nothing:
 call `Me` to check it online, as the [Quick start](#quick-start) does. `me.Role` says what the
 key is (`admin`: an organization key) and `me.Space.Test` its mode: a job that must only run in
 test mode checks it.
 
-Keep the key in a secret store or an environment variable, never in code. The SDK only checks the
-`sk_` prefix; keys issued before API v2 (`sk_<digits>_…`) are refused by the API (`401`): create a
-new one in the dashboard.
+Keep the key in a secret store or an environment variable, never in code. API v2 issues keys shaped
+`sk_<test|live>_<uuid>_<secret>`; the SDK never parses them. Keys of an earlier shape
+(`sk_<digits>_…`, `sk_<uuid>_<test|live>_…`) pass that check but are refused by the API (`401`):
+create a new one in the dashboard.
 
 ### `On-Behalf-Of`: acting in a member's space
 
@@ -416,6 +419,11 @@ fmt.Println("Redirect the customer to", session.Link)
   them as they are, never URL-encoded. In live mode both
   URLs must be `https`. A redirect proves nothing (anyone can open the URL): fulfil on the
   webhook, or on `CheckoutSessions.Get`.
+- **Redirect URLs are the organization's.** Left empty, they come from the space's
+  `checkout.defaults` setting, which the organization's team sets (also for a member's space). A
+  member's own key sending `SuccessURL` or `CancelURL` gets a `403 forbidden` whose
+  `Details["field"]` names it (`successUrl` first), and nothing is created; an organization key
+  acting for the member (`OnBehalfOf`) may send them.
 - **Errors to expect:** `409 merchant_not_ready` (`Details["reason"]`) when the space's wallets
   accept no currency, or for a subscription of a member whose funds you hold (`fundsHeld`); `409 unique_violation` when another payment or open session holds the
   `Reference`; `400 validation_failed` above `"5"` USD in test mode, fees included
@@ -466,8 +474,9 @@ fmt.Println("Redirect the customer to", session.Link)
   keep $120.00. The rate is the checkout's: QBitFlow's fee for your space when the checkout is
   created (a schedule by volume, unless QBitFlow set you a custom rate).
   Left `nil`, the space's `checkout.customerPaysProcessingFee` setting decides (off by default;
-  set it in the dashboard, members may set their own); `false` turns it off for this checkout,
-  and product payment links follow the setting.
+  the organization's team sets it in the dashboard, for its own space or as an exception for a
+  member's; a member can't change it); `false` turns it off for this checkout, and product
+  payment links follow the setting.
 - **What is charged** is the price plus every line: the session's and the payment's `AmountUSD`,
   which the contracts split (QBitFlow's fee, and a marketplace's organization fee, are taken on
   it). The network fee is paid on top, by the customer's wallet (`Settlement.Split.NetworkFee`).
@@ -800,7 +809,8 @@ for bill, err := range client.Subscriptions.IterateBills(ctx, subscriptionUUID, 
 
 - `Subscriptions.GetByReference` reads one by your checkout's `Reference` (the list's
   `?reference=` filter; a `*NotFoundError` when none); `GetBill` one bill (`sub-hist@…`). Bills
-  carry no metadata: read the subscription's.
+  carry no metadata: read the subscription's. `Subscriptions.Get` and `GetBill` take
+  `&qbitflow.ReadParams{IncludeMembers: true}` to read a member's from the organization's space.
 - `Subscriptions.Update` changes its `Metadata` only, merged (a key set to `""` deletes it), and
   answers the subscription:
 
@@ -1100,6 +1110,38 @@ for _, w := range wallets {
 `Wallets.ListAcceptedCurrencies` the currencies a space's checkouts accept now (`UserUUID`: a
 member's, organization key): none means its checkouts answer `409 merchant_not_ready`.
 
+## Settings
+
+A space's **settings** (branding, checkout defaults, refund rules, email choices) and, for an
+organization, the **policies** that say what its members may do themselves. Defaults live in the
+API: an untouched space has none stored. `Settings.Definitions` lists every key with its `Type`
+(`boolean`, `integer`, `enum` or `object`), bounds and default, and `Settings.List` the value each
+key has in the request's space, its `Source` (`SettingSourceOwn`, `SettingSourceOrganization` or
+`SettingSourceDefault`) and whether this key may change it (`Editable`). Both are bounded lists
+(slices).
+
+```go
+s, err := client.Settings.Set(ctx, "refunds.windowDays", 14)
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(s.Key, string(s.Value), s.Source) // refunds.windowDays 14 own
+
+err = client.Settings.Reset(ctx, "refunds.windowDays") // inherits the organization's value, or the default
+```
+
+- `Set(ctx, key, value)` gives the space its own value and returns the key's `SettingValue`. The
+  value is typed by the key: a `bool`, an integer, an enum string, or an object (a struct or map,
+  whose unknown fields the API refuses); `nil` is refused. A wrong type, range or value is a
+  `*ValidationError` naming `value` or `value.<field>`, an unknown key a `*NotFoundError`. `Reset`
+  removes the own value (204). The key is 1 to 100 characters. Neither is retried.
+- An organization key writes every setting, a member's key its own: `403 forbidden` for the
+  others, and `403 policy_disabled` (`Details["policy"]`) when a policy has turned the key off for
+  members. A key writes its own mode only. **A policy (`members.*`) is changed from the dashboard
+  only**: with an API key, `Set` and `Reset` answer `403 forbidden`.
+- A value is the space's own, else the organization's, else the default; an own value replaces the
+  organization's as a whole. `Value` is raw JSON (`json.RawMessage`): decode it with `encoding/json`.
+
 ## Accounting export
 
 Every payment, bill, refund and fee between two dates (`YYYY-MM-DD`, both included), as JSON rows
@@ -1332,6 +1374,10 @@ for _, d := range detail.Deliveries {
 }
 ```
 
+Each `DeliveryAttempt` has `Delivered`, `StatusCode` (`nil` when the endpoint didn't answer) and
+`Error`. An attempt that was not posted at all is `Skipped`, with no `StatusCode`: a member's
+endpoint while the organization's `members.webhooks` policy is off for them.
+
 ## Currencies
 
 <!-- docs:snippet currencies-list -->
@@ -1426,7 +1472,7 @@ Every error the SDK returns is one of the types below, matched with `errors.As`.
 | `*ValidationError` | 400 `validation_failed`, or input the SDK refused **before sending** (`StatusCode` 0) | `FieldErrors`: each failing input by its wire name, dotted when nested (`frequency.unit`) |
 | `*BadRequestError` | any other 400 | `foreign_key_violation` (`Details["field"]`), `test_mode_only`, `sender_is_receiver` |
 | `*AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
-| `*PermissionDeniedError` | 403 | `forbidden`, `policy_disabled` (`Details["policy"]`), `plan_required` |
+| `*PermissionDeniedError` | 403 | `forbidden` (`Details["field"]` when a member's key sends a checkout's `successUrl` / `cancelUrl`), `policy_disabled` (`Details["policy"]`), `plan_required` |
 | `*NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `GetByReference` that found nothing (code `not_found`, the list's `RequestID`) |
 | `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `*GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
@@ -1435,7 +1481,7 @@ Every error the SDK returns is one of the types below, matched with `errors.As`.
 | `*ServerError` | 5xx (503 `network_unavailable`, 504 `timeout`), an unexpected 3xx (redirects are never followed), a 2xx whose body is not the expected JSON | |
 | `*NetworkError` | no response: DNS, connection, TLS, timeout, cancelled context | `Err`: `errors.Is(err, context.DeadlineExceeded)` works through it |
 | `*WebhookSignatureError` | a webhook signature refused, locally or by `VerifyRemote` | `Reason` |
-| `*APIError` | any other HTTP error (e.g. 413 `request_too_large`) | |
+| `*APIError` | any other HTTP error | 413 `request_too_large`; 405 `method_not_allowed` (a path called with a method it doesn't take, the `Allow` header listing its methods: the SDK never does that, so it points at a proxy or a wrong base URL) |
 
 `*APIError` carries `StatusCode`, `Code` (branch on it, never on `Message`), `Message`, `Details`
 (never nil, and raw: money in it is a string, `Details["max"] == "5"`, but the accounting window's
@@ -1564,8 +1610,8 @@ fmt.Println(client != nil)
 
 | Client option | Default | |
 |---|---|---|
-| `WithBaseURL(url)` | `https://api.qbitflow.app/v2` (`qbitflow.DefaultBaseURL`) | an absolute `http(s)` URL; a trailing `/` is stripped |
-| `WithTimeout(d)` | 30 s (`DefaultTimeout`) | per attempt; positive |
+| `WithBaseURL(url)` | `https://api.qbitflow.app/v2` (`qbitflow.DefaultBaseURL`) | an absolute `http(s)` URL with a host, without credentials (`user:pass@`), query or fragment; a trailing `/` is stripped |
+| `WithTimeout(d)` | 30 s (`DefaultTimeout`) | per attempt, through the last byte of the answer's body; positive |
 | `WithMaxRetries(n)` | 3 (`DefaultMaxRetries`) | `0` disables retries; negative is refused |
 | `WithHTTPClient(c)` | a plain `*http.Client` | the SDK uses a copy that never follows redirects |
 | `WithOnBehalfOf(userUUID)` | none | every request acts in that member's space |
@@ -1573,7 +1619,7 @@ fmt.Println(client != nil)
 | Request option (any method, last arguments) | |
 |---|---|
 | `WithOnBehalfOf(userUUID)` | acts in that member's space for this call; `""` forces the organization's (no header) |
-| `WithIdempotencyKey(key)` | the 7 creates only: your own `Idempotency-Key` |
+| `WithIdempotencyKey(key)` | the 6 creates only: your own `Idempotency-Key` |
 | `WithRequestID(id)` | sends `X-Request-Id` (1 to 128 of `A-Z a-z 0-9 - _ . :`) |
 
 | Webhook option (`VerifyWebhook`, `VerifyWebhookRequest`, `ConstructEvent`, `NewWebhookRouter`) | Default |

@@ -68,8 +68,8 @@ type AccountingEvent struct {
 	PlatformFee string `json:"platformFee,omitempty"`
 	// PlatformFeeMinUnits is the same on-chain.
 	PlatformFeeMinUnits string `json:"platformFeeMinUnits,omitempty"`
-	// ReferralFee is the referrer's share, paid out of the platform fee, in the currency's units:
-	// what a referralFee event earned. "" when no referral applied (none, or past its deadline).
+	// ReferralFee is the referrer's share, paid out of the platform fee, in the currency's units
+	// (on a referralFee row: what the referrer earned); "" when no referral applied.
 	ReferralFee string `json:"referralFee,omitempty"`
 	// ReferralFeeMinUnits is the same on-chain.
 	ReferralFeeMinUnits string `json:"referralFeeMinUnits,omitempty"`

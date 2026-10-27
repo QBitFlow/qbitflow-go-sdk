@@ -23,8 +23,9 @@ func (s *ProductsService) List(ctx context.Context, params *ProductListParams, o
 func (s *ProductsService) Iterate(ctx context.Context, params *ProductListParams, opts ...RequestOption) iter.Seq2[Product, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Product], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 

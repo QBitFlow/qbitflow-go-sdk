@@ -40,6 +40,8 @@ type Client struct {
 	Invitations *InvitationsService
 	// Wallets reads the wallets and the currencies they accept (/wallets…).
 	Wallets *WalletsService
+	// Settings reads and writes the space's settings (/settings…).
+	Settings *SettingsService
 	// Accounting exports the accounting events (/accounting/export).
 	Accounting *AccountingService
 	// Webhooks verifies webhooks and manages the endpoints (Endpoints) and the event log (Events).
@@ -55,9 +57,11 @@ type Client struct {
 	onBehalfOfErr error
 }
 
-// NewClient creates a client for apiKey (sent as X-API-Key). The key must be non-blank and
-// start with "sk_"; the rest is opaque. Options: WithBaseURL, WithTimeout, WithMaxRetries,
-// WithHTTPClient, WithOnBehalfOf. A bad key or option returns a *ValidationError.
+// NewClient creates a client for apiKey (sent as X-API-Key). Surrounding whitespace is trimmed;
+// the key must then start with "sk_" and be printable ASCII without spaces (0x21–0x7E). The rest
+// is opaque: API v2 issues sk_<test|live>_<uuid>_<secret> keys, and the SDK never parses them.
+// Options: WithBaseURL, WithTimeout, WithMaxRetries, WithHTTPClient, WithOnBehalfOf. A bad key
+// or option returns a *ValidationError, whose message never quotes the key.
 //
 // NewClient sends nothing: call Client.Me to check the key online.
 func NewClient(apiKey string, opts ...ClientOption) (*Client, error) {
@@ -65,8 +69,12 @@ func NewClient(apiKey string, opts ...ClientOption) (*Client, error) {
 	if apiKey == "" {
 		return nil, newFieldError("apiKey", "is required")
 	}
+	// The messages never quote the key.
 	if !strings.HasPrefix(apiKey, "sk_") {
 		return nil, newFieldError("apiKey", "must be a QBitFlow API key (sk_…)")
+	}
+	if !isPrintableASCII(apiKey) {
+		return nil, newFieldError("apiKey", "must be printable ASCII without spaces (no line break, control or non-ASCII character)")
 	}
 
 	cfg := clientConfig{baseURL: DefaultBaseURL, timeout: DefaultTimeout, maxRetries: DefaultMaxRetries}
@@ -90,7 +98,7 @@ func NewClient(apiKey string, opts ...ClientOption) (*Client, error) {
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 	t := &transport{
-		apiKey:     apiKey,
+		apiKey:     &apiKey,
 		baseURL:    cfg.baseURL,
 		httpClient: httpClient,
 		timeout:    cfg.timeout,
@@ -135,6 +143,7 @@ func newClient(t *transport, onBehalfOf string, onBehalfOfErr error) *Client {
 	c.Members = &MembersService{client: c}
 	c.Invitations = &InvitationsService{client: c}
 	c.Wallets = &WalletsService{client: c}
+	c.Settings = &SettingsService{client: c}
 	c.Accounting = &AccountingService{client: c}
 	c.Webhooks = &WebhooksService{
 		client:    c,

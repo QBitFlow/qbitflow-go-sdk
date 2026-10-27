@@ -19,7 +19,10 @@ import (
 
 // transport is the configuration a Client and its OnBehalfOf copies share.
 type transport struct {
-	apiKey     string
+	// apiKey is behind a pointer so that no fmt verb ever prints it: a pointer nested in a
+	// value fmt prints is shown as an address (a string field would be shown as is, even
+	// through the Client with %s).
+	apiKey     *string
 	baseURL    string
 	httpClient *http.Client
 	timeout    time.Duration // per attempt
@@ -213,7 +216,7 @@ func (c *Client) send(ctx context.Context, e endpoint, opts []RequestOption) (*r
 	}
 
 	header := http.Header{}
-	header.Set("X-API-Key", c.t.apiKey)
+	header.Set("X-API-Key", *c.t.apiKey)
 	header.Set("User-Agent", userAgent)
 	header.Set("Accept", "application/json")
 	if e.accept != "" {
@@ -300,21 +303,29 @@ func (t *transport) roundTrip(ctx context.Context, method, target string, payloa
 
 	res, err := t.httpClient.Do(req)
 	if err != nil {
-		switch {
-		case ctx.Err() != nil:
-			return nil, newNetworkError("request cancelled", err)
-		case errors.Is(attemptCtx.Err(), context.DeadlineExceeded):
-			return nil, newNetworkError("request timed out after "+t.timeout.String(), err)
-		}
-		return nil, newNetworkError("request failed", err)
+		return nil, t.attemptError(ctx, attemptCtx, "request failed", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 
+	// The body is read under attemptCtx too: the timeout bounds the attempt through its last
+	// byte, so a server trickling its body cannot hold the call past it.
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, newNetworkError("failed to read the response", err)
+		return nil, t.attemptError(ctx, attemptCtx, "failed to read the response", err)
 	}
 	return &response{status: res.StatusCode, header: res.Header, body: data}, nil
+}
+
+// attemptError wraps a failed attempt's error in a *NetworkError naming why: the caller's
+// context ended, the per-attempt timeout elapsed, or what (the fallback message).
+func (t *transport) attemptError(ctx, attemptCtx context.Context, fallback string, err error) *NetworkError {
+	switch {
+	case ctx.Err() != nil:
+		return newNetworkError("request cancelled", err)
+	case errors.Is(attemptCtx.Err(), context.DeadlineExceeded):
+		return newNetworkError("request timed out after "+t.timeout.String(), err)
+	}
+	return newNetworkError(fallback, err)
 }
 
 // encodeBody encodes a request body. A value JSON cannot represent (NaN, ±Inf, invalid

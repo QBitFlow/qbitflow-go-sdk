@@ -24,8 +24,9 @@ func (s *SubscriptionsService) List(ctx context.Context, params *SubscriptionLis
 func (s *SubscriptionsService) Iterate(ctx context.Context, params *SubscriptionListParams, opts ...RequestOption) iter.Seq2[Subscription, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Subscription], error) {
-		p.Cursor = cursor
-		return s.List(ctx, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.List(ctx, &page, opts...)
 	})
 }
 
@@ -82,8 +83,9 @@ func (s *SubscriptionsService) ListBills(ctx context.Context, uuid string, param
 func (s *SubscriptionsService) IterateBills(ctx context.Context, uuid string, params *BillListParams, opts ...RequestOption) iter.Seq2[Bill, error] {
 	p := derefOrZero(params)
 	return iteratePages(p.Cursor, func(cursor string) (*Page[Bill], error) {
-		p.Cursor = cursor
-		return s.ListBills(ctx, uuid, &p, opts...)
+		page := p // a copy per request: ranges never share params
+		page.Cursor = cursor
+		return s.ListBills(ctx, uuid, &page, opts...)
 	})
 }
 
@@ -110,8 +112,9 @@ func (s *SubscriptionsService) GetBill(ctx context.Context, billUUID string, par
 // cancellation goes on whatever happens).
 //
 // Errors: 404 for a cancelled or another space's subscription; 409
-// subscription_already_stopped_or_inactive (Immediate false on a stopped one); 400 on
-// immediate for a trial with Immediate false; 409 tx_already_sent while a cancellation runs.
+// subscription_already_stopped_or_inactive (Immediate false on a stopped one); 400
+// validation_failed on immediate (Immediate false on a trial, which has no paid period to
+// finish); 409 tx_already_sent while a cancellation runs.
 func (s *SubscriptionsService) Cancel(ctx context.Context, uuid string, params *CancelSubscriptionParams, opts ...RequestOption) (*SubscriptionCancellation, error) {
 	if err := checkPathTxID("uuid", uuid); err != nil {
 		return nil, err

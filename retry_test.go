@@ -414,3 +414,24 @@ func TestNewUUIDv4(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// TestCrossOriginRedirectNeverSendsTheKey: net/http strips Authorization on a cross-domain
+// redirect but not X-API-Key, so the SDK must not follow one at all: the other origin receives
+// nothing, also with a caller's http.Client that would follow it.
+func TestCrossOriginRedirectNeverSendsTheKey(t *testing.T) {
+	other := newTestServer(t, func(w http.ResponseWriter, _ *http.Request, _ int) { jsonReply(w, 200, `{}`) })
+	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		http.Redirect(w, r, other.URL+"/v2/me", http.StatusTemporaryRedirect)
+	})
+	following := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return nil }}
+	for _, opts := range [][]ClientOption{nil, {WithHTTPClient(following)}} {
+		c, _ := newTestClient(t, ts, opts...)
+		var se *ServerError
+		if _, err := c.Me(context.Background()); !errors.As(err, &se) || se.StatusCode != http.StatusTemporaryRedirect {
+			t.Errorf("want a 307 *ServerError, got %v", err)
+		}
+	}
+	if n := len(other.recorded()); n != 0 {
+		t.Errorf("the redirect's target received %d requests", n)
+	}
+}
