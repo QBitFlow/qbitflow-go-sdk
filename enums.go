@@ -236,8 +236,8 @@ const (
 	EventTypeSubscriptionBillingFailed         EventType = "subscription.billingFailed"
 	EventTypeSubscriptionUpcomingBill          EventType = "subscription.upcomingBill"
 	EventTypeRefundRequested                   EventType = "refund.requested"
-	EventTypeRefundApproved                    EventType = "refund.approved" // Was refund.completed
-	EventTypeRefundRejected                    EventType = "refund.rejected" // Was refund.denied
+	EventTypeRefundApproved                    EventType = "refund.approved"
+	EventTypeRefundRejected                    EventType = "refund.rejected"
 	EventTypeMemberJoined                      EventType = "member.joined"
 	EventTypeMemberRemoved                     EventType = "member.removed"
 	EventTypeHeldFundsReleased                 EventType = "heldFunds.released"

@@ -1320,7 +1320,7 @@ handler, `body, err := qbitflow.VerifyWebhookRequest(r, secret)` reads the reque
 | `subscription.actionRequiredChanged` | `SubscriptionActionRequiredChanged()` | the `Subscription` + `PreviousActionRequired` |
 | `subscription.billingFailed` | `SubscriptionBillingFailed()` | the `Subscription` + `Reason`, `BillUUID`, `AmountUSD` (a string), `Attempt`, `RemainingAttempts`, `NextAttemptAt` |
 | `subscription.upcomingBill` | `SubscriptionUpcomingBill()` | the `Subscription` + `BillingAt`, `AmountUSD` (a string), `TrialEnding`, `BalanceSufficient`, `AllowanceSufficient` |
-| `refund.requested` / `.approved` / `.rejected` | `RefundRequested()` / `RefundApproved()` / `RefundRejected()` | the `Refund` (`refund.approved` and `refund.rejected` were `refund.completed` and `refund.denied`) |
+| `refund.requested` / `.approved` / `.rejected` | `RefundRequested()` / `RefundApproved()` / `RefundRejected()` | the `Refund` |
 | `member.joined` | `MemberJoined()` | the `Member` + `InvitationUUID` |
 | `member.removed` | `MemberRemoved()` | the `Member` |
 | `heldFunds.released` | `HeldFundsReleased()` | the transfer paid to the member (`Amount`, `AmountUSD`, `Settlement.Transaction`) + the `Ledgers` it settled |

@@ -261,7 +261,7 @@ func (e *Event) RefundRequested() (*Refund, error) {
 	return decodeEventData[Refund](e, EventTypeRefundRequested)
 }
 
-// RefundApproved decodes a refund.approved event's data (was refund.completed): the refund,
+// RefundApproved decodes a refund.approved event's data: the refund,
 // approved, its transfer confirmed (TxHash, Settlement.Transaction); RefundPercent and Amount
 // are the share actually paid back. For a merchant's own refund (InitiatedBy merchant) it is
 // the first and only event.
@@ -269,7 +269,7 @@ func (e *Event) RefundApproved() (*Refund, error) {
 	return decodeEventData[Refund](e, EventTypeRefundApproved)
 }
 
-// RefundRejected decodes a refund.rejected event's data (was refund.denied): a customer's
+// RefundRejected decodes a refund.rejected event's data: a customer's
 // request rejected by whoever decides it. A decision, final.
 func (e *Event) RefundRejected() (*Refund, error) {
 	return decodeEventData[Refund](e, EventTypeRefundRejected)

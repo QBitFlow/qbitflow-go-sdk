@@ -173,13 +173,13 @@ func (r *WebhookRouter) OnRefundRequested(fn func(ctx context.Context, data *Ref
 	return onType(r, EventTypeRefundRequested, (*Event).RefundRequested, fn)
 }
 
-// OnRefundApproved handles refund.approved (was refund.completed): reverse the order, in full
+// OnRefundApproved handles refund.approved: reverse the order, in full
 // or in part (RefundPercent below 100).
 func (r *WebhookRouter) OnRefundApproved(fn func(ctx context.Context, data *Refund, e *Event) error) *WebhookRouter {
 	return onType(r, EventTypeRefundApproved, (*Event).RefundApproved, fn)
 }
 
-// OnRefundRejected handles refund.rejected (was refund.denied).
+// OnRefundRejected handles refund.rejected.
 func (r *WebhookRouter) OnRefundRejected(fn func(ctx context.Context, data *Refund, e *Event) error) *WebhookRouter {
 	return onType(r, EventTypeRefundRejected, (*Event).RefundRejected, fn)
 }
