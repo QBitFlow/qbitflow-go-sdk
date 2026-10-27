@@ -8,8 +8,6 @@ import (
 
 // Me is what the API key is, and where the request acts (Client.Me).
 type Me struct {
-	// Credential is apiKey for an API key.
-	Credential Credential `json:"credential"`
 	// APIKeyUUID is the key's id.
 	APIKeyUUID string `json:"apiKeyUuid,omitempty"`
 	// Role is what the request may do in the space: admin (an organization key) or user (a
@@ -155,7 +153,7 @@ type UpdateMemberParams struct {
 	OrganizationFeePercent string `json:"organizationFeePercent"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *UpdateMemberParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -272,7 +270,7 @@ func (p CreateInvitationParams) MarshalJSON() ([]byte, error) {
 	}{p.Email, RoleUser, p.HoldFunds, p.OrganizationFeePercent, p.RedirectURL, p.SendEmail})
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *CreateInvitationParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")

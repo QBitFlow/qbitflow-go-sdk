@@ -49,7 +49,7 @@ func TestNewClientDefaults(t *testing.T) {
 	for name, svc := range map[string]any{
 		"Products": c.Products, "Customers": c.Customers, "CheckoutSessions": c.CheckoutSessions,
 		"Payments": c.Payments, "Failures": c.Failures, "Subscriptions": c.Subscriptions,
-		"Refunds": c.Refunds, "Members": c.Members, "Invitations": c.Invitations, "Wallets": c.Wallets, "Settings": c.Settings,
+		"Refunds": c.Refunds, "Members": c.Members, "Invitations": c.Invitations, "Wallets": c.Wallets,
 		"Accounting": c.Accounting, "Webhooks": c.Webhooks, "Webhooks.Endpoints": c.Webhooks.Endpoints,
 		"Webhooks.Events": c.Webhooks.Events, "Currencies": c.Currencies,
 	} {
@@ -275,7 +275,7 @@ func TestMe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if me.Credential != CredentialAPIKey || me.Role != RoleUser || me.OnBehalfOfUserUUID != memberUUID {
+	if me.Role != RoleUser || me.OnBehalfOfUserUUID != memberUUID {
 		t.Errorf("me = %+v", me)
 	}
 	if me.Space == nil || !me.Space.Test || me.Space.OrganizationName != "Example Shop" || me.Space.Member == nil || me.Space.Member.FirstName != "Ada" ||

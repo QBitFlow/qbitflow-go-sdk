@@ -24,7 +24,6 @@ func TestErrorMapping(t *testing.T) {
 		{401, "unauthorized", (*AuthenticationError)(nil)},
 		{403, "forbidden", (*PermissionDeniedError)(nil)},
 		{403, "policy_disabled", (*PermissionDeniedError)(nil)},
-		{403, "plan_required", (*PermissionDeniedError)(nil)},
 		{404, "not_found", (*NotFoundError)(nil)},
 		{409, "unique_violation", (*ConflictError)(nil)},
 		{409, "tx_already_sent", (*ConflictError)(nil)},

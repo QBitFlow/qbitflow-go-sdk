@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Typing rule (types.md §1): a field the API always sends is a value; an optional string is a
+// Typing rule: a field the API always sends is a value; an optional string is a
 // string ("" = absent); any other optional field is a pointer (nil = absent); lists are slices
 // and merchant metadata a map[string]string (both nil-safe). The API never sends null: an
 // optional field without a value is absent. Money, token amounts and fee rates are decimal
@@ -113,8 +113,6 @@ type RefundSummary struct {
 // Attempt is how a session's (or a refund approval's) last attempt failed, while it waits for
 // another: never final.
 type Attempt struct {
-	// Status is failed.
-	Status AttemptStatus `json:"status"`
 	// Code is the error code (e.g. insufficient_funds, token_not_approved): what to do about it.
 	Code string `json:"code,omitempty"`
 	// Message is the reason, for the customer.

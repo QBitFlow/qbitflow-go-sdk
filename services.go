@@ -41,9 +41,6 @@ type InvitationsService struct{ client *Client }
 // WalletsService reads the wallets and the currencies a space accepts.
 type WalletsService struct{ client *Client }
 
-// SettingsService reads and writes the space's settings.
-type SettingsService struct{ client *Client }
-
 // AccountingService exports the accounting events.
 type AccountingService struct{ client *Client }
 

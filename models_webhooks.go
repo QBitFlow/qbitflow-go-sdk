@@ -18,14 +18,10 @@ type WebhookEndpoint struct {
 	Events []EventType `json:"events"`
 	// IncludeMembers is true for an organization endpoint that also receives its members' events.
 	IncludeMembers bool `json:"includeMembers"`
-	// PayloadVersion is the payload it receives: v2 (the event envelope), the only version.
-	PayloadVersion WebhookPayloadVersion `json:"payloadVersion"`
 	// Description is a note for the dashboard; "" (absent) when none.
 	Description string `json:"description,omitempty"`
 	// CreatedAt is when it was created.
 	CreatedAt time.Time `json:"createdAt"`
-	// RotatedAt is when its secret last changed.
-	RotatedAt *time.Time `json:"rotatedAt,omitempty"`
 	// DisabledAt is when it was disabled (it receives nothing): after 3 days without a successful
 	// delivery (live mode only), or by its owner; nil while enabled. Update with Enabled true
 	// enables it again.
@@ -110,7 +106,7 @@ type CreateWebhookEndpointParams struct {
 	Description string `json:"description,omitempty"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *CreateWebhookEndpointParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -136,15 +132,12 @@ type UpdateWebhookEndpointParams struct {
 	IncludeMembers *bool `json:"includeMembers,omitempty"`
 	// Description is the new note; a pointer to "" clears it, nil leaves it unchanged.
 	Description *string `json:"description,omitempty"`
-	// PayloadVersion is the payload it receives: v2, the only version today (anything else is
-	// refused); "" leaves it unchanged.
-	PayloadVersion WebhookPayloadVersion `json:"payloadVersion,omitempty"`
 	// Enabled false pauses the endpoint (it receives nothing, deliveries in progress stop); true
 	// enables it again, also after it was disabled for failing.
 	Enabled *bool `json:"enabled,omitempty"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *UpdateWebhookEndpointParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -155,7 +148,6 @@ func (p *UpdateWebhookEndpointParams) Validate() error {
 	if p.Description != nil {
 		v.text("description", *p.Description, 0, 200)
 	}
-	oneOf(&v, "payloadVersion", p.PayloadVersion, WebhookPayloadVersionV2)
 	return v.err()
 }
 

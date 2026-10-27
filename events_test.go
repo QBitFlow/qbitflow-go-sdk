@@ -13,7 +13,7 @@ import (
 )
 
 // loadEvent parses testdata/events/<type>.json: the docs' example body of each event type
-// (docs/api webhooks.md § Examples, generated from the API's code).
+// (the API reference's webhook examples).
 func loadEvent(t *testing.T, eventType EventType) *Event {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "events", string(eventType)+".json"))
@@ -24,7 +24,7 @@ func loadEvent(t *testing.T, eventType EventType) *Event {
 	if err != nil {
 		t.Fatalf("ParseEvent(%s): %v", eventType, err)
 	}
-	if e.Type != eventType || e.Version != WebhookPayloadVersionV2 || !strings.HasPrefix(e.ID, "evt_") || e.CreatedAt.IsZero() {
+	if e.Type != eventType || !strings.HasPrefix(e.ID, "evt_") || e.CreatedAt.IsZero() {
 		t.Fatalf("envelope %+v", e)
 	}
 	return e
@@ -50,6 +50,33 @@ var strictModel = map[EventType]func() any{
 	EventTypeWebhookTest:                       func() any { return new(WebhookTest) },
 }
 
+// notModelled lists, per event type, the top-level data keys the API sends but the SDK
+// deliberately leaves out (dashboard-only, or constant for an API key): decoding ignores them.
+var notModelled = map[EventType][]string{
+	EventTypeCheckoutExpired:   {"availableCurrencies", "userName", "organizationName"},
+	EventTypeHeldFundsReleased: {"type"},
+}
+
+// withoutKeys returns data (a JSON object) without the given top-level keys (when present).
+func withoutKeys(t *testing.T, data []byte, keys []string) []byte {
+	t.Helper()
+	if len(keys) == 0 {
+		return data
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		delete(m, k)
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestEventFixturesAreFullyModelled(t *testing.T) {
 	if len(strictModel) != len(knownEventTypes) || len(knownEventTypes) != 15 {
 		t.Fatalf("%d models for %d types", len(strictModel), len(knownEventTypes))
@@ -60,7 +87,7 @@ func TestEventFixturesAreFullyModelled(t *testing.T) {
 	}
 	for _, eventType := range knownEventTypes {
 		e := loadEvent(t, eventType)
-		dec := json.NewDecoder(bytes.NewReader(e.Data))
+		dec := json.NewDecoder(bytes.NewReader(withoutKeys(t, e.Data, notModelled[eventType])))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(strictModel[eventType]()); err != nil {
 			t.Errorf("%s: %v", eventType, err)
@@ -236,7 +263,7 @@ func TestEventMembersAndFunds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !released.Received || released.Type != TransferTypeHeldFundsRelease || len(released.Ledgers) != 3 || released.Amount != "98.9068" ||
+	if !released.Received || len(released.Ledgers) != 3 || released.Amount != "98.9068" ||
 		released.AmountUSD != "98.9068" || released.Settlement.Transaction == nil || released.Currency.Code != "BASE:USDC" ||
 		!strings.HasPrefix(released.UUID, "transfer@") {
 		t.Errorf("released %+v", released)
@@ -271,16 +298,15 @@ func TestEventCheckoutExpired(t *testing.T) {
 		t.Fatalf("payment session expected: %+v", ce)
 	}
 	p := ce.Payment
-	if p.TxType != TransactionTypePayment || p.PriceUSD != "10" || p.AmountUSD != "10" || len(p.AvailableCurrencies) != 2 ||
-		p.AvailableCurrencies[0].Address != "" || p.AvailableCurrencies[1].Code != "BASE:USDC" || p.Metadata["orderId"] != "order-1043" ||
-		p.OrganizationName != "Example Shop" || p.ExpiresAt == nil || p.CreatedAt == nil || p.Reference != "order-1043" {
+	if p.TxType != TransactionTypePayment || p.PriceUSD != "10" || p.AmountUSD != "10" ||
+		p.Metadata["orderId"] != "order-1043" || p.ExpiresAt == nil || p.CreatedAt == nil || p.Reference != "order-1043" {
 		t.Errorf("payment session %+v", p)
 	}
 	if p.Fees == nil || len(p.Fees) != 0 {
 		t.Errorf("the docs' session has no fees: %+v", p.Fees)
 	}
 
-	withFees := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{
+	withFees := &Event{Type: EventTypeCheckoutExpired, Data: json.RawMessage(`{
 		"uuid":"pay@2","txType":"payment","organizationName":"Shop","priceUsd":"3.99","amountUsd":"4.81",
 		"fees":[{"type":"custom","label":"Shipping","description":"Standard, 3 to 5 days","amountUsd":"0.75"},
 		{"type":"processingFee","label":"Processing fee","amountUsd":"0.07"}],"availableCurrencies":[],"metadata":{}}`)}
@@ -293,7 +319,7 @@ func TestEventCheckoutExpired(t *testing.T) {
 		t.Errorf("session fees %+v amount %v", ce.Payment.Fees, ce.Payment.AmountUSD)
 	}
 
-	sub := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{
+	sub := &Event{Type: EventTypeCheckoutExpired, Data: json.RawMessage(`{
 		"uuid":"sub@1","txType":"createSubscription","organizationName":"Shop","test":true,"priceUsd":"9.99","amountUsd":"9.99","fees":[],
 		"availableCurrencies":[` + fxCurrency + `],"metadata":{"plan":"pro"},
 		"frequency":{"value":1,"unit":"weeks"},"trialPeriod":{"value":14,"unit":"days"},"minPeriods":3,"upgradingFromTrial":false}`)}
@@ -303,18 +329,18 @@ func TestEventCheckoutExpired(t *testing.T) {
 	}
 	s := ce.Subscription
 	if s.UUID != "sub@1" || s.Frequency != (Duration{1, DurationUnitWeeks}) || s.TrialPeriod == nil || *s.MinPeriods != 3 ||
-		s.UpgradingFromTrial || s.Metadata["plan"] != "pro" || s.AvailableCurrencies[0].Code != "BASE:USDC" {
+		s.UpgradingFromTrial || s.Metadata["plan"] != "pro" {
 		t.Errorf("subscription session %+v", s)
 	}
 
-	unknown := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{"uuid":"x@1","txType":"payAsYouGo","organizationName":"Shop"}`)}
+	unknown := &Event{Type: EventTypeCheckoutExpired, Data: json.RawMessage(`{"uuid":"x@1","txType":"payAsYouGo","organizationName":"Shop"}`)}
 	ce, err = unknown.CheckoutExpired()
 	if err != nil || ce.Payment == nil || ce.Payment.TxType != "payAsYouGo" {
 		t.Errorf("unknown txType: %+v %v", ce, err)
 	}
 
 	// The session's amounts are decimal strings: a number is refused.
-	numeric := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{"uuid":"pay@3","txType":"payment","priceUsd":10}`)}
+	numeric := &Event{Type: EventTypeCheckoutExpired, Data: json.RawMessage(`{"uuid":"pay@3","txType":"payment","priceUsd":10}`)}
 	if _, err := numeric.CheckoutExpired(); !errors.As(err, new(*ValidationError)) {
 		t.Errorf("numeric priceUsd: %v", err)
 	}
@@ -354,7 +380,7 @@ func TestEventDecodeData(t *testing.T) {
 		t.Errorf("DecodeData[map]: %v %v", m, err)
 	}
 	// A shape that does not fit: an amountUsd as a number where the model wants a decimal string.
-	numeric := &Event{Type: EventTypeSubscriptionBillingFailed, Version: "v2", Data: json.RawMessage(`{"amountUsd":10}`)}
+	numeric := &Event{Type: EventTypeSubscriptionBillingFailed, Data: json.RawMessage(`{"amountUsd":10}`)}
 	if _, err := numeric.SubscriptionBillingFailed(); !errors.As(err, new(*ValidationError)) {
 		t.Errorf("wrong shape: %v", err)
 	}

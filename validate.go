@@ -12,8 +12,8 @@ import (
 	"unicode/utf8"
 )
 
-// This file is the SDK's one set of client-side checks (behaviour §8, docs validators.md).
-// They mirror the API's binding rules so a bad input fails before the round trip, with a
+// This file is the SDK's one set of client-side checks. They mirror the API's validation rules
+// so a bad input fails before the round trip, with a
 // *ValidationError naming each failing input by its wire name. Lengths count code points.
 // Rules that depend on the key's mode or on server state (test-mode price cap, https-only
 // URLs in live mode, the live subscription price minimum, the frequency minimum, the 92-day
@@ -62,7 +62,7 @@ func (v *validator) length(field, value string, minLen, maxLen int) bool {
 	return false
 }
 
-// textDisallowed are the characters names and free text refuse (validators.md).
+// textDisallowed are the characters names and free text refuse (as the API's validators do).
 const textDisallowed = "<>{}[]`\\|;\"~^"
 
 // bidiControls reorder the text around them (U+202A–U+202E, U+2066–U+2069).

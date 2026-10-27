@@ -69,17 +69,10 @@ type PaymentSessionData struct {
 	SuccessURL string `json:"successUrl,omitempty"`
 	// CancelURL is the merchant's page for a customer who leaves the checkout (placeholders filled).
 	CancelURL string `json:"cancelUrl,omitempty"`
-	// OrganizationName is the merchant's organization, as the checkout shows it.
-	OrganizationName string `json:"organizationName"`
-	// UserName is the member the checkout pays (a marketplace's seller), by name; "" on the
-	// organization's own checkouts.
-	UserName string `json:"userName,omitempty"`
 	// Test is true for a checkout paid on test networks.
 	Test bool `json:"test"`
 	// TxType is the session's kind: payment or createSubscription.
 	TxType TransactionType `json:"txType"`
-	// AvailableCurrencies are the currencies the customer could pay with.
-	AvailableCurrencies []Currency `json:"availableCurrencies"`
 	// Metadata is the merchant's own data on the checkout; empty without any.
 	Metadata map[string]string `json:"metadata"`
 	// CreatedAt is when the session was opened.
@@ -125,13 +118,16 @@ type CreatePaymentSessionParams struct {
 	PriceUSD string `json:"priceUsd,omitempty"`
 	// SuccessURL is where the customer goes after paying, through QBitFlow's page for the payment
 	// (PlaceholderUUID: the session's id; PlaceholderTransactionType: payment or
-	// createSubscription). Default: the space's checkout.defaults setting. https only in live
-	// mode. Reaching it is no proof of payment: fulfil on payment.completed. Organization
-	// credentials only: a member's own key sending it is a 403 forbidden (details.field
-	// "successUrl"); an organization key acting On-Behalf-Of the member may.
+	// createSubscription). Default: the space's checkout defaults (set in the dashboard). https
+	// only in live mode. Reaching it is no proof of payment: fulfil on payment.completed. A
+	// member's own key may send it while its organization's members.checkoutRedirects policy
+	// allows it (the default); with the policy off: 403 policy_disabled (details.policy
+	// "members.checkoutRedirects", details.field "successUrl"). An organization key acting
+	// On-Behalf-Of the member may always send it.
 	SuccessURL string `json:"successUrl,omitempty"`
-	// CancelURL is where the customer goes after a cancelled or failed payment (same placeholders).
-	// Organization credentials only, as SuccessURL (403 forbidden, details.field "cancelUrl").
+	// CancelURL is where the customer goes after a cancelled or failed payment (same placeholders
+	// and default). A member's own key may send it under the same policy as SuccessURL (403
+	// policy_disabled, details.field "cancelUrl", while it is off).
 	CancelURL string `json:"cancelUrl,omitempty"`
 	// CustomerUUID is one of the space's customers (unknown: 404); the checkout then asks the
 	// customer nothing.
@@ -190,7 +186,7 @@ type FeeItem struct {
 // maxFeeItems is the most lines CheckoutFees.Items may have.
 const maxFeeItems = 10
 
-// validate checks the fees (behaviour §8): at most 10 lines; each label the name rule, 1 to 40;
+// validate checks the fees: at most 10 lines; each label the name rule, 1 to 40;
 // each description the text rule, at most 200; each amount the usd rule.
 func (f *CheckoutFees) validate(v *validator, field string) {
 	if f == nil {
@@ -211,7 +207,7 @@ func (f *CheckoutFees) validate(v *validator, field string) {
 	}
 }
 
-// Validate checks the params (behaviour §8): the product choice, names, texts, references,
+// Validate checks the params: the product choice, names, texts, references,
 // URLs, the price, the lifetime, the metadata and the fees.
 func (p *CreatePaymentSessionParams) Validate() error {
 	if p == nil {
@@ -223,7 +219,7 @@ func (p *CreatePaymentSessionParams) Validate() error {
 	return v.err()
 }
 
-// validate checks every field but the fees (reported last, behaviour §8).
+// validate checks every field but the fees (reported last).
 func (p *CreatePaymentSessionParams) validate(v *validator) {
 	v.reference("reference", p.Reference)
 	v.uuid("productUuid", p.ProductUUID)
@@ -240,7 +236,7 @@ func (p *CreatePaymentSessionParams) validate(v *validator) {
 	v.metadata("metadata", p.Metadata)
 
 	// Exactly one of: productUuid, productReference, an inline product. Any inline field next
-	// to productUuid or productReference counts as mixing (behaviour §10).
+	// to productUuid or productReference counts as mixing.
 	inline := p.ProductName != "" || p.PriceUSD != "" || p.Description != ""
 	chosen := 0
 	for _, set := range []bool{p.ProductUUID != "", p.ProductReference != "", inline} {
@@ -285,11 +281,14 @@ type CreateSubscriptionSessionParams struct {
 	// "0.25" for a live subscription (inline or its product's; details.min).
 	PriceUSD string `json:"priceUsd,omitempty"`
 	// SuccessURL is where the customer goes after subscribing (placeholders and default as for
-	// CreatePayment). Organization credentials only: a member's own key sending it is a 403
-	// forbidden (details.field "successUrl"); an organization key acting On-Behalf-Of may.
+	// CreatePayment). A member's own key may send it while its organization's
+	// members.checkoutRedirects policy allows it (the default); with the policy off: 403
+	// policy_disabled (details.policy "members.checkoutRedirects", details.field "successUrl"). An
+	// organization key acting On-Behalf-Of the member may always send it.
 	SuccessURL string `json:"successUrl,omitempty"`
-	// CancelURL is where the customer goes after a cancelled or failed checkout. Organization
-	// credentials only, as SuccessURL (403 forbidden, details.field "cancelUrl").
+	// CancelURL is where the customer goes after a cancelled or failed checkout. A member's own key
+	// may send it under the same policy as SuccessURL (403 policy_disabled, details.field
+	// "cancelUrl", while it is off).
 	CancelURL string `json:"cancelUrl,omitempty"`
 	// CustomerUUID is one of the space's customers.
 	CustomerUUID string `json:"customerUuid,omitempty"`

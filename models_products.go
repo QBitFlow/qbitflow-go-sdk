@@ -102,7 +102,7 @@ type CreateProductParams struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *CreateProductParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -146,7 +146,7 @@ type UpdateProductParams struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *UpdateProductParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")

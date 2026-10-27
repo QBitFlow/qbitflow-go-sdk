@@ -290,9 +290,9 @@ func iterCases() []iterCase {
 				return collect(c.Products.Iterate(ctx, &ProductListParams{Limit: 2, IncludeHidden: true}),
 					func(v Product) string { return v.UUID }, stopAfter)
 			}},
-		{"Customers.Iterate", "/customers", "email=a%40b.co&limit=2&verified=false", uuidItem,
+		{"Customers.Iterate", "/customers", "email=a%40b.co&limit=2", uuidItem,
 			func(ctx context.Context, c *Client, stopAfter int) ([]string, error) {
-				return collect(c.Customers.Iterate(ctx, &CustomerListParams{Limit: 2, Email: "a@b.co", Verified: &no}),
+				return collect(c.Customers.Iterate(ctx, &CustomerListParams{Limit: 2, Email: "a@b.co"}),
 					func(v Customer) string { return v.UUID }, stopAfter)
 			}},
 		{"Payments.Iterate", "/payments", "createdAfter=" + afterQ + "&limit=2", uuidItem,

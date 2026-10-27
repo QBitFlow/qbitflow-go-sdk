@@ -43,9 +43,10 @@ type WaitOptions struct {
 // Send the customer to Link. The Payment exists, with the same id, once the customer's
 // transaction is confirmed: fulfil on the payment.completed webhook (or Get "completed"), give
 // up on checkout.expired. SuccessURL and CancelURL may carry PlaceholderUUID and
-// PlaceholderTransactionType, filled in on redirect. Only the organization gives them: with a
-// member's own key they are a 403 (the organization's checkout.defaults setting applies); an
-// organization key acting On-Behalf-Of the member may send them.
+// PlaceholderTransactionType, filled in on redirect. A member's own key may send them while its
+// organization's members.checkoutRedirects policy allows it (the default); with the policy off
+// they are a 403 policy_disabled and the organization's checkout defaults apply. An organization
+// key acting On-Behalf-Of the member may always send them.
 //
 // Fees (optional) adds lines to the price (a tax, shipping, QBitFlow's processing fee): the
 // customer pays the price plus every line (the payment's AmountUSD), and the network fee on top
@@ -55,8 +56,8 @@ type WaitOptions struct {
 // live mode needs https URLs); 404 for an unknown product or customer; 409 unique_violation on
 // reference; 409 merchant_not_ready (details.reason) when the space's wallets accept no
 // currency; 410 merchant_closed for a removed member's or a closed organization's space; 403
-// forbidden with details.field "successUrl" or "cancelUrl" (successUrl first) when a member's
-// key sends either.
+// policy_disabled with details.policy "members.checkoutRedirects" and details.field "successUrl"
+// or "cancelUrl" (successUrl first) when a member's key sends either while that policy is off.
 func (s *CheckoutSessionsService) CreatePayment(ctx context.Context, params *CreatePaymentSessionParams, opts ...RequestOption) (*CreatedCheckoutSession, error) {
 	if err := params.Validate(); err != nil {
 		return nil, err

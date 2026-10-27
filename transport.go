@@ -188,7 +188,7 @@ func (c *Client) callText(ctx context.Context, e endpoint, opts []RequestOption)
 }
 
 // send performs e: it applies the request options, builds the headers, encodes the body, and
-// runs the retry policy (behaviour §3). It returns any 2xx response, else a typed error.
+// runs the retry policy. It returns any 2xx response, else a typed error.
 func (c *Client) send(ctx context.Context, e endpoint, opts []RequestOption) (*response, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -412,7 +412,7 @@ func joinPath(path, name string) string {
 	return path + "." + name
 }
 
-// decodeResponse decodes a 2xx JSON answer (behaviour §6): an absent or null value leaves the
+// decodeResponse decodes a 2xx JSON answer: an absent or null value leaves the
 // field's zero value; a value of the wrong JSON type, an empty body or a non-JSON body is a
 // *ServerError. Integral floats are accepted into integer fields (1.0 → 1).
 func decodeResponse[T any](resp *response) (T, error) {

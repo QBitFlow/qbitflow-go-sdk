@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// TestNewClientKeyCharset (behaviour §2): after trimming, the key starts with sk_ and every
+// TestNewClientKeyCharset: after trimming, the key starts with sk_ and every
 // character is printable ASCII without spaces (0x21–0x7E); else a *ValidationError on apiKey
 // whose message never quotes the key. Beyond that the key is opaque.
 func TestNewClientKeyCharset(t *testing.T) {
@@ -44,7 +44,7 @@ func TestNewClientKeyCharset(t *testing.T) {
 	}
 }
 
-// TestWithBaseURLRefusesCredentialsQueryFragment (behaviour §1): an http(s) URL with a host and
+// TestWithBaseURLRefusesCredentialsQueryFragment: an http(s) URL with a host and
 // no user:pass@, query or fragment; the message never quotes the URL.
 func TestWithBaseURLRefusesCredentialsQueryFragment(t *testing.T) {
 	for name, base := range map[string]string{
@@ -75,7 +75,7 @@ func TestWithBaseURLRefusesCredentialsQueryFragment(t *testing.T) {
 	}
 }
 
-// TestTimeoutCoversTheBody (behaviour §1): the per-attempt timeout bounds the attempt through
+// TestTimeoutCoversTheBody: the per-attempt timeout bounds the attempt through
 // the last byte of the body; a server trickling it is a timed-out *NetworkError, retried like one.
 func TestTimeoutCoversTheBody(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {

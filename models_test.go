@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Fixtures with every wire key of each response model (docs/api generated Go types), all
+// Fixtures with every wire key of each response model (the API's response types), all
 // non-empty, shaped like the docs' examples (a 10 USD price paid in BASE:USDC, 0.99 % fee).
 const (
 	fxCurrency = `{"id":8,"code":"BASE:USDC","symbol":"USDC","name":"USD Coin","chain":"BASE","decimals":6,` +
@@ -20,7 +20,7 @@ const (
 	fxSummary  = `{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","reference":"crm-1","deleted":true}`
 	fxRefundSm = `{"uuid":"refund@1","status":"approved","initiatedBy":"merchant","refundPercent":"50","amount":"5.0021",` +
 		`"amountMinUnits":"5002100","amountUsd":"5.0021","createdAt":"2026-10-01T12:00:00Z","respondedAt":"2026-10-01T13:00:00Z"}`
-	fxAttempt    = `{"status":"failed","code":"insufficient_funds","message":"Not enough USDC","txHash":"0xa","at":"2026-10-01T12:00:00Z"}`
+	fxAttempt    = `{"code":"insufficient_funds","message":"Not enough USDC","txHash":"0xa","at":"2026-10-01T12:00:00Z"}`
 	fxTx         = `{"blockNumber":"52468103","blockTime":"2026-10-01T11:59:58Z","gasUsed":95000,"fee":{"amount":"0.00000114","amountMinUnits":"1140000000000","amountUsd":"0.005144"},"l1Fee":{"amount":"0.0000001","amountMinUnits":"100000000000","amountUsd":"0.00045"},"nativePriceUsd":"4512.37"}`
 	fxSettlement = `{"feePercent":"0.99","organizationFee":{"address":"0xorg","feePercent":"10"},` +
 		`"referralFee":{"address":"0xref","feePercent":"20"},` +
@@ -42,14 +42,13 @@ const (
 		`"cancellableAt":"2026-12-01T12:00:00Z","metadata":{"plan":"pro","crm:account":"A-1042"},"managementPageLink":"https://qbitflow.app/user/s/manage?uuid=sub@1",` +
 		`"test":false,"userUuid":"m-1","customerUuid":"c-1","customerReference":"crm-1","customer":` + fxSummary + `,` +
 		`"dunning":{"failedAttempts":1,"remainingAttempts":3,"failingSince":"2026-10-01T12:00:00Z","nextAttemptAt":"2026-10-02T12:00:00Z","awaitingMaximumSince":"2026-10-01T12:00:00Z"}}`
-	fxEndpoint = `"uuid":"e-1","test":true,"url":"https://x.io/hook","events":["payment.completed"],"includeMembers":true,"payloadVersion":"v2",` +
-		`"description":"d","createdAt":"2026-10-01T12:00:00Z","rotatedAt":"2026-10-01T12:00:00Z","disabledAt":"2026-10-02T12:00:00Z",` +
+	fxEndpoint = `"uuid":"e-1","test":true,"url":"https://x.io/hook","events":["payment.completed"],"includeMembers":true,` +
+		`"description":"d","createdAt":"2026-10-01T12:00:00Z","disabledAt":"2026-10-02T12:00:00Z",` +
 		`"disabledReason":"failing","failingSince":"2026-09-29T12:00:00Z","lastDeliveredAt":"2026-09-28T12:00:00Z"`
 	fxSession = `"uuid":"sub@1","reference":"order-1044","productUuid":"p-1","productReference":"tshirt","productName":"T-shirt",` +
 		`"description":"Blue, size M","priceUsd":"3.99","fees":[{"type":"custom","label":"Shipping","description":"Standard","amountUsd":"0.75"},` +
 		`{"type":"processingFee","label":"Processing fee","amountUsd":"0.07"}],"amountUsd":"4.81","successUrl":"https://x/ok","cancelUrl":"https://x/ko",` +
-		`"organizationName":"Shop","userName":"Ada","test":true,"txType":"createSubscription",` +
-		`"availableCurrencies":[` + fxCurrency + `,` + fxNative + `],"metadata":{"orderId":"order-1044"},` +
+		`"test":true,"txType":"createSubscription","metadata":{"orderId":"order-1044"},` +
 		`"createdAt":"2026-10-01T12:00:00Z","expiresAt":"2026-10-01T13:00:00Z"`
 )
 
@@ -92,7 +91,7 @@ var modelFixtures = map[string]struct {
 		`"amountUsd":"5.0021","currency":` + fxCurrency + `,"settlement":{"transaction":` + fxTx + `},"chain":"BASE","explorerUrl":"https://e",` +
 		`"approval":{"status":"waitingConfirmation","txHash":"0xa","lastAttempt":` + fxAttempt + `},"customerUuid":"c-1","productName":"Pro",` +
 		`"customer":` + fxSummary + `}`, strict[Refund]},
-	"Customer": {`{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","verified":true,"phoneNumber":"+33 6 12 34 56 78",` +
+	"Customer": {`{"uuid":"c-1","firstName":"Ada","lastName":"Lovelace","email":"ada@example.com","phoneNumber":"+33 6 12 34 56 78",` +
 		`"address":"1 rue X","reference":"crm-1","metadata":{"crm":"42"},"createdAt":"2026-10-01T12:00:00Z","test":true,"userUuid":"m-1"}`, strict[Customer]},
 	"Product": {`{"uuid":"p-1","name":"Pro","description":"d","priceUsd":"9.99","createdAt":"2026-10-01T12:00:00Z","isActive":true,"reference":"pro",` +
 		`"metadata":{"sku":"PRO-1"},"subscription":{"frequency":{"value":1,"unit":"months"},"trialPeriod":{"value":14,"unit":"days"},"minPeriods":3},` +
@@ -107,15 +106,12 @@ var modelFixtures = map[string]struct {
 		`"currency":` + fxCurrency + `,"owed":"-10.0042","owedMinUnits":"-10004200","owedUsd":"-10.0042","createdAt":"2026-10-02T12:00:00Z"}],` +
 		`"totalUsd":"-1.0933"}`, strict[HeldFunds]},
 	"MemberHeldFunds": {`{"userUuid":"m-1","totalUsd":"98.5","count":2,"oldestAt":"2026-09-28T12:00:00Z"}`, strict[MemberHeldFunds]},
-	"HeldFundsReleased": {`{"uuid":"transfer@1",` + fxTransfer + `,"received":true,"type":"heldFundsRelease","settlement":{"transaction":` + fxTx + `},` +
+	"HeldFundsReleased": {`{"uuid":"transfer@1",` + fxTransfer + `,"received":true,"settlement":{"transaction":` + fxTx + `},` +
 		`"ledgers":[{"txUuid":"pay@1","type":"payment","description":"Payment pay@1","amountUsd":"10","currency":` + fxCurrency + `,` +
 		`"owed":"9.901","owedMinUnits":"9901000","owedUsd":"9.901","createdAt":"2026-10-01T12:00:00Z"}]}`, strict[HeldFundsReleased]},
 	"Wallet": {`{"uuid":"w-1","createdAt":"2026-10-01T12:00:00Z","address":"0xpk","test":false,"userUuid":"m-1","tokenWallets":[` +
 		`{"uuid":"tw-1","createdAt":"2026-10-01T12:00:00Z","currency":` + fxCurrency + `,"walletUuid":"w-1",` +
 		`"balance":{"currency":` + fxCurrency + `,"amount":"12.5","amountMinUnits":"12500000","amountUsd":"12.5"}}],"currency":` + fxNative + `}`, strict[Wallet]},
-	"SettingValue": {`{"key":"refunds.windowDays","kind":"setting","value":30,"source":"own","editable":true}`, strict[SettingValue]},
-	"SettingDefinition": {`{"key":"refunds.windowDays","category":"refunds","kind":"setting","description":"Days a customer may request a refund","type":"integer",` +
-		`"enum":["a","b"],"min":1,"max":365,"default":30,"membersEdit":"never"}`, strict[SettingDefinition]},
 	"Invitation": {`{"uuid":"i-1","test":false,"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5",` +
 		`"redirectUrl":"https://x.io/welcome","expiresAt":"2026-10-08T12:00:00Z","acceptedByUserUuid":"m-1","acceptedAt":"2026-10-02T12:00:00Z",` +
 		`"revokedAt":"2026-10-03T12:00:00Z","createdAt":"2026-10-01T12:00:00Z","status":"accepted"}`, strict[Invitation]},
@@ -133,11 +129,11 @@ var modelFixtures = map[string]struct {
 		`"tokenContractOrMint":"0x8335","explorerUrl":"https://e","receiptUrl":"https://r","txUuid":"refund@1","relatedTxUuid":"pay@0",` +
 		`"productUuid":"p-1","productReference":"pro","productDescription":"d","customerUuid":"c-1","userUuid":"m-1"}`, strict[AccountingEvent]},
 	"WebhookEndpointCreated": {`{` + fxEndpoint + `,"secret":"whsec_x"}`, strict[WebhookEndpointCreated]},
-	"EventDetail": {`{"id":"evt_1","type":"payment.completed","version":"v2","createdAt":"2026-10-01T12:00:00.123Z","test":false,"userUuid":"m-1",` +
+	"EventDetail": {`{"id":"evt_1","type":"payment.completed","createdAt":"2026-10-01T12:00:00.123Z","test":false,"userUuid":"m-1",` +
 		`"data":{"uuid":"pay@1"},"deliveries":[{"endpointUuid":"e-1","url":"https://x.io/hook","delivered":true,"attempts":[{"uuid":"a-1",` +
 		`"eventId":"evt_1","eventType":"payment.completed","endpointUuid":"e-1","attempt":2,"delivered":false,"skipped":true,"statusCode":500,` +
 		`"error":"500 Internal Server Error","durationMs":120,"attemptedAt":"2026-10-01T12:00:01Z"}]}]}`, strict[EventDetail]},
-	"Me": {`{"credential":"apiKey","apiKeyUuid":"k-1","role":"user","onBehalfOfUserUuid":"m-1","space":{"uuid":"s-1",` +
+	"Me": {`{"apiKeyUuid":"k-1","role":"user","onBehalfOfUserUuid":"m-1","space":{"uuid":"s-1",` +
 		`"organizationUuid":"o-1","organizationName":"Shop","userUuid":"m-1","test":true,"role":"admin",` +
 		`"member":{"userUuid":"m-1","firstName":"Ada","lastName":"L","email":"a@b.co"},"organizationFeePercent":"7.5",` +
 		`"trustedAt":"2026-10-01T12:00:00Z","createdAt":"2026-09-01T12:00:00Z"}}`, strict[Me]},
@@ -253,7 +249,7 @@ func TestModelValues(t *testing.T) {
 
 	ss := fixture[SubscriptionSessionData](t, "SubscriptionSessionData")
 	if ss.AmountUSD != "4.81" || ss.PriceUSD != "3.99" || len(ss.Fees) != 2 || ss.TxType != TransactionTypeCreateSubscription ||
-		len(ss.AvailableCurrencies) != 2 || ss.AvailableCurrencies[1].Code != "ETH" || ss.Metadata["orderId"] != "order-1044" ||
+		ss.Metadata["orderId"] != "order-1044" ||
 		ss.Frequency != (Duration{1, DurationUnitMonths}) || *ss.MinPeriods != 3 || !ss.UpgradingFromTrial {
 		t.Errorf("session %+v", ss)
 	}
@@ -336,8 +332,8 @@ func TestModelValues(t *testing.T) {
 		t.Errorf("me %+v", me)
 	}
 	// The fields no API key needs (the session's user, spaces, reauthenticatedUntil; the staff
-	// console's space.staffView) are not modelled: ignored.
-	if me2, err := decodeJSON[Me]([]byte(`{"credential":"apiKey","spaces":[],"user":{"uuid":"u"},"space":{"uuid":"s","staffView":false}}`)); err != nil || me2.Credential != CredentialAPIKey {
+	// console's space.staffView; credential, always apiKey) are not modelled: ignored.
+	if me2, err := decodeJSON[Me]([]byte(`{"credential":"apiKey","spaces":[],"user":{"uuid":"u"},"space":{"uuid":"s","staffView":false}}`)); err != nil || me2.Space == nil || me2.Space.UUID != "s" {
 		t.Errorf("me with session fields %+v %v", me2, err)
 	}
 }
@@ -348,7 +344,7 @@ func TestModelValues(t *testing.T) {
 // them, yet decoding succeeds: the fields are ignored and the enum values stay raw strings.
 func TestOutOfScopeWireValuesDecode(t *testing.T) {
 	me, err := decodeJSON[Me]([]byte(`{"credential":"session","userUuid":"u-1","space":{"uuid":"s","role":"handle","test":false}}`))
-	if err != nil || me.Credential != Credential("session") || me.Space == nil || me.Space.Role != Role("handle") {
+	if err != nil || me.Space == nil || me.Space.Role != Role("handle") {
 		t.Errorf("me %+v %v", me, err)
 	}
 
@@ -368,14 +364,14 @@ func TestOutOfScopeWireValuesDecode(t *testing.T) {
 	if err != nil || p.UUID != "pay@1" {
 		t.Errorf("payment with note %+v %v", p, err)
 	}
-	completed := &Event{Type: EventTypePaymentCompleted, Version: "v2",
+	completed := &Event{Type: EventTypePaymentCompleted,
 		Data: json.RawMessage(`{"uuid":"pay@1","note":"thanks","productName":"Tip","metadata":{},"fees":[]}`)}
 	if pc, err := completed.PaymentCompleted(); err != nil || pc.UUID != "pay@1" {
 		t.Errorf("payment.completed with note %+v %v", pc, err)
 	}
 
 	for _, txType := range []string{"payment", "faucet"} {
-		expired := &Event{Type: EventTypeCheckoutExpired, Version: "v2", Data: json.RawMessage(`{"uuid":"pay@2","txType":"` + txType +
+		expired := &Event{Type: EventTypeCheckoutExpired, Data: json.RawMessage(`{"uuid":"pay@2","txType":"` + txType +
 			`","redirectUrl":"https://shop.example.com/thanks","organizationName":"Shop","priceUsd":"1","amountUsd":"1","fees":[],` +
 			`"availableCurrencies":[],"metadata":{}}`)}
 		ce, err := expired.CheckoutExpired()
@@ -384,9 +380,9 @@ func TestOutOfScopeWireValuesDecode(t *testing.T) {
 		}
 	}
 
-	released := &Event{Type: EventTypeHeldFundsReleased, Version: "v2",
+	released := &Event{Type: EventTypeHeldFundsReleased,
 		Data: json.RawMessage(`{"uuid":"t-1","type":"accountClaim","received":true,"ledgers":[]}`)}
-	if hf, err := released.HeldFundsReleased(); err != nil || hf.Type != TransferType("accountClaim") {
+	if hf, err := released.HeldFundsReleased(); err != nil || hf.UUID != "t-1" || !hf.Received {
 		t.Errorf("heldFunds.released accountClaim %+v %v", hf, err)
 	}
 
@@ -456,7 +452,7 @@ func TestModelOptionalFields(t *testing.T) {
 	if a := detail.Deliveries[0].Attempts[0]; !a.Skipped || a.Delivered || a.StatusCode != nil || a.Error == "" {
 		t.Errorf("skipped attempt %+v", a)
 	}
-	// Lenient on absence and null (behaviour §6): zero values, never an error.
+	// Lenient on absence and null: zero values, never an error.
 	nulls, err := decodeJSON[Product]([]byte(`{"uuid":"p-1","description":null,"metadata":null,"subscription":null,"priceUsd":null}`))
 	if err != nil || nulls.Description != "" || nulls.Metadata != nil || nulls.Subscription != nil || nulls.PriceUSD != "" {
 		t.Errorf("nulls %+v %v", nulls, err)
@@ -522,5 +518,43 @@ func TestModelFees(t *testing.T) {
 	}
 	if p.Fees[0].Type != "tip" || p.Fees[0].AmountUSD != "2" || p.Fees[1].Description != "" || p.Fees[1].Type != FeeLineTypeProcessingFee {
 		t.Errorf("fees %+v", p.Fees)
+	}
+}
+
+// TestNotModelledKeysAreIgnored: the API still sends keys the SDK deliberately leaves out
+// (dashboard-only, or constant for an API key): Me.credential, Customer.verified, a failed
+// attempt's status, the held-funds transfer's type, an endpoint's payloadVersion and rotatedAt,
+// the checkout session data's organizationName, userName and availableCurrencies, and the
+// settings endpoints' shapes. Decoding ignores them and keeps every other field.
+func TestNotModelledKeysAreIgnored(t *testing.T) {
+	me, err := decodeJSON[Me]([]byte(`{"credential":"apiKey","apiKeyUuid":"k-1","role":"admin"}`))
+	if err != nil || me.APIKeyUUID != "k-1" || me.Role != RoleAdmin {
+		t.Errorf("me %+v %v", me, err)
+	}
+	c, err := decodeJSON[Customer]([]byte(`{"uuid":"c-1","email":"a@b.co","verified":true}`))
+	if err != nil || c.UUID != "c-1" || c.Email != "a@b.co" {
+		t.Errorf("customer %+v %v", c, err)
+	}
+	a, err := decodeJSON[Attempt]([]byte(`{"status":"failed","code":"insufficient_funds"}`))
+	if err != nil || a.Code != "insufficient_funds" {
+		t.Errorf("attempt %+v %v", a, err)
+	}
+	hf, err := decodeJSON[HeldFundsReleased]([]byte(`{"uuid":"transfer@1","type":"heldFundsRelease","received":true}`))
+	if err != nil || hf.UUID != "transfer@1" || !hf.Received {
+		t.Errorf("held funds released %+v %v", hf, err)
+	}
+	ep, err := decodeJSON[WebhookEndpoint]([]byte(`{"uuid":"e-1","payloadVersion":"v2","rotatedAt":"2026-10-01T12:00:00Z","url":"https://x.io"}`))
+	if err != nil || ep.UUID != "e-1" || ep.URL != "https://x.io" {
+		t.Errorf("endpoint %+v %v", ep, err)
+	}
+	ss, err := decodeJSON[SubscriptionSessionData]([]byte(`{"uuid":"sub@1","organizationName":"Shop","userName":"Ada",` +
+		`"availableCurrencies":[` + fxCurrency + `],"txType":"createSubscription","frequency":{"value":1,"unit":"months"}}`))
+	if err != nil || ss.UUID != "sub@1" || ss.Frequency != (Duration{1, DurationUnitMonths}) {
+		t.Errorf("subscription session %+v %v", ss, err)
+	}
+	// The event envelope's version is checked (v2 only) but not exposed.
+	e, err := ParseEvent([]byte(`{"id":"evt_1","type":"webhook.test","version":"v2","createdAt":"2026-10-01T12:00:00Z","test":false,"data":{}}`))
+	if err != nil || e.ID != "evt_1" {
+		t.Errorf("event %+v %v", e, err)
 	}
 }

@@ -341,7 +341,7 @@ func TestLiveWritesCustomer(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup(t, "customer", func(ctx context.Context) error { return c.Customers.Delete(ctx, cust.UUID) })
-	if cust.PhoneNumber == "" || cust.FirstName != "Ada" || !cust.Verified || cust.Metadata["crm"] != "42" {
+	if cust.PhoneNumber == "" || cust.FirstName != "Ada" || cust.Metadata["crm"] != "42" {
 		t.Errorf("created %+v", cust)
 	}
 	if byRef, err := c.Customers.GetByReference(ctx, "sdk-go-"+s); err != nil || byRef.UUID != cust.UUID {
@@ -525,7 +525,7 @@ func TestLiveWritesWebhookEndpoint(t *testing.T) {
 	}
 
 	got, err := c.Webhooks.Endpoints.Get(ctx, created.UUID)
-	if err != nil || got.URL != created.URL || got.PayloadVersion != qbitflow.WebhookPayloadVersionV2 {
+	if err != nil || got.URL != created.URL {
 		t.Fatalf("Get: %+v %v", got, err)
 	}
 	found := false

@@ -16,7 +16,7 @@ const (
 	maxRetryWait = 60 * time.Second
 )
 
-// shouldRetry reports whether a failed attempt may be retried (behaviour §3): a network error
+// shouldRetry reports whether a failed attempt may be retried: a network error
 // or timeout, a 5xx, a 429, or — for the idempotent creates — a 409 idempotency_key_in_use.
 // Every other 4xx, a 3xx and a response-shape failure are final.
 func shouldRetry(err error, idempotent bool) bool {

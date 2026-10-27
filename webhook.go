@@ -21,8 +21,6 @@ const (
 	EventIDHeader = "QBitFlow-Event-Id"
 	// EventTypeHeader carries the event's type.
 	EventTypeHeader = "QBitFlow-Event-Type"
-	// WebhookVersionHeader carries the payload version (v2, the only one).
-	WebhookVersionHeader = "QBitFlow-Webhook-Version"
 )
 
 const (
@@ -206,16 +204,20 @@ func ParseEvent(rawBody []byte) (*Event, error) {
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, newFieldError("body", "must be a JSON object (a webhook event)")
 	}
-	var e Event
+	// The envelope's version is always v2 (v1 payloads are retired): checked, not exposed.
+	var e struct {
+		Event
+		Version string `json:"version"`
+	}
 	if err := json.Unmarshal(trimmed, &e); err != nil {
 		v := newFieldError("body", "is not a valid webhook event")
 		v.Err = err
 		return nil, v
 	}
-	if e.Version != WebhookPayloadVersionV2 {
+	if e.Version != "v2" {
 		return nil, newFieldError("version", "must be v2 (unsupported payload version)")
 	}
-	return &e, nil
+	return &e.Event, nil
 }
 
 // ConstructEvent verifies a webhook delivery (VerifyWebhook) and parses it (ParseEvent).

@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Tests of the integration helpers (helpers.md H3–H8; H1 and H2 are in webhook_router_test.go).
+// Tests of the integration helpers (the webhook router and test signatures are in webhook_router_test.go).
 
 const waitUUID = "pay@01a0f755-f200-7000-8000-000000000001"
 
@@ -308,7 +308,7 @@ func TestExportWindows(t *testing.T) {
 		from, to string
 		want     [][2]string
 	}{
-		// helpers.md H6's yearly example: windows of 92 days, both ends included.
+		// A yearly export: windows of 92 days, both ends included.
 		{"2026-01-01", "2026-12-31", [][2]string{
 			{"2026-01-01", "2026-04-02"}, {"2026-04-03", "2026-07-03"}, {"2026-07-04", "2026-10-03"}, {"2026-10-04", "2026-12-31"},
 		}},

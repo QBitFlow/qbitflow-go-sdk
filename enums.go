@@ -95,14 +95,6 @@ const (
 	FeeLineTypeProcessingFee FeeLineType = "processingFee" // QBitFlow's processing fee, which the merchant has the customer pay (computed by QBitFlow)
 )
 
-// AttemptStatus is a failed attempt's status.
-type AttemptStatus string
-
-// Attempt statuses.
-const (
-	AttemptStatusFailed AttemptStatus = "failed" // Not sent, not confirmed, or failed on the network: nothing was paid
-)
-
 // RefundStatus is where a refund stands. An approval and a rejection are final: the transaction
 // never gets another refund.
 type RefundStatus string
@@ -112,7 +104,6 @@ const (
 	RefundStatusPending  RefundStatus = "pending"  // A customer's request not answered yet
 	RefundStatusApproved RefundStatus = "approved" // The refund transfer is confirmed (refund.approved); the merchant's own refund is recorded only then
 	RefundStatusRejected RefundStatus = "rejected" // Rejected by whoever decides it (refund.rejected)
-	RefundStatusFailed   RefundStatus = "failed"   // Declared, never set: a failed approval leaves the request pending
 )
 
 // RefundInitiator says who started a refund.
@@ -186,14 +177,6 @@ type TransactionType string
 const (
 	TransactionTypePayment            TransactionType = "payment"
 	TransactionTypeCreateSubscription TransactionType = "createSubscription"
-)
-
-// TransferType is a transfer's kind (HeldFundsReleased.Type: heldFundsRelease).
-type TransferType string
-
-// Transfer types.
-const (
-	TransferTypeHeldFundsRelease TransferType = "heldFundsRelease" // The funds an organization held for a member, paid out to them
 )
 
 // LedgerEntryType is a held-funds line's kind. A held member sells no subscription, so no bill
@@ -271,14 +254,6 @@ var knownEventTypes = []EventType{
 	EventTypeHeldFundsReleased, EventTypeCheckoutExpired, EventTypeWebhookTest,
 }
 
-// WebhookPayloadVersion is a webhook endpoint's (and an event's) payload version.
-type WebhookPayloadVersion string
-
-// Webhook payload versions.
-const (
-	WebhookPayloadVersionV2 WebhookPayloadVersion = "v2" // The event envelope {id, type, version, createdAt, test, userUuid, data}: the only version
-)
-
 // EndpointDisabledReason says why a webhook endpoint is disabled.
 type EndpointDisabledReason string
 
@@ -314,14 +289,6 @@ const (
 	RoleUser  Role = "user"  // A member's key, or On-Behalf-Of; a member's invitation
 )
 
-// Credential is what authenticated a request (Me.Credential).
-type Credential string
-
-// Credentials.
-const (
-	CredentialAPIKey Credential = "apiKey" // An API key (X-API-Key)
-)
-
 // MerchantNotReadyReason is details.reason of a 409 merchant_not_ready.
 type MerchantNotReadyReason string
 
@@ -331,23 +298,4 @@ const (
 	MerchantNotReadyReasonOrganizationNoWallet MerchantNotReadyReason = "organizationNoWallet"
 	MerchantNotReadyReasonNoTokenWallet        MerchantNotReadyReason = "noTokenWallet"
 	MerchantNotReadyReasonFundsHeld            MerchantNotReadyReason = "fundsHeld" // A subscription checkout of a member whose funds the organization holds: one-time payments only until Members.Trust
-)
-
-// SettingKind is what a setting definition is.
-type SettingKind string
-
-// Setting kinds.
-const (
-	SettingKindSetting SettingKind = "setting" // A value of a space; members inherit the organization's
-	SettingKindPolicy  SettingKind = "policy"  // The organization's rule for its members
-)
-
-// SettingSource is where a space's value of a key comes from.
-type SettingSource string
-
-// Setting sources.
-const (
-	SettingSourceOwn          SettingSource = "own"          // The space's own value
-	SettingSourceOrganization SettingSource = "organization" // Inherited from the organization
-	SettingSourceDefault      SettingSource = "default"      // Nobody set it
 )

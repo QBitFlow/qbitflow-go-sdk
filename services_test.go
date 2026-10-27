@@ -102,7 +102,7 @@ type routeCase struct {
 	check func(t *testing.T, v any)
 }
 
-// routeCases covers every service method (the 54 routes of surface.md §2, plus Me).
+// routeCases covers every service method (every route the SDK calls, Me included).
 func routeCases(t *testing.T) []routeCase {
 	evt := eventFixture(t)
 	no := false
@@ -180,7 +180,7 @@ func routeCases(t *testing.T) []routeCase {
 			},
 			reply: fx("Customer"),
 			check: func(t *testing.T, v any) {
-				if c := is[*Customer](t, v); c.UUID != "c-1" || !c.Verified || c.UserUUID != "m-1" || c.FirstName != "Ada" || c.Metadata["crm"] != "42" {
+				if c := is[*Customer](t, v); c.UUID != "c-1" || c.UserUUID != "m-1" || c.FirstName != "Ada" || c.Metadata["crm"] != "42" {
 					t.Errorf("%+v", c)
 				}
 			}},
@@ -197,9 +197,9 @@ func routeCases(t *testing.T) []routeCase {
 			},
 			reply: fx("Customer")},
 		{name: "Customers.List", method: "GET", path: "/customers",
-			query: "cursor=" + cursorA + "&email=ada%2B1%40example.com&limit=5&verified=true",
+			query: "cursor=" + cursorA + "&email=ada%2B1%40example.com&limit=5",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Customers.List(ctx, &CustomerListParams{Limit: 5, Cursor: cursorA, Email: "ada+1@example.com", Verified: &yes}, o...)
+				return c.Customers.List(ctx, &CustomerListParams{Limit: 5, Cursor: cursorA, Email: "ada+1@example.com"}, o...)
 			},
 			reply: page(fx("Customer")),
 			check: func(t *testing.T, v any) {
@@ -613,28 +613,6 @@ func routeCases(t *testing.T) []routeCase {
 				}
 			}},
 
-		// Settings.
-		{name: "Settings.Definitions", method: "GET", path: "/settings/definitions",
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Settings.Definitions(ctx, o...)
-			},
-			reply: bounded(fx("SettingDefinition"))},
-		{name: "Settings.List", method: "GET", path: "/settings",
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Settings.List(ctx, o...)
-			},
-			reply: bounded(fx("SettingValue"))},
-		{name: "Settings.Set", method: "PUT", path: "/settings/refunds.windowDays", body: `{"value":30}`,
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return c.Settings.Set(ctx, "refunds.windowDays", 30, o...)
-			},
-			reply: fx("SettingValue")},
-		{name: "Settings.Reset", method: "DELETE", path: "/settings/refunds.windowDays",
-			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
-				return nil, c.Settings.Reset(ctx, "refunds.windowDays", o...)
-			},
-			status: 204},
-
 		// Accounting.
 		{name: "Accounting.ExportJSON", method: "GET", path: "/accounting/export", query: "format=json&from=2026-09-01&to=2026-09-30",
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
@@ -698,10 +676,10 @@ func routeCases(t *testing.T) []routeCase {
 			},
 			reply: fx("WebhookEndpointCreated")},
 		{name: "Webhooks.Endpoints.Update", method: "PATCH", path: "/webhooks/endpoints/" + uuidA,
-			body: `{"events":[],"description":"","payloadVersion":"v2","enabled":true}`,
+			body: `{"events":[],"description":"","enabled":true}`,
 			call: func(ctx context.Context, c *Client, o ...RequestOption) (any, error) {
 				return c.Webhooks.Endpoints.Update(ctx, uuidA, &UpdateWebhookEndpointParams{Events: []EventType{}, Description: ptr(""),
-					PayloadVersion: WebhookPayloadVersionV2, Enabled: &yes}, o...)
+					Enabled: &yes}, o...)
 			},
 			reply: fx("WebhookEndpointCreated")},
 		{name: "Webhooks.Endpoints.Update without events", method: "PATCH", path: "/webhooks/endpoints/" + uuidA, body: `{"url":"https://shop.example/v2"}`,

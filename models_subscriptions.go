@@ -178,7 +178,7 @@ type UpdateSubscriptionParams struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Validate checks the params (behaviour §8): the metadata sent (the 50-key cap on the merged
+// Validate checks the params: the metadata sent (the 50-key cap on the merged
 // result is the API's).
 func (p *UpdateSubscriptionParams) Validate() error {
 	if p == nil {

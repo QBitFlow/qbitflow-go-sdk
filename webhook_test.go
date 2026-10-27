@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// The shared vector (behaviour §7, docs webhooks.md).
+// The shared vector (from the API reference's webhook signature example).
 const (
 	vectorBody = `{"createdAt":"2026-10-01T12:00:00Z","data":{},"id":"evt_3f1c2d4e-5a6b-5c7d-8e9f-0a1b2c3d4e5f","test":false,"type":"webhook.test","version":"v2"}`
 	vectorT    = int64(1790856000)
@@ -236,7 +236,7 @@ func TestConstructEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e.ID != "evt_3f1c2d4e-5a6b-5c7d-8e9f-0a1b2c3d4e5f" || e.Type != EventTypeWebhookTest || e.Version != "v2" || e.Test ||
+	if e.ID != "evt_3f1c2d4e-5a6b-5c7d-8e9f-0a1b2c3d4e5f" || e.Type != EventTypeWebhookTest || e.Test ||
 		!e.CreatedAt.Equal(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)) || e.UserUUID != "" {
 		t.Errorf("event %+v", e)
 	}
@@ -265,5 +265,37 @@ func TestConstructEvent(t *testing.T) {
 	var ve *ValidationError
 	if !errors.As(err, &ve) || ve.FieldErrors[0].Field != "version" {
 		t.Errorf("v1 body: %v", err)
+	}
+}
+
+// The signature covers t exactly as the header carries it, leading zeros included.
+func TestVerifyWebhookSignsRawTimestampText(t *testing.T) {
+	body := []byte(`{"id":"evt_1","type":"webhook.test","version":"v2","test":true,"createdAt":"2026-10-01T12:00:00Z","data":{}}`)
+	const secret = "whsec_raw_t"
+	rawT := "0001790856000"
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(rawT + "."))
+	mac.Write(body)
+	overRaw := hex.EncodeToString(mac.Sum(nil))
+	clock := WithClock(func() time.Time { return time.Unix(1790856000, 0) })
+
+	if err := VerifyWebhook(body, "t="+rawT+",v1="+overRaw, secret, clock); err != nil {
+		t.Fatalf("signature over the raw t text must verify: %v", err)
+	}
+	overInt := sign(secret, 1790856000, body) // the integer form "1790856000"
+	err := VerifyWebhook(body, "t="+rawT+",v1="+overInt, secret, clock)
+	var se *WebhookSignatureError
+	if !errors.As(err, &se) || se.Reason != WebhookSignatureNoMatchingSignature {
+		t.Fatalf("signature over the re-formatted t must not verify, got %v", err)
+	}
+	// A t that does not fit an int64 is malformed, not "outside tolerance".
+	err = VerifyWebhook(body, "t=99999999999999999999,v1="+overRaw, secret, clock)
+	if !errors.As(err, &se) || se.Reason != WebhookSignatureMalformedHeader {
+		t.Fatalf("oversized t must be malformedHeader, got %v", err)
+	}
+	// A whitespace-only header is a missing one.
+	err = VerifyWebhook(body, "  \t ", secret, clock)
+	if !errors.As(err, &se) || se.Reason != WebhookSignatureMissingHeader {
+		t.Fatalf("blank header must be missingHeader, got %v", err)
 	}
 }

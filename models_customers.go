@@ -14,13 +14,8 @@ type Customer struct {
 	// LastName is the last name; "" (absent) when not given.
 	LastName string `json:"lastName,omitempty"`
 	// Email is the email address, lowercase (matched case-insensitively). Several customers of a
-	// space may share one (see Verified).
+	// space may share one.
 	Email string `json:"email"`
-	// Verified is true for a customer the merchant created (the API, the dashboard), who vouches
-	// for its details; false for one QBitFlow created from the email a payer typed at a checkout
-	// that named no customer (nobody proved the payer owns that address). A checkout never links a
-	// typed email to a verified customer.
-	Verified bool `json:"verified"`
 	// PhoneNumber is the phone number; "" (absent) when not given.
 	PhoneNumber string `json:"phoneNumber,omitempty"`
 	// Address is the physical address; "" (absent) when not given.
@@ -61,7 +56,7 @@ type CreateCustomerParams struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *CreateCustomerParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -101,7 +96,7 @@ type UpdateCustomerParams struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// Validate checks the params (behaviour §8).
+// Validate checks the params.
 func (p *UpdateCustomerParams) Validate() error {
 	if p == nil {
 		return newValidationError("params are required")
@@ -133,9 +128,6 @@ type CustomerListParams struct {
 	// Reference keeps only the customer with this reference (a page of 0 or 1 customer;
 	// Customers.GetByReference reads it).
 	Reference string
-	// Verified keeps only the customers the merchant created (true) or those created from an
-	// email a payer typed at checkout (false).
-	Verified *bool
 }
 
 // Validate checks the filters.
@@ -158,6 +150,5 @@ func (p *CustomerListParams) values() url.Values {
 	setPage(q, p.Limit, p.Cursor)
 	setString(q, "email", p.Email)
 	setString(q, "reference", p.Reference)
-	setBoolPtr(q, "verified", p.Verified)
 	return q
 }

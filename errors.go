@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Error codes the SDK branches on (the API's stable `code` values, README §8).
+// Error codes the SDK branches on (the API's stable `code` values).
 const (
 	codeValidationFailed     = "validation_failed"
 	codeNotFound             = "not_found"
@@ -118,7 +118,10 @@ type AuthenticationError struct{ *APIError }
 // Unwrap returns the embedded *APIError.
 func (e *AuthenticationError) Unwrap() error { return e.APIError }
 
-// PermissionDeniedError is a 403 (forbidden, policy_disabled with details.policy, plan_required).
+// PermissionDeniedError is a 403: forbidden (no details: the role or the resource doesn't allow
+// it), or policy_disabled (a member's key doing what its organization's member policy doesn't
+// allow: details.policy names the policy, and details.field the request field it governs when
+// there is one, e.g. "successUrl" under members.checkoutRedirects).
 type PermissionDeniedError struct{ *APIError }
 
 // Unwrap returns the embedded *APIError.

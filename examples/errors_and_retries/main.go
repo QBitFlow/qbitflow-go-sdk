@@ -170,7 +170,7 @@ func describe(what string, err error) {
 	case errors.As(err, &auth):
 		fmt.Println("bad API key")
 	case errors.As(err, &denied):
-		fmt.Printf("not allowed: %s\n", denied.Code) // forbidden, policy_disabled, plan_required
+		fmt.Printf("not allowed: %s\n", denied.Code) // forbidden, or policy_disabled (details.policy)
 	case errors.As(err, &network), errors.As(err, &server):
 		fmt.Printf("transient (retryable: %v): %v\n", qbitflow.IsRetryable(err), err)
 	case errors.As(err, &api):

@@ -481,3 +481,16 @@ func TestSignWebhook(t *testing.T) {
 		t.Fatalf("other secret: %v", err)
 	}
 }
+
+// Data that does not match its known type is a 400 even when no typed handler is registered.
+func TestRouterRefusesMalformedDataWithoutTypedHandler(t *testing.T) {
+	const secret = "whsec_router"
+	body := []byte(`{"id":"evt_x","type":"payment.completed","version":"v2","test":true,"createdAt":"2026-10-01T12:00:00Z","data":{"amount":10}}`)
+	now := time.Now()
+	anyRan := false
+	r := NewWebhookRouter(secret).OnAny(func(context.Context, *Event) error { anyRan = true; return nil })
+	res := r.Handle(context.Background(), body, SignWebhook(body, secret, now))
+	if res.Status != 400 || anyRan {
+		t.Fatalf("want 400 and no handler run, got %d (onAny ran: %v, err %v)", res.Status, anyRan, res.Err)
+	}
+}

@@ -2,6 +2,7 @@ package qbitflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -88,7 +89,7 @@ func TestQueryEncodersPerParams(t *testing.T) {
 		{(&ProductListParams{IncludeHidden: true, Subscription: ptr(true)}).values(), "includeHidden=true&subscription=true"},
 		{(&ProductListParams{Limit: 50, Cursor: "c", Reference: "pro"}).values(), "cursor=c&limit=50&reference=pro"},
 		{(&ProductListParams{}).values(), ""},
-		{(&CustomerListParams{Limit: 5, Email: "a+b@x.io", Verified: ptr(false)}).values(), "email=a%2Bb%40x.io&limit=5&verified=false"},
+		{(&CustomerListParams{Limit: 5, Email: "a+b@x.io"}).values(), "email=a%2Bb%40x.io&limit=5"},
 		{(&CustomerListParams{Reference: "crm:1"}).values(), "reference=crm%3A1"},
 		{(&TransactionListParams{Type: TransactionKindBill, SubscriptionUUID: "sub@x", Refunded: ptr(true)}).values(), "refunded=true&subscriptionUuid=sub%40x&type=bill"},
 		{(&FailureListParams{Kind: FailureKindBill, Category: FailureCategoryOther, UserUUID: memberUUID}).values(), "category=other&kind=bill&userUuid=" + memberUUID},
@@ -287,5 +288,53 @@ func TestStatusTextAndVoid(t *testing.T) {
 	}
 	if _, err := c.callRef[Product](ctx, get("/nocontent"), nil); !errors.As(err, new(*ServerError)) {
 		t.Errorf("204 where JSON is expected: %v", err)
+	}
+}
+
+// Every answer is a JSON object (lists are pages): a null body is a ServerError, for a list too.
+func TestNullResponseBody(t *testing.T) {
+	ts := newTestServer(t, staticReply(200, "null"))
+	c, _ := newTestClient(t, ts)
+	ctx := context.Background()
+	if _, err := c.Products.Get(ctx, "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"); !errors.As(err, new(*ServerError)) {
+		t.Fatalf("null object body: want *ServerError, got %v", err)
+	}
+	if _, err := c.Products.List(ctx, nil); !errors.As(err, new(*ServerError)) {
+		t.Fatalf("null page body: want *ServerError, got %v", err)
+	}
+	if _, err := c.Currencies.List(ctx, nil); !errors.As(err, new(*ServerError)) {
+		t.Fatalf("null bounded list body: want *ServerError, got %v", err)
+	}
+}
+
+// A "." or ".." path segment would be resolved as a relative path: refused before any request.
+// A reference is never "." or ".." either (the API's reference rule), so GetByReference refuses
+// them too; "..." is an ordinary reference, sent as the filter.
+func TestDotPathSegmentsRefused(t *testing.T) {
+	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		ref, _ := json.Marshal(r.URL.Query().Get("reference")) // the item carries the reference asked for
+		jsonReply(w, 200, `{"items":[{"uuid":"sub@1","reference":`+string(ref)+`}],"hasMore":false}`)
+	})
+	c, _ := newTestClient(t, ts)
+	ctx := context.Background()
+	for _, id := range []string{".", ".."} {
+		_, err := c.Webhooks.Events.Get(ctx, id)
+		var ve *ValidationError
+		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "id" {
+			t.Errorf("event id %q: want a ValidationError on id, got %v", id, err)
+		}
+		_, err = c.Subscriptions.GetByReference(ctx, id)
+		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "reference" {
+			t.Errorf("reference %q: want a ValidationError on reference, got %v", id, err)
+		}
+	}
+	if n := len(ts.recorded()); n != 0 {
+		t.Fatalf("%d requests sent", n)
+	}
+	if _, err := c.Subscriptions.GetByReference(ctx, "..."); err != nil {
+		t.Fatalf(`reference "..." must be sent as a filter: %v`, err)
+	}
+	if got := ts.recorded()[0].query; got != "reference=..." {
+		t.Errorf("query %q", got)
 	}
 }

@@ -18,8 +18,6 @@ type Event struct {
 	ID string `json:"id"`
 	// Type is the event's type.
 	Type EventType `json:"type"`
-	// Version is the payload version: v2, the only one.
-	Version WebhookPayloadVersion `json:"version"`
 	// CreatedAt is when it happened (at most millisecond precision).
 	CreatedAt time.Time `json:"createdAt"`
 	// Test is true when it happened in test mode.
@@ -194,8 +192,6 @@ type HeldFundsReleased struct {
 	UserUUID string `json:"userUuid,omitempty"`
 	// Received is true once the recipient received it.
 	Received bool `json:"received"`
-	// Type is heldFundsRelease.
-	Type TransferType `json:"type"`
 	// Settlement is the transfer's transaction: its block and what it cost its sender.
 	Settlement TransferSettlement `json:"settlement"`
 	// Ledgers are the lines it settled, oldest first: the payments it paid (positive)

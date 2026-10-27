@@ -7,8 +7,8 @@ import (
 )
 
 // List returns one page of the space's customers (GET /customers; newest first, page size 20
-// by default, at most 100), filtered by Email (several customers may share one), Reference or
-// Verified. params may be nil. Iterate walks every page.
+// by default, at most 100), filtered by Email (several customers may share one) or Reference.
+// params may be nil. Iterate walks every page.
 func (s *CustomersService) List(ctx context.Context, params *CustomerListParams, opts ...RequestOption) (*Page[Customer], error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func (s *CustomersService) Iterate(ctx context.Context, params *CustomerListPara
 	})
 }
 
-// Create creates a customer (POST /customers, 201; verified). It sends an Idempotency-Key and
+// Create creates a customer (POST /customers, 201). It sends an Idempotency-Key and
 // is retried on transient failures. The email is stored lowercase and is not unique: several
 // customers of a space may share one.
 //

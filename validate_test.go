@@ -473,10 +473,11 @@ func TestRuleFilters(t *testing.T) {
 	check(t, "transactions exclusive", (&TransactionListParams{IncludeMembers: true, UserUUID: memberUUID}).Validate(), "userUuid")
 	check(t, "kind/category", (&FailureListParams{Kind: "refund", Category: "boom"}).Validate(), "kind", "category")
 	check(t, "invitation status", (&InvitationListParams{Status: "open"}).Validate(), "status")
-	all := []RefundStatus{RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusFailed, RefundStatusPending}
+	all := []RefundStatus{RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusApproved, RefundStatusPending}
 	check(t, "refund statuses ok", (&RefundListParams{Status: all}).Validate())
 	check(t, "refund 6 statuses", (&RefundListParams{Status: append(all, RefundStatusPending)}).Validate(), "status")
 	check(t, "refund unknown status", (&RefundListParams{Status: []RefundStatus{RefundStatusApproved, "completed", ""}}).Validate(), "status[1]", "status[2]")
+	check(t, "refund status failed is not a status", (&RefundListParams{Status: []RefundStatus{"failed"}}).Validate(), "status[0]")
 	check(t, "refund exclusive", (&RefundListParams{IncludeMembers: ptr(true), UserUUID: memberUUID}).Validate(), "userUuid")
 	check(t, "refund includeMembers false + user", (&RefundListParams{IncludeMembers: ptr(false), UserUUID: memberUUID}).Validate())
 	check(t, "accepted currencies", (&AcceptedCurrenciesParams{UserUUID: "x"}).Validate(), "userUuid")
@@ -491,7 +492,7 @@ func TestRuleFilters(t *testing.T) {
 func TestRuleDates(t *testing.T) {
 	var v validator
 	v.dateRange("from", "2026-06-01", "to", "2026-06-01")
-	v.dateRange("from", "2024-02-29", "to", "2026-12-31") // no window check (D5)
+	v.dateRange("from", "2024-02-29", "to", "2026-12-31") // no client-side window check: the 92-day limit is the API's
 	if v.err() != nil {
 		t.Errorf("valid ranges: %v", v.err())
 	}
@@ -515,8 +516,6 @@ func TestRuleEndpointEvents(t *testing.T) {
 	check(t, "empty entry", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{EventTypeRefundApproved, ""}}).Validate(), "events[1]")
 	check(t, "update webhook.test", (&UpdateWebhookEndpointParams{Events: []EventType{EventTypeWebhookTest}}).Validate(), "events[0]")
 	check(t, "unknown type passes (the API judges)", (&CreateWebhookEndpointParams{URL: "https://x.io", Events: []EventType{"future.event"}}).Validate())
-	check(t, "payloadVersion v1", (&UpdateWebhookEndpointParams{PayloadVersion: "v1"}).Validate(), "payloadVersion")
-	check(t, "payloadVersion v2", (&UpdateWebhookEndpointParams{PayloadVersion: WebhookPayloadVersionV2}).Validate())
 }
 
 func TestRuleHeaders(t *testing.T) {
@@ -560,7 +559,7 @@ func TestUpdateSemantics(t *testing.T) {
 		{UpdateSubscriptionParams{Metadata: map[string]string{"plan": "", "seats": "5"}}, `{"metadata":{"plan":"","seats":"5"}}`},
 		{UpdateWebhookEndpointParams{}, `{}`},
 		{UpdateWebhookEndpointParams{Description: ptr(""), Events: []EventType{}}, `{"events":[],"description":""}`},
-		{UpdateWebhookEndpointParams{Enabled: ptr(false), PayloadVersion: WebhookPayloadVersionV2}, `{"payloadVersion":"v2","enabled":false}`},
+		{UpdateWebhookEndpointParams{Enabled: ptr(false)}, `{"enabled":false}`},
 		{UpdateMemberParams{OrganizationFeePercent: "0"}, `{"organizationFeePercent":"0"}`},
 		{CreateInvitationParams{Email: "a@b.co"}, `{"email":"a@b.co","role":"user","holdFunds":false}`},
 		{CreateInvitationParams{Email: "a@b.co", HoldFunds: true, OrganizationFeePercent: "2.5", RedirectURL: "https://x.io"}, `{"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5","redirectUrl":"https://x.io"}`},

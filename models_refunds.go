@@ -19,7 +19,7 @@ type Refund struct {
 	// refund; "" (absent) when it gave none.
 	Reason string `json:"reason,omitempty"`
 	// Status is pending (a customer's request not answered yet), approved (its transfer
-	// confirmed) or rejected. failed is declared but never set.
+	// confirmed) or rejected.
 	Status RefundStatus `json:"status"`
 	// CreatedAt is when it was requested (or prepared by the merchant).
 	CreatedAt time.Time `json:"createdAt"`
@@ -103,9 +103,9 @@ type RefundListParams struct {
 	Limit int
 	// Cursor is the previous page's NextCursor, verbatim; "" for the first page.
 	Cursor string
-	// Status keeps only the refunds in one of these statuses (at most 5 of pending, approved,
-	// rejected, failed); empty: every status. RefundStatusPending lists the ones
-	// awaiting an answer.
+	// Status keeps only the refunds in one of these statuses (at most 5 entries, each pending,
+	// approved or rejected); empty: every status. RefundStatusPending lists the ones awaiting an
+	// answer.
 	Status []RefundStatus
 	// TxUUID keeps only the refund of this transaction (pay@…, sub-hist@…, or the bare UUID).
 	TxUUID string
@@ -136,7 +136,7 @@ func (p *RefundListParams) Validate() error {
 			v.add(field, "is required")
 			continue
 		}
-		oneOf(&v, field, status, RefundStatusPending, RefundStatusApproved, RefundStatusRejected, RefundStatusFailed)
+		oneOf(&v, field, status, RefundStatusPending, RefundStatusApproved, RefundStatusRejected)
 	}
 	v.txID("txUuid", p.TxUUID)
 	v.uuid("userUuid", p.UserUUID)

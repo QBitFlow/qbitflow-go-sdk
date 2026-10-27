@@ -40,8 +40,6 @@ type Client struct {
 	Invitations *InvitationsService
 	// Wallets reads the wallets and the currencies they accept (/wallets…).
 	Wallets *WalletsService
-	// Settings reads and writes the space's settings (/settings…).
-	Settings *SettingsService
 	// Accounting exports the accounting events (/accounting/export).
 	Accounting *AccountingService
 	// Webhooks verifies webhooks and manages the endpoints (Endpoints) and the event log (Events).
@@ -143,7 +141,6 @@ func newClient(t *transport, onBehalfOf string, onBehalfOfErr error) *Client {
 	c.Members = &MembersService{client: c}
 	c.Invitations = &InvitationsService{client: c}
 	c.Wallets = &WalletsService{client: c}
-	c.Settings = &SettingsService{client: c}
 	c.Accounting = &AccountingService{client: c}
 	c.Webhooks = &WebhooksService{
 		client:    c,
