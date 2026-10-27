@@ -88,7 +88,16 @@ func TestRuleReference(t *testing.T) {
 	check(t, "product filter", (&ProductListParams{Reference: "bad ref"}).Validate(), "reference")
 	check(t, "customer filter", (&CustomerListParams{Reference: strings.Repeat("r", 101)}).Validate(), "reference")
 	check(t, "payment filter", (&PaymentListParams{Reference: "o/1"}).Validate(), "reference")
-	check(t, "dots are references", (&PaymentListParams{Reference: ".."}).Validate())
+	// "." and ".." alone are dot-segments, never a reference (anywhere the rule applies); other
+	// dotted values are ordinary references.
+	for _, s := range []string{".", ".."} {
+		check(t, "dot-segment filter "+s, (&PaymentListParams{Reference: s}).Validate(), "reference")
+		check(t, "dot-segment product "+s, (&CreateProductParams{Name: "Plan", PriceUSD: "1", Reference: s}).Validate(), "reference")
+		check(t, "dot-segment session "+s, (&CreatePaymentSessionParams{ProductReference: s, CustomerReference: s, Reference: s}).Validate(), "reference", "productReference", "customerReference")
+	}
+	for _, s := range []string{"...", ".a", "INV.2026.001"} {
+		check(t, "dotted filter "+s, (&PaymentListParams{Reference: s}).Validate())
+	}
 }
 
 func TestRulePhone(t *testing.T) {

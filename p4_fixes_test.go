@@ -61,7 +61,8 @@ func TestNullResponseBody(t *testing.T) {
 }
 
 // A "." or ".." path segment would be resolved as a relative path: refused before any request.
-// References are query filters now: "." and ".." are ordinary (valid) references there.
+// A reference is never "." or ".." either (the API's reference rule), so GetByReference refuses
+// them too; "..." is an ordinary reference, sent as the filter.
 func TestDotPathSegmentsRefused(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
 		ref, _ := json.Marshal(r.URL.Query().Get("reference")) // the item carries the reference asked for
@@ -75,16 +76,18 @@ func TestDotPathSegmentsRefused(t *testing.T) {
 		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "id" {
 			t.Errorf("event id %q: want a ValidationError on id, got %v", id, err)
 		}
+		_, err = c.Subscriptions.GetByReference(ctx, id)
+		if !errors.As(err, &ve) || len(ve.FieldErrors) != 1 || ve.FieldErrors[0].Field != "reference" {
+			t.Errorf("reference %q: want a ValidationError on reference, got %v", id, err)
+		}
 	}
 	if n := len(ts.recorded()); n != 0 {
 		t.Fatalf("%d requests sent", n)
 	}
-	for _, ref := range []string{".", "..", "..."} {
-		if _, err := c.Subscriptions.GetByReference(ctx, ref); err != nil {
-			t.Fatalf("reference %q must be sent as a filter: %v", ref, err)
-		}
+	if _, err := c.Subscriptions.GetByReference(ctx, "..."); err != nil {
+		t.Fatalf(`reference "..." must be sent as a filter: %v`, err)
 	}
-	if got := ts.recorded()[1].query; got != "reference=.." {
+	if got := ts.recorded()[0].query; got != "reference=..." {
 		t.Errorf("query %q", got)
 	}
 }

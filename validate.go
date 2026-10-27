@@ -113,13 +113,16 @@ func (v *validator) text(field, value string, minLen, maxLen int) {
 
 var referencePattern = regexp.MustCompile(`^[A-Za-z0-9._:@-]+$`)
 
-// reference checks a merchant reference when set: 1 to 100 of A-Z a-z 0-9 . _ : @ -.
+// reference checks a merchant reference when set: 1 to 100 of A-Z a-z 0-9 . _ : @ -, and never
+// "." or ".." alone. Those two are dot-segments, which URL parsers and proxies resolve away, so a
+// URL built on such a reference could never name it: the API refuses them, and so does the SDK
+// ("...", ".a" and "INV.2026.001" are ordinary references).
 func (v *validator) reference(field, value string) {
 	if value == "" || !v.length(field, value, 1, 100) {
 		return
 	}
-	if !referencePattern.MatchString(value) {
-		v.add(field, "must contain only letters, digits and . _ : @ -")
+	if !referencePattern.MatchString(value) || value == "." || value == ".." {
+		v.add(field, `must contain only letters, digits and . _ : @ -, and cannot be "." or ".."`)
 	}
 }
 
