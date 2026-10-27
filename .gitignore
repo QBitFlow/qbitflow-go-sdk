@@ -15,3 +15,6 @@ test-internal
 PUBLISH.md
 
 **/.qbitflow-sync
+# Local notes for coding agents (not published)
+CLAUDE.md
+AGENTS.md
