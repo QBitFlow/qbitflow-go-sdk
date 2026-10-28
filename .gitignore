@@ -1,10 +1,8 @@
-CONTRIBUTING.md
 PROJECT_SUMMARY.*
 .DS_Store
 .coverage
 *.log
 .env
-
 
 # IDE
 .vscode/
@@ -12,11 +10,11 @@ PROJECT_SUMMARY.*
 *.swp
 *.swo
 
-
 test-internal
 
 PUBLISH.md
 
-CLAUDE.md
-
 **/.qbitflow-sync
+# Local notes for coding agents (not published)
+CLAUDE.md
+AGENTS.md
