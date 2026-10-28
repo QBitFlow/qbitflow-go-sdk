@@ -1107,9 +1107,8 @@ fmt.Println("fee now", member.OrganizationFeePercent, "%")
 - `Members.Remove` ends a seller's membership in the key's mode: their keys stop working and their
   checkouts close (`204`). It is a `409 held_funds_pending` while you hold their live funds:
   release them first.
-- `Invitations.List` / `Iterate` (by `Status`; your team's invitations are listed too, with
-  `Role` admin and no `Test`, `HoldFunds` or fee) and `Invitations.Revoke` (`204`, returns only an
-  error) manage the invitations.
+- `Invitations.List` / `Iterate` (by `Status`; member invitations only, your team's are managed in
+  the dashboard) and `Invitations.Revoke` (`204`, returns only an error) manage the invitations.
 - Today a seller whose account already belongs to another organization cannot accept (no
   `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
 

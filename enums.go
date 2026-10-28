@@ -278,15 +278,15 @@ const (
 	DurationUnitYears   DurationUnit = "years"
 )
 
-// Role is what a credential (or an invitation) may do in a space. An API key is at most admin:
-// admin (organization key) or user (a member's key, or On-Behalf-Of). Another value the API may
-// send is kept as is.
+// Role is what a credential may do in a space (Me.Role, MeSpace.Role). An API key is at most
+// admin: admin (organization key) or user (a member's key, or On-Behalf-Of). Another value the
+// API may send is kept as is.
 type Role string
 
 // Roles.
 const (
-	RoleAdmin Role = "admin" // An organization key; an invitation to the team
-	RoleUser  Role = "user"  // A member's key, or On-Behalf-Of; a member's invitation
+	RoleAdmin Role = "admin" // An organization key
+	RoleUser  Role = "user"  // A member's key, or an organization key acting On-Behalf-Of a member
 )
 
 // MerchantNotReadyReason is details.reason of a 409 merchant_not_ready.

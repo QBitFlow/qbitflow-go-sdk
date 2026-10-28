@@ -114,9 +114,10 @@ func (s *InvitationsService) Create(ctx context.Context, params *CreateInvitatio
 	return s.client.callRef[CreatedInvitation](ctx, endpoint{method: http.MethodPost, path: "/invitations", body: params, idempotent: true}, opts)
 }
 
-// List returns one page of the organization's invitations (GET /invitations; newest first,
-// page size 20 by default, at most 100), its team's (role admin) included, optionally filtered
-// by Status. Organization key only. params may be nil.
+// List returns one page of the organization's member invitations in the key's mode
+// (GET /invitations; newest first, page size 20 by default, at most 100), optionally filtered
+// by Status. The team's invitations are not listed: they are managed from the dashboard.
+// Organization key only. params may be nil.
 func (s *InvitationsService) List(ctx context.Context, params *InvitationListParams, opts ...RequestOption) (*Page[Invitation], error) {
 	if err := params.Validate(); err != nil {
 		return nil, err

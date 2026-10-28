@@ -112,10 +112,10 @@ var modelFixtures = map[string]struct {
 	"Wallet": {`{"uuid":"w-1","createdAt":"2026-10-01T12:00:00Z","address":"0xpk","test":false,"userUuid":"m-1","tokenWallets":[` +
 		`{"uuid":"tw-1","createdAt":"2026-10-01T12:00:00Z","currency":` + fxCurrency + `,"walletUuid":"w-1",` +
 		`"balance":{"currency":` + fxCurrency + `,"amount":"12.5","amountMinUnits":"12500000","amountUsd":"12.5"}}],"currency":` + fxNative + `}`, strict[Wallet]},
-	"Invitation": {`{"uuid":"i-1","test":false,"email":"a@b.co","role":"user","holdFunds":true,"organizationFeePercent":"2.5",` +
+	"Invitation": {`{"uuid":"i-1","test":false,"email":"a@b.co","holdFunds":true,"organizationFeePercent":"2.5",` +
 		`"redirectUrl":"https://x.io/welcome","expiresAt":"2026-10-08T12:00:00Z","acceptedByUserUuid":"m-1","acceptedAt":"2026-10-02T12:00:00Z",` +
 		`"revokedAt":"2026-10-03T12:00:00Z","createdAt":"2026-10-01T12:00:00Z","status":"accepted"}`, strict[Invitation]},
-	"CreatedInvitation": {`{"uuid":"i-1","test":true,"email":"a@b.co","role":"user","holdFunds":false,"organizationFeePercent":"0",` +
+	"CreatedInvitation": {`{"uuid":"i-1","test":true,"email":"a@b.co","holdFunds":false,"organizationFeePercent":"0",` +
 		`"redirectUrl":"https://x.io/welcome","expiresAt":"2026-10-08T12:00:00Z","acceptedByUserUuid":"m-1","acceptedAt":"2026-10-02T12:00:00Z",` +
 		`"revokedAt":"2026-10-03T12:00:00Z","createdAt":"2026-10-01T12:00:00Z","status":"pending","link":"https://qbitflow.app/invite?token=x"}`, strict[CreatedInvitation]},
 	"AccountingEvent": {`{"txTimeUtc":"2026-09-13T19:23:26.62Z","type":"refund","reference":"r","relatedReference":"r0",` +
@@ -302,11 +302,12 @@ func TestModelValues(t *testing.T) {
 		inv.OrganizationFeePercent != "0" {
 		t.Errorf("created invitation %+v", inv)
 	}
-	// A team invitation: mode-free, so test, holdFunds and the fee are absent.
-	team, err := decodeJSON[Invitation]([]byte(`{"uuid":"i-2","email":"a@b.co","role":"admin","expiresAt":"2026-10-08T12:00:00Z",` +
+	// Decoding stays tolerant: an invitation without test, holdFunds or the fee still decodes.
+	sparse, err := decodeJSON[Invitation]([]byte(`{"uuid":"i-2","email":"a@b.co","expiresAt":"2026-10-08T12:00:00Z",` +
 		`"createdAt":"2026-10-01T12:00:00Z","status":"pending"}`))
-	if err != nil || team.Test != nil || team.HoldFunds != nil || team.OrganizationFeePercent != "" || team.Role != RoleAdmin || team.AcceptedAt != nil {
-		t.Errorf("team invitation %+v %v", team, err)
+	if err != nil || sparse.Test != nil || sparse.HoldFunds != nil || sparse.OrganizationFeePercent != "" || sparse.AcceptedAt != nil ||
+		sparse.Status != InvitationStatusPending {
+		t.Errorf("sparse invitation %+v %v", sparse, err)
 	}
 
 	hf := fixture[HeldFunds](t, "HeldFunds")
@@ -338,10 +339,11 @@ func TestModelValues(t *testing.T) {
 	}
 }
 
-// TestOutOfScopeWireValuesDecode: the server may still send what no API key sees (a session's
-// userUuid, credential session, role handle, a qbf.cash payment's note, the hosted page's
-// redirectUrl, transaction and transfer types no SDK field carries). The SDK does not model
-// them, yet decoding succeeds: the fields are ignored and the enum values stay raw strings.
+// TestOutOfScopeWireValuesDecode: the server may still send what no API key sees or needs (a
+// session's userUuid, credential session, role handle, an invitation's role, a qbf.cash
+// payment's note, the hosted page's redirectUrl, transaction and transfer types no SDK field
+// carries). The SDK does not model them, yet decoding succeeds: the fields are ignored and the
+// enum values stay raw strings.
 func TestOutOfScopeWireValuesDecode(t *testing.T) {
 	me, err := decodeJSON[Me]([]byte(`{"credential":"session","userUuid":"u-1","space":{"uuid":"s","role":"handle","test":false}}`))
 	if err != nil || me.Space == nil || me.Space.Role != Role("handle") {
@@ -355,9 +357,11 @@ func TestOutOfScopeWireValuesDecode(t *testing.T) {
 			t.Errorf("me with role owner %+v %v", owner, err)
 		}
 	}
-	inv, err := decodeJSON[Invitation]([]byte(`{"uuid":"i-1","role":"owner"}`))
-	if err != nil || inv.Role != Role("owner") {
-		t.Errorf("invitation with role owner %+v %v", inv, err)
+	// An invitation's role (always "user" for an API key) is still sent, and ignored.
+	for _, raw := range []string{`{"uuid":"i-1","role":"user"}`, `{"uuid":"i-1","role":"owner"}`} {
+		if inv, err := decodeJSON[Invitation]([]byte(raw)); err != nil || inv.UUID != "i-1" {
+			t.Errorf("invitation with role %s: %+v %v", raw, inv, err)
+		}
 	}
 
 	p, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","note":"thanks","productName":"Tip","metadata":{}}`))

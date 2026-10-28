@@ -192,23 +192,20 @@ func (p *MemberListParams) values() url.Values {
 	return q
 }
 
-// Invitation is an invitation to the organization: to be a member in one mode (role user), or
-// to its team (role admin, from the dashboard: mode-free, so Test, HoldFunds and
-// OrganizationFeePercent are absent).
+// Invitation is an invitation to be a member of the organization in one mode. An API key only
+// sees member invitations: the team is invited and listed from the dashboard.
 type Invitation struct {
 	// UUID is the invitation's id.
 	UUID string `json:"uuid"`
-	// Test is a member invitation's mode; nil (absent) for a team invitation.
+	// Test is the invitation's mode: true for test, false for live (nil if the API omits it).
 	Test *bool `json:"test,omitempty"`
 	// Email is the invited address.
 	Email string `json:"email"`
-	// Role is admin (the team) or user (a member).
-	Role Role `json:"role"`
-	// HoldFunds is, for a member, true when the organization holds their payments until it trusts
-	// them (Members.Trust), false when they are paid directly; nil (absent) for the team.
+	// HoldFunds is true when the organization holds the member's payments until it trusts them
+	// (Members.Trust), false when they are paid directly (nil if the API omits it).
 	HoldFunds *bool `json:"holdFunds,omitempty"`
-	// OrganizationFeePercent is, for a member, the organization's fee on their payments, a percent
-	// string ("0": none); "" (absent) for the team.
+	// OrganizationFeePercent is the organization's fee on the member's payments, a percent
+	// string ("0": none; "" if the API omits it).
 	OrganizationFeePercent string `json:"organizationFeePercent,omitempty"`
 	// RedirectURL is where the person goes once they accepted (with ?invitationUuid=<uuid>); ""
 	// when none.
