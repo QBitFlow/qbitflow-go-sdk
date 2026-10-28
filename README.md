@@ -1109,8 +1109,10 @@ fmt.Println("fee now", member.OrganizationFeePercent, "%")
   release them first.
 - `Invitations.List` / `Iterate` (by `Status`; member invitations only, your team's are managed in
   the dashboard) and `Invitations.Revoke` (`204`, returns only an error) manage the invitations.
-- Today a seller whose account already belongs to another organization cannot accept (no
-  `member.joined` comes), and test-mode sellers are real accounts that accept from a real inbox.
+- A seller who already uses QBitFlow joins your platform with the same account: accepting with an
+  account that belongs to another organization succeeds like any acceptance, keeps its other
+  memberships, and sends `member.joined` as for any member. Test-mode sellers are real accounts
+  that accept from a real inbox.
 
 ## Wallets
 
