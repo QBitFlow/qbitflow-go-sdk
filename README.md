@@ -127,7 +127,9 @@ Then fulfil the order when the [`payment.completed` webhook](#webhooks) arrives 
   next to `AmountMinUnits: "10000000"` on-chain and the `Currency` object) and fee rates in percent
   (`FeePercent: "0.99"` is 0.99 %, `RefundPercent: "50"`). Inputs are checked before sending: at
   most 2 decimals, no sign or exponent (`"12.50"` is fine; a JSON number would be refused by the
-  API). Compare or add them with a decimal library, or `FormatAmount` / `ParseAmount`.
+  API). Compare or add them with a decimal library, or `FormatAmount` / `ParseAmount`. They come
+  back canonical (`"12.50"` reads back `"12.5"`, `"12.00"` as `"12"`): compare amounts as
+  decimals, never as strings.
 - **Metadata:** products, customers, checkouts and subscriptions carry `Metadata`, your own
   `map[string]string` (an order id, a CRM key): at most 50 keys of 1 to 40 characters among
   `A-Z a-z 0-9 _ - . :`, values of at most 500 characters without control or bidirectional
@@ -245,17 +247,21 @@ if status.Status != qbitflow.CheckoutSessionStatusCompleted {
 
 ### Access control
 
-A subscription grants access until the end of the period paid for, whatever its status:
+A subscription grants access while now < `AccessUntil`, whatever its status: the end of the
+period paid for, plus an hour for an `active` one, since its renewal is billed within minutes of
+its due date. `HasAccess` reads `AccessUntil`, else `CurrentPeriodEnd` (a subscription you stored
+before the API sent `AccessUntil`):
 
 <!-- docs:snippet has-access -->
 ```go
-// Access lasts until the end of the period paid for, whatever the status.
+// Access lasts while now < AccessUntil, whatever the status: the end of the period paid
+// for, plus an hour for an active subscription while its renewal is billed.
 sub, err := client.Subscriptions.Get(ctx, subscriptionUUID, nil)
 if err != nil {
 	log.Fatal(err)
 }
-if sub.HasAccess(time.Now()) { // CurrentPeriodEnd set and now before it
-	fmt.Println("access granted until", sub.CurrentPeriodEnd.Format(time.RFC3339))
+if sub.HasAccess(time.Now()) { // now before AccessUntil
+	fmt.Println("access granted until", sub.AccessUntil.Format(time.RFC3339))
 } else {
 	fmt.Println("no access")
 }
@@ -434,8 +440,15 @@ fmt.Println("Redirect the customer to", session.Link)
 ```
 <!-- /docs:snippet -->
 
+- **Products and checkout kinds.** A payment checkout of a subscription product sells it **once**,
+  at its price (its terms are ignored, nothing recurs). A subscription checkout of a one-time
+  product needs `Frequency`, else a `*ValidationError` on `frequency` naming the product. An
+  inline product of a **subscription** checkout creates a hidden product (`IsActive` false),
+  reused by the next checkouts with the same name, description and price
+  (`Products.List` with `IncludeHidden` shows it); a payment's inline product creates none.
 - **Other fields:** `Reference` is your order id, unique per space; `CustomerUUID` or
-  `CustomerReference` (kept on the payment) names your customer; `ExpiresInMinutes` sets the
+  `CustomerReference` (kept on the payment) names your customer (**no receipt without a QBitFlow
+  customer**: see [Products and customers](#products-and-customers)); `ExpiresInMinutes` sets the
   session's lifetime (10 to 1440; 0 = the default); `Metadata` is copied onto the payment or the
   subscription and into their webhooks (`payment.completed`, `subscription.*`, `checkout.expired`).
 - **The answer** is a `CreatedCheckoutSession`: `Link`, `UUID` and `ExpiresAt`, always set.
@@ -563,7 +576,9 @@ the webhook.
 ### Expire
 
 End a session early (an order cancelled on your side). It answers its status (`expired`,
-`ExpiresAt` the time you expired it), and `checkout.expired` follows. Once the customer paid or is paying it is a `409 tx_already_sent`.
+`ExpiresAt` the time you expired it), and `checkout.expired` follows. Expiring it again answers
+`expired` too, without `ExpiresAt` (only the first answer has it). Once the customer paid or is
+paying it is a `409 tx_already_sent`.
 
 <!-- docs:snippet checkout-expire -->
 ```go
@@ -578,8 +593,9 @@ fmt.Println(expired.Status) // expired; checkout.expired follows
 
 ## Products and customers
 
-Products are optional (a checkout can name an inline product) and give you a reusable catalog
-with payment links. The reference is generated when `""`. A subscription product carries its
+Products are optional for payments (a payment checkout can name an inline product; a
+subscription checkout's inline product becomes a hidden product: [Checkout sessions](#checkout-sessions))
+and give you a reusable catalog with payment links. The reference is generated when `""`. A subscription product carries its
 terms: `Subscription: &qbitflow.SubscriptionTermsParams{Frequency: &qbitflow.Duration{Value: 1,
 Unit: qbitflow.DurationUnitMonths}}`. A member's key gives a product terms (on `Create` or
 `Update`) only while the organization's `members.subscriptions` policy allows it (`403
@@ -671,8 +687,14 @@ fmt.Println(customer.UUID == byReference.UUID)
 `Customers.Get`, `List` / `Iterate` (by `Email` or `Reference`) and `Delete` (`204`) complete the
 set. A checkout given `CustomerUUID` or `CustomerReference` asks the customer
 nothing (`CustomerReference` is kept on the payment, and links your customer with that reference
-if there is one); without either, the checkout asks what your `checkout.customerDetails` setting
-says (the full details by default).
+if there is one; none is created); without either, the checkout asks what your
+`checkout.customerDetails` setting says (the full details by default).
+
+**Without a QBitFlow customer, the buyer gets no receipt and no other customer email** (a
+subscription's billing emails included): QBitFlow has no address for them. To have them, create
+the customer with that reference and their email first
+(`Customers.Create(ctx, &qbitflow.CreateCustomerParams{Reference: "crm-42", FirstName: "Ada", Email: "ada@example.com"})`).
+That works even after the checkout was created, as long as it is before the payment is recorded.
 
 ## Payments and failures
 
@@ -784,9 +806,13 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 | `stopped` | Cancelled during its period: never billed again, `cancelled` at `NextBillingAt` |
 | `cancelled` | Over (`CancellationReason` says why). Final |
 
-**Access rule: grant access while `now < CurrentPeriodEnd`, whatever the status.** A `stopped` or
-`paused` subscription has paid for its period; a `pastDue` one's period has ended.
-`sub.HasAccess(time.Now())` applies it ([recipe](#access-control)).
+**Access rule: grant access while `now < AccessUntil`, whatever the status.** `AccessUntil` is
+`CurrentPeriodEnd` (the paid-through date), plus 1 hour for an `active` subscription: QBitFlow
+bills a renewal within minutes of its due date, so checking `CurrentPeriodEnd` would cut every
+subscriber off for those minutes at each renewal (show it as "paid through", don't gate on it). A
+`stopped` or `paused` subscription has paid for its period; a `pastDue` one's period has ended.
+`sub.HasAccess(time.Now())` applies it, reading `CurrentPeriodEnd` for a subscription stored
+before `AccessUntil` existed ([recipe](#access-control)).
 
 `ActionRequired` says what the customer must do (`topUpAllowance`, `raiseMaximum`,
 `confirmTrial`; `""`: nothing): point them to the subscription's `ManagementPageLink`.
@@ -794,7 +820,9 @@ the free trial. It keeps the checkout's `sub@…` id for life.
 A subscription's price is locked at signup: `PriceUSD` plus its `Fees` lines, every bill. Its
 `Allowance` (absent during a trial) is what the subscriber's wallet still lets QBitFlow bill
 (`Amount`, `AmountMinUnits`, `AmountUSD`), how many bills that covers (`RemainingPeriods`) and the
-most one bill may charge (`MaxPerPeriod`). `LastBilledAt`, `NextBillingAt` and `CancellableAt` are
+most one bill may charge (`MaxPerPeriod`). `RemainingPeriods` counts bills before each bill's
+network fee, so it is usually higher than the checkout's "N payments" (an estimate that kept room
+for network fees). `LastBilledAt`, `NextBillingAt` and `CancellableAt` are
 `nil` when they don't apply.
 
 <!-- docs:snippet subscriptions-get -->
@@ -987,15 +1015,17 @@ created, err := client.Invitations.Create(ctx, &qbitflow.CreateInvitationParams{
 if err != nil {
 	log.Fatal(err) // 409 already_joined for a member
 }
-// The link is also emailed. The seller exists once they accepted: wait for member.joined.
+// QBitFlow also emails the seller a link of their own. The seller exists once they
+// accepted: wait for member.joined.
 fmt.Println("invitation", created.UUID, "link:", created.Link)
 ```
 <!-- /docs:snippet -->
 
 `HoldFunds` is required (always sent); the fee is a percent string with at most 2 decimals
 (`"0"` to `"50"`). The answer is a `CreatedInvitation`: the invitation's fields and its `Link`
-(only here). `SendEmail: new(false)` creates the invitation without emailing it: share `Link` in
-your own onboarding (signing up through it still emails the person a confirmation). An
+(only here). QBitFlow emails the person a link of their own (another token, never returned), so
+don't compare it with `Link`. `SendEmail: new(false)` creates the invitation without emailing it:
+share `Link` in your own onboarding (signing up through it still emails the person a confirmation). An
 organization sends at most 50 invitations an hour, emailed or not (`429`, raised at once).
 
 **2. Wait for `member.joined`.** The seller exists once they accepted: store the event's
@@ -1042,8 +1072,10 @@ and their subscription products' links open nothing.
 **4. Hear of every sale.** An organization webhook endpoint receives every seller's events by
 default; the event's `UserUUID` names the seller. Use it as `OnBehalfOf` for follow-up reads.
 
-**5. Commission and held funds.** Each payment records your fee in `Settlement.OrganizationFee`
-and `Settlement.Split.Organization`. While you hold a seller's funds (`HoldFunds` true,
+**5. Commission and held funds.** Your commission is taken on what remains after QBitFlow's fee:
+`(amount − QBitFlow's fee) × OrganizationFeePercent / 100`, rounded down, the seller getting the
+rest (on $7.50 at 0.5 % and 10 %: QBitFlow 0.0375, you 0.74625, the seller 6.71625). Each payment
+records it in `Settlement.OrganizationFee` and `Settlement.Split.Organization`. While you hold a seller's funds (`HoldFunds` true,
 `Member.TrustedAt` nil), their payments go to your wallet and the net is owed to them
 (`HeldFunds.TotalUSD`, each `LedgerEntry` with what it counts for: `Owed`, `OwedMinUnits`,
 `OwedUSD`, negative on a refund line):
@@ -1068,17 +1100,22 @@ fmt.Printf("owed to %s: %s USD over %d lines\n", memberUUID, held.TotalUSD, len(
 ```
 <!-- /docs:snippet -->
 
-Trust a seller to pay them directly:
+Trust a seller to pay them directly. Trust is one-way and narrows the seller's currencies to their
+own wallets': a seller whose wallets accept none of yours is a `409 member_has_no_wallet` (nothing
+changes; trust them once they've added one):
 
 <!-- docs:snippet members-trust -->
 ```go
-// Their new payments go to their own wallets from now on. What is held stays held until
-// you release it in the dashboard (heldFunds.released tells you).
+// Their new payments go to their own wallets from now on (one-way). What is held stays
+// held until you release it in the dashboard (heldFunds.released tells you).
 member, err := client.Members.Trust(ctx, memberUUID)
-if err != nil {
+var conflict *qbitflow.ConflictError
+switch {
+case errors.As(err, &conflict) && conflict.Code == "member_has_no_wallet":
+	fmt.Println("not trusted: their own wallets accept none of your currencies yet")
+case err != nil:
 	log.Fatal(err)
-}
-if member.TrustedAt != nil {
+case member.TrustedAt != nil:
 	fmt.Println("trusted since", member.TrustedAt.Format(time.RFC3339))
 }
 ```
@@ -1106,7 +1143,7 @@ fmt.Println("fee now", member.OrganizationFeePercent, "%")
   the reads.
 - `Members.Remove` ends a seller's membership in the key's mode: their keys stop working and their
   checkouts close (`204`). It is a `409 held_funds_pending` while you hold their live funds:
-  release them first.
+  release them from the dashboard first.
 - `Invitations.List` / `Iterate` (by `Status`; member invitations only, your team's are managed in
   the dashboard) and `Invitations.Revoke` (`204`, returns only an error) manage the invitations.
 - A seller who already uses QBitFlow joins your platform with the same account: accepting with an
@@ -1297,6 +1334,12 @@ handler, `body, err := qbitflow.VerifyWebhookRequest(r, secret)` reads the reque
 - **Answer 2xx fast**, within 30 seconds, **including to the types you ignore**: anything else is
   retried (for 3 days in live mode), and an endpoint failing for 3 days is disabled. Store the
   event, answer, then process it in the background.
+- **Order is per publication, never per subscription.** The events published together (a
+  `subscription.created` and its first `subscription.billed`) reach an endpoint in that order,
+  each once the previous one is delivered or abandoned; meanwhile the event log shows the waiting
+  one `Pending` with `WaitingFor` the earlier event ([The event log](#the-event-log)). Nothing
+  waits across publications: a renewal's `subscription.billed` never waits for an earlier event
+  your endpoint is failing. Order those by `CreatedAt` and the resources' own timestamps.
 - **Secret rotation** needs nothing on your side: for 24 hours after a rotation the header carries
   two `v1=` signatures, the new secret's and the previous one's, and either secret verifies. Switch
   your secret within the day.
@@ -1320,7 +1363,7 @@ handler, `body, err := qbitflow.VerifyWebhookRequest(r, secret)` reads the reque
 | `subscription.statusChanged` | `SubscriptionStatusChanged()` | the `Subscription` + `PreviousStatus` |
 | `subscription.actionRequiredChanged` | `SubscriptionActionRequiredChanged()` | the `Subscription` + `PreviousActionRequired` |
 | `subscription.billingFailed` | `SubscriptionBillingFailed()` | the `Subscription` + `Reason`, `BillUUID`, `AmountUSD` (a string), `Attempt`, `RemainingAttempts`, `NextAttemptAt` |
-| `subscription.upcomingBill` | `SubscriptionUpcomingBill()` | the `Subscription` + `BillingAt`, `AmountUSD` (a string), `TrialEnding`, `BalanceSufficient`, `AllowanceSufficient` |
+| `subscription.upcomingBill` | `SubscriptionUpcomingBill()` | the `Subscription` + `BillingAt`, `AmountUSD` (a string), `TrialEnding`, `BalanceSufficient`, `AllowanceSufficient`. Sent the dashboard's `subscriptions.upcomingBillDays` before the bill (3 days by default, 0 = never), checked daily; not for a subscription whose period (a trial: the trial) is no longer than that |
 | `refund.requested` / `.approved` / `.rejected` | `RefundRequested()` / `RefundApproved()` / `RefundRejected()` | the `Refund` |
 | `member.joined` | `MemberJoined()` | the `Member` + `InvitationUUID` |
 | `member.removed` | `MemberRemoved()` | the `Member` |
@@ -1367,9 +1410,35 @@ if err != nil {
 	log.Fatal(err)
 }
 for _, d := range detail.Deliveries {
-	fmt.Println(d.URL, d.Delivered, len(d.Attempts))
+	switch {
+	case d.Delivered:
+		fmt.Println(d.URL, "delivered after", len(d.Attempts), "attempts")
+	case d.NextAttemptAt != nil:
+		fmt.Println(d.URL, "failed, retried at", d.NextAttemptAt.Format(time.RFC3339))
+	case d.WaitingFor != "":
+		fmt.Println(d.URL, "queued behind", d.WaitingFor) // no attempt yet
+	case d.Pending:
+		fmt.Println(d.URL, "about to start") // no attempt yet
+	default:
+		fmt.Println(d.URL, "not delivered, gave up after", len(d.Attempts), "attempts")
+	}
 }
 ```
+
+`Pending` is true while QBitFlow still attempts the event on its own: `NextAttemptAt` is set while
+it is retried after a failed attempt, `WaitingFor` (an `evt_…`) while it is queued behind an earlier
+event of the same publication, and neither while its delivery is about to start (within a minute).
+**A queued or starting delivery has no `Attempts` yet**: check the length before reading the last
+one. Once `Pending` is false nothing more happens on its own, and `Delivered` false means it was
+abandoned after its retries (3 days in live mode, 3 hours in test mode) or the endpoint was disabled
+or deleted. If QBitFlow can't read a delivery's progress at that moment, `Pending` comes from the
+attempts: true while the retry schedule still attempts the event again (a delivery being retried
+never reads as abandoned), without `NextAttemptAt`; a delivery queued with no attempt yet isn't
+listed until its progress can be read: read the event again a moment later.
+
+A member's deliveries to your organization's endpoints show from the organization: list with
+`&qbitflow.EventListParams{IncludeMembers: true}`, then `Get`. Read on behalf of the member, the
+event lists only the member's own endpoints (no `Deliveries` without any).
 
 Each `DeliveryAttempt` has `Delivered`, `StatusCode` (`nil` when the endpoint didn't answer) and
 `Error`. An attempt that was not posted at all is `Skipped`, with no `StatusCode`: a member's
@@ -1471,7 +1540,7 @@ Every error the SDK returns is one of the types below, matched with `errors.As`.
 | `*AuthenticationError` | 401 | a missing, unknown, expired or revoked key (a removed member's keys too) |
 | `*PermissionDeniedError` | 403 | `forbidden` (no details: the key's role or the resource doesn't allow it; also a bad `On-Behalf-Of`), `policy_disabled`: a member's key doing what its organization's member policy doesn't allow (`Details["policy"]`, e.g. `members.subscriptions`; plus `Details["field"]` when the policy governs a request field: `successUrl` / `cancelUrl` under `members.checkoutRedirects`) |
 | `*NotFoundError` | 404 | unknown, deleted, or outside the request's space; also a `GetByReference` that found nothing (code `not_found`, the list's `RequestID`) |
-| `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `held_funds_pending`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
+| `*ConflictError` | 409 | `unique_violation` (`Details["field"]`), `tx_already_sent`, `merchant_not_ready` (`Details["reason"]`), `held_funds_pending`, `member_has_no_wallet`, `already_joined`, `payment_not_due`, `subscription_already_stopped_or_inactive`, `idempotency_key_in_use`, `conflict` |
 | `*GoneError` | 410 | `merchant_closed`: a removed member's or a closed organization's space |
 | `*IdempotencyError` | 422 `idempotency_key_reused` | an `Idempotency-Key` reused for another request: a bug, never retried |
 | `*RateLimitError` | 429 | `RetryAfter` (a `time.Duration`), `Limit`, `PeriodSeconds` |
@@ -1531,7 +1600,8 @@ enum filters (refund `Status`, transaction `Type`, failure `Kind` and `Category`
 `Status`), and exclusive filters. A failure is a `*ValidationError` with `StatusCode` 0, `Code`
 `""` and nothing is sent. What depends on the key's mode or on stored data is left to the API: the
 `"5"` USD test-mode cap, `https`-only live URLs, the live subscription minimum (`"0.25"`), the
-frequency minimum (1 hour live, 5 minutes test), the 92-day export window, the 50-key cap on merged
+frequency minimum (1 hour live, 5 minutes test; a development server lowers the live one to 1
+minute, production never does), the 92-day export window, the 50-key cap on merged
 metadata, uniqueness.
 
 ## Retries and idempotency
@@ -1631,7 +1701,7 @@ fmt.Println(client != nil)
 
 A bad option makes `NewClient` return a `*ValidationError`. A client's configuration never changes
 after `NewClient`; `client.OnBehalfOf` derives clients that share it. Every request sends
-`User-Agent: qbitflow-go/3.0.0` (`qbitflow.Version`).
+`User-Agent: qbitflow-go/3.1.0` (`qbitflow.Version`).
 
 ## Migrating from 2.x
 

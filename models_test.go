@@ -132,7 +132,9 @@ var modelFixtures = map[string]struct {
 	"EventDetail": {`{"id":"evt_1","type":"payment.completed","createdAt":"2026-10-01T12:00:00.123Z","test":false,"userUuid":"m-1",` +
 		`"data":{"uuid":"pay@1"},"deliveries":[{"endpointUuid":"e-1","url":"https://x.io/hook","delivered":true,"attempts":[{"uuid":"a-1",` +
 		`"eventId":"evt_1","eventType":"payment.completed","endpointUuid":"e-1","attempt":2,"delivered":false,"skipped":true,"statusCode":500,` +
-		`"error":"500 Internal Server Error","durationMs":120,"attemptedAt":"2026-10-01T12:00:01Z"}]}]}`, strict[EventDetail]},
+		`"error":"500 Internal Server Error","durationMs":120,"attemptedAt":"2026-10-01T12:00:01Z"}],` +
+		`"pending":true,"nextAttemptAt":"2026-10-01T12:05:01Z"},` +
+		`{"endpointUuid":"e-2","url":"https://y.io/hook","delivered":false,"attempts":[],"pending":true,"waitingFor":"evt_0"}]}`, strict[EventDetail]},
 	"Me": {`{"apiKeyUuid":"k-1","role":"user","onBehalfOfUserUuid":"m-1","space":{"uuid":"s-1",` +
 		`"organizationUuid":"o-1","organizationName":"Shop","userUuid":"m-1","test":true,"role":"admin",` +
 		`"member":{"userUuid":"m-1","firstName":"Ada","lastName":"L","email":"a@b.co"},"organizationFeePercent":"7.5",` +
@@ -416,13 +418,54 @@ func TestReferralFeeDeadlineIgnored(t *testing.T) {
 	}
 }
 
+// TestEndpointDeliveryProgress decodes the delivery states of the event log: retried, queued
+// behind an earlier event of its publication (no attempt yet), about to start, delivered, and an
+// answer without pending (a server before it).
+func TestEndpointDeliveryProgress(t *testing.T) {
+	detail, err := decodeJSON[EventDetail]([]byte(`{"id":"evt_2","type":"subscription.billed","version":"v2","data":{},"deliveries":[` +
+		`{"endpointUuid":"e-1","url":"https://x.io","delivered":false,"attempts":[{"uuid":"a-1","attempt":1,"delivered":false,` +
+		`"statusCode":503,"durationMs":40,"attemptedAt":"2026-10-01T12:00:01Z"}],"pending":true,"nextAttemptAt":"2026-10-01T12:05:01Z"},` +
+		`{"endpointUuid":"e-2","url":"https://y.io","delivered":false,"attempts":[],"pending":true,"waitingFor":"evt_1"},` +
+		`{"endpointUuid":"e-3","url":"https://z.io","delivered":false,"attempts":[],"pending":true},` +
+		`{"endpointUuid":"e-4","url":"https://w.io","delivered":true,"attempts":[{"uuid":"a-2","attempt":1,"delivered":true,` +
+		`"statusCode":200,"durationMs":40,"attemptedAt":"2026-10-01T12:00:01Z"}],"pending":false},` +
+		`{"endpointUuid":"e-5","url":"https://v.io","delivered":false,"attempts":null}]}`))
+	if err != nil || len(detail.Deliveries) != 5 {
+		t.Fatalf("deliveries %+v %v", detail, err)
+	}
+	d := detail.Deliveries
+	next := time.Date(2026, 10, 1, 12, 5, 1, 0, time.UTC)
+	if !d[0].Pending || d[0].NextAttemptAt == nil || !d[0].NextAttemptAt.Equal(next) || d[0].WaitingFor != "" || len(d[0].Attempts) != 1 {
+		t.Errorf("retried %+v", d[0])
+	}
+	if !d[1].Pending || d[1].WaitingFor != "evt_1" || d[1].NextAttemptAt != nil || d[1].Attempts == nil || len(d[1].Attempts) != 0 {
+		t.Errorf("queued %+v", d[1])
+	}
+	if !d[2].Pending || d[2].WaitingFor != "" || d[2].NextAttemptAt != nil || len(d[2].Attempts) != 0 {
+		t.Errorf("about to start %+v", d[2])
+	}
+	if d[3].Pending || !d[3].Delivered || d[3].NextAttemptAt != nil || d[3].WaitingFor != "" {
+		t.Errorf("delivered %+v", d[3])
+	}
+	if d[4].Pending || d[4].Delivered || d[4].NextAttemptAt != nil || d[4].WaitingFor != "" || len(d[4].Attempts) != 0 {
+		t.Errorf("without pending %+v", d[4])
+	}
+	// Wrong JSON types are refused, like every field.
+	for _, bad := range []string{`"pending":"true"`, `"nextAttemptAt":"soon"`, `"waitingFor":1`} {
+		_, err := decodeJSON[EndpointDelivery]([]byte(`{"endpointUuid":"e-1",` + bad + `}`))
+		if err == nil {
+			t.Errorf("%s: decoded", bad)
+		}
+	}
+}
+
 // TestModelOptionalFields decodes the minimal shapes the docs allow: every O field absent
 // decodes to its zero value ("" or nil), every L field absent to an empty slice.
 func TestModelOptionalFields(t *testing.T) {
 	sub, err := decodeJSON[Subscription]([]byte(`{"uuid":"sub@1","to":"0xt","status":"trial","priceUsd":"9.99","fees":[],"metadata":{},` +
 		`"currency":` + fxCurrency + `,"frequency":{"value":1,"unit":"months"},"currentPeriodEnd":"2026-10-15T12:00:00Z"}`))
 	if err != nil || sub.From != "" || sub.ProductUUID != "" || sub.SubscriptionHash != "" || sub.Allowance != nil || sub.LastBilledAt != nil ||
-		sub.NextBillingAt != nil || sub.CancellableAt != nil || sub.Dunning != nil || sub.ActionRequired != "" || sub.CurrentPeriodEnd == nil {
+		sub.NextBillingAt != nil || sub.CancellableAt != nil || sub.Dunning != nil || sub.ActionRequired != "" || sub.CurrentPeriodEnd == nil || sub.AccessUntil != nil {
 		t.Errorf("trial %+v %v", sub, err)
 	}
 	pay, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","amount":"10","priceUsd":"10","fees":[],"metadata":{},"settlement":{"feePercent":"0.99"}}`))

@@ -52,7 +52,13 @@ type EventDetail struct {
 	Deliveries []EndpointDelivery `json:"deliveries"`
 }
 
-// EndpointDelivery is an event's deliveries to one endpoint.
+// EndpointDelivery is an event's deliveries to one endpoint, and whether they go on.
+//
+// While Pending, QBitFlow still attempts the event on its own: NextAttemptAt is set when it is
+// retried after a failed attempt, WaitingFor when it is queued behind an earlier event of the
+// same publication, and neither when its delivery is about to start (the last two have no
+// Attempts yet). Once Pending is false nothing more happens on its own, and Delivered tells how
+// it ended (false: abandoned after its retries, or the endpoint was disabled or deleted).
 type EndpointDelivery struct {
 	// EndpointUUID is the endpoint.
 	EndpointUUID string `json:"endpointUuid"`
@@ -60,8 +66,24 @@ type EndpointDelivery struct {
 	URL string `json:"url"`
 	// Delivered is true when one attempt was answered with a 2xx.
 	Delivered bool `json:"delivered"`
-	// Attempts are its attempts, oldest first.
+	// Attempts are its attempts, oldest first. Empty while the event waits for its first
+	// attempt (Pending): check the length before reading the last one.
 	Attempts []DeliveryAttempt `json:"attempts"`
+	// Pending is true while QBitFlow still attempts the event on its own. False once delivered,
+	// abandoned after its retries (3 days in live mode, 3 hours in test mode), or when the
+	// endpoint was disabled or deleted. When QBitFlow can't read a delivery's progress, Pending
+	// comes from the attempts: true while the retry schedule still attempts the event again (a
+	// delivery being retried never reads as abandoned), without NextAttemptAt; a delivery queued
+	// with no attempt yet isn't listed until its progress can be read: read the event again a
+	// moment later.
+	Pending bool `json:"pending"`
+	// NextAttemptAt is when the next attempt comes, while Pending after a failed attempt; nil
+	// otherwise.
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+	// WaitingFor is the id (evt_…) of the earlier event of the same publication this one is
+	// queued behind, while Pending; "" otherwise. An endpoint gets a publication's events in
+	// order, each once the previous one is delivered or abandoned.
+	WaitingFor string `json:"waitingFor,omitempty"`
 }
 
 // DeliveryAttempt is one attempt to deliver an event to an endpoint.

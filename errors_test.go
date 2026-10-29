@@ -29,6 +29,7 @@ func TestErrorMapping(t *testing.T) {
 		{409, "tx_already_sent", (*ConflictError)(nil)},
 		{409, "merchant_not_ready", (*ConflictError)(nil)},
 		{409, "held_funds_pending", (*ConflictError)(nil)},
+		{409, "member_has_no_wallet", (*ConflictError)(nil)},
 		{409, "idempotency_key_in_use", (*ConflictError)(nil)},
 		{410, "merchant_closed", (*GoneError)(nil)},
 		{422, "idempotency_key_reused", (*IdempotencyError)(nil)},

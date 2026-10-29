@@ -148,7 +148,12 @@ func TestEventSubscriptions(t *testing.T) {
 		created.Allowance.MaxPerPeriodMinUnits != "30000000" || created.Currency.Code != "BASE:USDC" || created.Dunning != nil {
 		t.Errorf("created %+v", created)
 	}
-	if !created.HasAccess(time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)) || created.HasAccess(*created.CurrentPeriodEnd) {
+	// Active: access runs to AccessUntil, an hour past CurrentPeriodEnd (the renewal on its way).
+	if created.AccessUntil == nil || !created.AccessUntil.Equal(created.CurrentPeriodEnd.Add(time.Hour)) {
+		t.Errorf("created AccessUntil %v, CurrentPeriodEnd %v", created.AccessUntil, created.CurrentPeriodEnd)
+	}
+	if !created.HasAccess(time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)) || !created.HasAccess(*created.CurrentPeriodEnd) ||
+		created.HasAccess(*created.AccessUntil) {
 		t.Error("HasAccess on the created subscription")
 	}
 

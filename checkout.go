@@ -110,8 +110,9 @@ func (s *CheckoutSessionsService) Get(ctx context.Context, uuid string, opts ...
 }
 
 // Expire ends a checkout session now (POST /checkout-sessions/:uuid/expire) and returns its
-// status, expired, with ExpiresAt the time it was expired (checkout.expired follows). Not
-// retried.
+// status, expired, with ExpiresAt the time it was expired (checkout.expired follows). Expiring
+// an expired session answers expired again, without ExpiresAt (only the first answer has it).
+// Not retried.
 //
 // Errors: 409 tx_already_sent once the customer paid or is paying.
 func (s *CheckoutSessionsService) Expire(ctx context.Context, uuid string, opts ...RequestOption) (*CheckoutSessionStatus, error) {

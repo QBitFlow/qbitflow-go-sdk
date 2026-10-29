@@ -34,8 +34,9 @@ type CheckoutSessionStatus struct {
 	// don't cancel the order on it; wait for completed (payment.completed, subscription.created) or
 	// expired (checkout.expired).
 	LastAttempt *Attempt `json:"lastAttempt,omitempty"`
-	// ExpiresAt is when the checkout can no longer be paid, while it is open (on Expire's answer:
-	// when it was expired); nil once completed, or expired at its time.
+	// ExpiresAt is when the checkout can no longer be paid, while it is open (on Expire's first
+	// answer: when it was expired); nil once completed, expired at its time, or on a repeated
+	// Expire.
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
