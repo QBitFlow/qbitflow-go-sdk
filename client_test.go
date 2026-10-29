@@ -119,7 +119,7 @@ func TestHeaders(t *testing.T) {
 		if got := r.header.Get("X-API-Key"); got != testAPIKey {
 			t.Errorf("X-API-Key = %q", got)
 		}
-		if got := r.header.Get("User-Agent"); got != "qbitflow-go/3.0.0" {
+		if got := r.header.Get("User-Agent"); got != "qbitflow-go/3.1.0" {
 			t.Errorf("User-Agent = %q", got)
 		}
 		if got := r.header.Get("Accept"); got != "application/json" {

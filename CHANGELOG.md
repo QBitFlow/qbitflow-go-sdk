@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-10-29
+
+The event log tells which deliveries are still in progress. Nothing you call changes.
+
+### Added
+
+-   **`EndpointDelivery.Pending`, `NextAttemptAt` and `WaitingFor`** (`Webhooks.Events.Get`).
+    `Pending` is true while QBitFlow still attempts the event on its own; `NextAttemptAt` is set
+    while it is retried after a failed attempt, and `WaitingFor` (an `evt_…`) while it is queued
+    behind an earlier event of the same publication. A delivery that is queued, or about to start,
+    is now listed with **no `Attempts`** instead of not being listed at all: code that reads
+    `Attempts[len(Attempts)-1]` must check the length first. A response without `pending` (an
+    older server) decodes as `Pending` false.
+
+### Changed
+
+-   **README: webhook order is per publication, never per subscription.** The events published
+    together (a `subscription.created` and its first `subscription.billed`) reach an endpoint in
+    order; nothing waits across publications.
+-   **README: a checkout's `CustomerReference` without a QBitFlow customer means no receipt** and
+    no other customer email. Create the customer with that reference and their email first (even
+    after the checkout was created, before the payment is recorded) to have them.
+
 ## [3.0.0] - 2026-10-28
 
 The Go SDK for **QBitFlow API v2**. A major release: the module path, the client, the routes and
@@ -648,5 +671,6 @@ Major release aligning the SDK with the current QBitFlow API. The API base URL i
 -   Easy integration
 -   Production-ready error handling
 
+[3.1.0]: https://github.com/QBitFlow/qbitflow-go-sdk/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/QBitFlow/qbitflow-go-sdk/releases/tag/v3.0.0
 [2.1.0]: https://github.com/QBitFlow/qbitflow-go-sdk/releases/tag/v2.1.0
