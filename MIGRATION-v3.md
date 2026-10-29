@@ -554,8 +554,9 @@ is.
 | `Subscription.Stopped == true` | `SubscriptionStatusStopped` (`stopped`): cancelled when the paid period ends |
 | none | `SubscriptionStatusPaused` (`paused`): paused by the customer |
 
-**Grant access while `now` is before `CurrentPeriodEnd`**, whatever the status, or call
-`sub.HasAccess(time.Time{})`. A check like `status == active` cuts off customers who have paid
+**Grant access while `now` is before `AccessUntil`**, whatever the status, or call
+`sub.HasAccess(time.Time{})` (from 3.1.0; `AccessUntil` is `CurrentPeriodEnd`, plus an hour for an
+`active` subscription while its renewal is billed). A check like `status == active` cuts off customers who have paid
 (`stopped`, `paused`) and keeps serving `pastDue` ones.
 
 **Checkout statuses.** 2.x's seven `TransactionStatusValue`s become four
@@ -818,7 +819,7 @@ organization key acting for the member with `OnBehalfOf` may always send them.
 - [ ] Amounts and fee rates are handled as decimal strings, never floats.
 - [ ] Checkouts use `CheckoutSessions.CreatePayment` / `CreateSubscription`, and status checks
       use the four checkout statuses.
-- [ ] Access checks use `CurrentPeriodEnd` (or `HasAccess`), not `status == active`.
+- [ ] Access checks use `AccessUntil` (or `HasAccess`), not `status == active`.
 - [ ] Users and claims code is replaced by invitations, members and held funds.
 - [ ] Errors are matched with `errors.As`; your own retry loops around reads and creates are
       removed (or `WithMaxRetries(0)` is set).

@@ -75,7 +75,8 @@ func invite(ctx context.Context, client *qbitflow.Client) {
 	if err != nil {
 		log.Fatal(err) // 409 already_joined for a member
 	}
-	// The link is also emailed. The seller exists once they accepted: wait for member.joined.
+	// QBitFlow also emails the seller a link of their own. The seller exists once they
+	// accepted: wait for member.joined.
 	fmt.Println("invitation", created.UUID, "link:", created.Link)
 	// docs:end members-invite
 
@@ -204,13 +205,16 @@ func manage(ctx context.Context, client *qbitflow.Client, memberUUID string) {
 
 	if os.Getenv("TRUST") == "1" {
 		// docs:start members-trust
-		// Their new payments go to their own wallets from now on. What is held stays held until
-		// you release it in the dashboard (heldFunds.released tells you).
+		// Their new payments go to their own wallets from now on (one-way). What is held stays
+		// held until you release it in the dashboard (heldFunds.released tells you).
 		member, err := client.Members.Trust(ctx, memberUUID)
-		if err != nil {
+		var conflict *qbitflow.ConflictError
+		switch {
+		case errors.As(err, &conflict) && conflict.Code == "member_has_no_wallet":
+			fmt.Println("not trusted: their own wallets accept none of your currencies yet")
+		case err != nil:
 			log.Fatal(err)
-		}
-		if member.TrustedAt != nil {
+		case member.TrustedAt != nil:
 			fmt.Println("trusted since", member.TrustedAt.Format(time.RFC3339))
 		}
 		// docs:end members-trust

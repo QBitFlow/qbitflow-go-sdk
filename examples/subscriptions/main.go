@@ -131,13 +131,14 @@ func openCheckout(ctx context.Context, client *qbitflow.Client) {
 // checkAccess tells whether the subscriber has access now.
 func checkAccess(ctx context.Context, client *qbitflow.Client, subscriptionUUID string) {
 	// docs:start has-access
-	// Access lasts until the end of the period paid for, whatever the status.
+	// Access lasts while now < AccessUntil, whatever the status: the end of the period paid
+	// for, plus an hour for an active subscription while its renewal is billed.
 	sub, err := client.Subscriptions.Get(ctx, subscriptionUUID, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if sub.HasAccess(time.Now()) { // CurrentPeriodEnd set and now before it
-		fmt.Println("access granted until", sub.CurrentPeriodEnd.Format(time.RFC3339))
+	if sub.HasAccess(time.Now()) { // now before AccessUntil
+		fmt.Println("access granted until", sub.AccessUntil.Format(time.RFC3339))
 	} else {
 		fmt.Println("no access")
 	}

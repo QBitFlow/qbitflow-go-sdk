@@ -229,8 +229,9 @@ type Invitation struct {
 type CreatedInvitation struct {
 	Invitation
 
-	// Link is the link to accept it, also emailed to the person unless SendEmail was false: share
-	// it in your own onboarding if you prefer.
+	// Link is a link to accept it, to share in your own onboarding if you prefer (with SendEmail
+	// false, the only one). Signing up through it emails the person a confirmation first. The
+	// link QBitFlow emails has its own token, never returned: it differs from this one.
 	Link string `json:"link"`
 }
 
@@ -249,9 +250,10 @@ type CreateInvitationParams struct {
 	// RedirectURL is where the person goes once they accepted (with ?invitationUuid=<uuid>): a
 	// convenience, confirm with the member.joined event.
 	RedirectURL string `json:"redirectUrl,omitempty"`
-	// SendEmail is whether QBitFlow emails the link to the person (nil = true). new(false) sends
-	// no invitation email: share the returned Link yourself. Signing up through the link still
-	// emails the person a confirmation.
+	// SendEmail is whether QBitFlow emails the person a link of their own (nil = true; signing up
+	// through it needs no confirmation: it proves the inbox). new(false) sends no invitation
+	// email: share the returned Link yourself (signing up through it emails the person a
+	// confirmation first).
 	SendEmail *bool `json:"sendEmail,omitempty"`
 }
 

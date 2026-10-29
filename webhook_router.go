@@ -138,7 +138,7 @@ func (r *WebhookRouter) OnPaymentCompleted(fn func(ctx context.Context, data *Pa
 }
 
 // OnSubscriptionCreated handles subscription.created (status active, or trial): grant access
-// until CurrentPeriodEnd.
+// until AccessUntil (Subscription.HasAccess).
 func (r *WebhookRouter) OnSubscriptionCreated(fn func(ctx context.Context, data *Subscription, e *Event) error) *WebhookRouter {
 	return onType(r, EventTypeSubscriptionCreated, (*Event).SubscriptionCreated, fn)
 }

@@ -465,7 +465,7 @@ func TestModelOptionalFields(t *testing.T) {
 	sub, err := decodeJSON[Subscription]([]byte(`{"uuid":"sub@1","to":"0xt","status":"trial","priceUsd":"9.99","fees":[],"metadata":{},` +
 		`"currency":` + fxCurrency + `,"frequency":{"value":1,"unit":"months"},"currentPeriodEnd":"2026-10-15T12:00:00Z"}`))
 	if err != nil || sub.From != "" || sub.ProductUUID != "" || sub.SubscriptionHash != "" || sub.Allowance != nil || sub.LastBilledAt != nil ||
-		sub.NextBillingAt != nil || sub.CancellableAt != nil || sub.Dunning != nil || sub.ActionRequired != "" || sub.CurrentPeriodEnd == nil {
+		sub.NextBillingAt != nil || sub.CancellableAt != nil || sub.Dunning != nil || sub.ActionRequired != "" || sub.CurrentPeriodEnd == nil || sub.AccessUntil != nil {
 		t.Errorf("trial %+v %v", sub, err)
 	}
 	pay, err := decodeJSON[Payment]([]byte(`{"uuid":"pay@1","amount":"10","priceUsd":"10","fees":[],"metadata":{},"settlement":{"feePercent":"0.99"}}`))

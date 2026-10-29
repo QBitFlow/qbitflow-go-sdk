@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// Subscription is a subscription (sub@…). Grant access while now < CurrentPeriodEnd, whatever
-// the status (HasAccess): the status says why, ActionRequired what its customer must do.
+// Subscription is a subscription (sub@…). Grant access while now < AccessUntil, whatever the
+// status (HasAccess): the status says why, ActionRequired what its customer must do.
 type Subscription struct {
 	// UUID is the subscription's id (sub@…), its checkout session's for life.
 	UUID string `json:"uuid"`
@@ -38,11 +38,18 @@ type Subscription struct {
 	// ActionRequired is what its customer must do (topUpAllowance, raiseMaximum, confirmTrial);
 	// "" (absent) for nothing. Every change sends subscription.actionRequiredChanged.
 	ActionRequired ActionRequired `json:"actionRequired,omitempty"`
-	// CurrentPeriodEnd is the paid-through date: grant access while now < CurrentPeriodEnd,
-	// whatever the status. A trial: its end; active, paused, stopped: the end of the period paid
-	// for; pastDue: the start of the unpaid period (past); cancelled: when it was cancelled, or
-	// the end of its last paid period if that came first. nil when absent.
+	// CurrentPeriodEnd is the paid-through date, to display ("paid through"). A trial: its end;
+	// active, paused, stopped: the end of the period paid for; pastDue: the start of the unpaid
+	// period (past); cancelled: when it was cancelled, or the end of its last paid period if that
+	// came first. For access, read AccessUntil: an active subscription is renewed a few minutes
+	// after this date. nil when absent.
 	CurrentPeriodEnd *time.Time `json:"currentPeriodEnd,omitempty"`
+	// AccessUntil is when access ends: grant it while now < AccessUntil, whatever the status
+	// (HasAccess). An active subscription: CurrentPeriodEnd plus 1 hour, since its renewal is
+	// billed within minutes of its due date (a subscriber whose bill is on its way keeps access;
+	// a failed bill makes it pastDue). Every other status: CurrentPeriodEnd. nil when absent
+	// (a subscription stored before the API sent it: HasAccess then reads CurrentPeriodEnd).
+	AccessUntil *time.Time `json:"accessUntil,omitempty"`
 	// PriceUSD is the price per period the customer subscribed at, in USD (a decimal string,
 	// "9.99"), locked at signup (a free trial's too); never "0". Every bill charges it plus Fees,
 	// converted to the token at the bill's price.
@@ -107,17 +114,26 @@ type Allowance struct {
 	MaxPerPeriodMinUnits string `json:"maxPerPeriodMinUnits,omitempty"`
 }
 
-// HasAccess reports whether the subscription grants access at at: CurrentPeriodEnd is set and
-// at is before it, whatever the status (a cancelled subscription keeps access to the end of the
-// period paid for). The zero time means now; a nil subscription has no access.
+// HasAccess reports whether the subscription grants access at at: at is before AccessUntil,
+// whatever the status (a cancelled subscription keeps access to the end of the period paid
+// for; an active one an hour past CurrentPeriodEnd, while its renewal is billed). Without
+// AccessUntil (a subscription stored before the API sent it), it reads CurrentPeriodEnd. False
+// when neither is set. The zero time means now; a nil subscription has no access.
 func (s *Subscription) HasAccess(at time.Time) bool {
-	if s == nil || s.CurrentPeriodEnd == nil {
+	if s == nil {
+		return false
+	}
+	until := s.AccessUntil
+	if until == nil {
+		until = s.CurrentPeriodEnd
+	}
+	if until == nil {
 		return false
 	}
 	if at.IsZero() {
 		at = time.Now()
 	}
-	return at.Before(*s.CurrentPeriodEnd)
+	return at.Before(*until)
 }
 
 // DunningStatus is a past-due subscription's retries.

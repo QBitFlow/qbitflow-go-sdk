@@ -208,6 +208,54 @@ func TestSubscriptionHasAccess(t *testing.T) {
 	}
 }
 
+// TestSubscriptionHasAccessUntil: AccessUntil decides when set; CurrentPeriodEnd is the fallback
+// for a subscription stored before the API sent it.
+func TestSubscriptionHasAccessUntil(t *testing.T) {
+	end := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	until := end.Add(time.Hour)
+	// An active subscription between CurrentPeriodEnd and AccessUntil: its renewal is on its way.
+	active := &Subscription{Status: SubscriptionStatusActive, CurrentPeriodEnd: &end, AccessUntil: &until}
+	cases := []struct {
+		at   time.Time
+		want bool
+	}{
+		{end.Add(-time.Nanosecond), true},
+		{end, true},
+		{end.Add(30 * time.Minute), true},
+		{until.Add(-time.Nanosecond), true},
+		{until, false}, // equal: no access
+		{until.Add(time.Nanosecond), false},
+	}
+	for _, tc := range cases {
+		if got := active.HasAccess(tc.at); got != tc.want {
+			t.Errorf("active HasAccess(%v) = %v", tc.at, got)
+		}
+	}
+	// AccessUntil is read even when it comes before CurrentPeriodEnd: it decides, not the later one.
+	early := end.Add(-time.Hour)
+	if (&Subscription{CurrentPeriodEnd: &end, AccessUntil: &early}).HasAccess(end.Add(-30 * time.Minute)) {
+		t.Error("AccessUntil not read first")
+	}
+	// Only AccessUntil set.
+	if !(&Subscription{AccessUntil: &until}).HasAccess(end) {
+		t.Error("AccessUntil alone")
+	}
+	// Absent AccessUntil (stored before it existed): CurrentPeriodEnd decides.
+	stored := &Subscription{Status: SubscriptionStatusActive, CurrentPeriodEnd: &end}
+	if !stored.HasAccess(end.Add(-time.Nanosecond)) || stored.HasAccess(end) || stored.HasAccess(end.Add(30*time.Minute)) {
+		t.Error("CurrentPeriodEnd fallback")
+	}
+	// Decoded: accessUntil absent or present.
+	old, err := decodeJSON[Subscription]([]byte(`{"status":"active","currentPeriodEnd":"2026-11-01T12:00:00Z"}`))
+	if err != nil || old.AccessUntil != nil || !old.HasAccess(end.Add(-time.Minute)) || old.HasAccess(end.Add(time.Minute)) {
+		t.Errorf("decoded without accessUntil %+v %v", old, err)
+	}
+	cur, err := decodeJSON[Subscription]([]byte(`{"status":"active","currentPeriodEnd":"2026-11-01T12:00:00Z","accessUntil":"2026-11-01T13:00:00Z"}`))
+	if err != nil || cur.AccessUntil == nil || !cur.AccessUntil.Equal(until) || !cur.HasAccess(end.Add(time.Minute)) {
+		t.Errorf("decoded with accessUntil %+v %v", cur, err)
+	}
+}
+
 func TestFormatAmount(t *testing.T) {
 	ok := []struct {
 		minUnits string

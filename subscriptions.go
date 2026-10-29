@@ -11,7 +11,7 @@ import (
 // is no subscription. Filters: Status, Reference, customer, product, creation window, and
 // IncludeMembers or UserUUID (organization key). params may be nil.
 //
-// Grant access while now < CurrentPeriodEnd, whatever the status (Subscription.HasAccess).
+// Grant access while now < AccessUntil, whatever the status (Subscription.HasAccess).
 func (s *SubscriptionsService) List(ctx context.Context, params *SubscriptionListParams, opts ...RequestOption) (*Page[Subscription], error) {
 	if err := params.Validate(); err != nil {
 		return nil, err
