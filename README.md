@@ -910,14 +910,16 @@ if res.Pending {
 <!-- /docs:snippet -->
 
 `Cancel` answers 200 when done and 202 (`Pending`) while confirming on-chain. It is never retried
-automatically. A trial is cancelled immediately only (`Immediate` false: `400`).
+automatically. A trial is cancelled immediately only (`Immediate` false: `400`). A subscription
+cancelled already is a `*ConflictError` (`409 subscription_already_stopped_or_inactive`), not a
+`*NotFoundError`: a 404 only means it isn't in your space (or doesn't exist).
 
 ### Test billing
 
 In test mode a subscription is billed only when you ask, with live's statuses and webhooks.
 `TestBill` answers once the attempt settled: a `TestBill` with the bill's `sub-hist@…` id, its
 `Stage` and, once done, its `Outcome` (a live subscription: `400 test_mode_only`; a bill not due:
-`409 payment_not_due`):
+`409 payment_not_due`; a cancelled subscription: `409 subscription_already_stopped_or_inactive`):
 
 <!-- docs:snippet subscriptions-test-bill -->
 ```go
@@ -1242,7 +1244,9 @@ fmt.Println("endpoint", created.UUID, "secret", created.Secret)
 organization endpoint also receives its members' events unless created with
 `IncludeMembers: new(false)`. `Endpoints.List` / `Iterate` (paginated), `Get`, `Update` (PATCH:
 `Enabled: new(false)` pauses it, `new(true)` enables it again, `Description: new("")` clears it,
-`Events: []qbitflow.EventType{}` receives every type) and `Delete` (`204`) manage them. An
+`Events: []qbitflow.EventType{}` receives every type) and `Delete` (`204`) manage them. `Delete`
+also deletes the endpoint's delivery history: `Events.Get` no longer lists its deliveries. To keep
+it, disable the endpoint instead. An
 endpoint's secret is shown and rotated in the dashboard only. A replay of the create's
 `Idempotency-Key` within 24 hours returns the same endpoint and secret.
 
@@ -1430,8 +1434,10 @@ it is retried after a failed attempt, `WaitingFor` (an `evt_…`) while it is qu
 event of the same publication, and neither while its delivery is about to start (within a minute).
 **A queued or starting delivery has no `Attempts` yet**: check the length before reading the last
 one. Once `Pending` is false nothing more happens on its own, and `Delivered` false means it was
-abandoned after its retries (3 days in live mode, 3 hours in test mode) or the endpoint was disabled
-or deleted. If QBitFlow can't read a delivery's progress at that moment, `Pending` comes from the
+abandoned after its retries (3 days in live mode, 3 hours in test mode) or the endpoint was
+disabled. **A deleted endpoint's deliveries aren't listed at all**: they are deleted with it, the
+successful ones included. To keep an endpoint's history, disable it (`Enabled: new(false)`) rather
+than delete it. If QBitFlow can't read a delivery's progress at that moment, `Pending` comes from the
 attempts: true while the retry schedule still attempts the event again (a delivery being retried
 never reads as abandoned), without `NextAttemptAt`; a delivery queued with no attempt yet isn't
 listed until its progress can be read: read the event again a moment later.
@@ -1701,7 +1707,7 @@ fmt.Println(client != nil)
 
 A bad option makes `NewClient` return a `*ValidationError`. A client's configuration never changes
 after `NewClient`; `client.OnBehalfOf` derives clients that share it. Every request sends
-`User-Agent: qbitflow-go/3.1.0` (`qbitflow.Version`).
+`User-Agent: qbitflow-go/3.1.1` (`qbitflow.Version`).
 
 ## Migrating from 2.x
 

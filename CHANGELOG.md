@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.1] - 2026-10-30
+
+A cancelled subscription's `Cancel` and `TestBill` now fail with a conflict, not a not-found, and
+deleting a webhook endpoint deletes its delivery history. No signature changes: the SDK maps errors
+by HTTP status, so these are the API's answers; the SDK's documentation and tests follow them.
+
+### Changed
+
+-   **⚠️ `Subscriptions.Cancel` and `Subscriptions.TestBill` on a cancelled subscription return a
+    `*ConflictError`** (`409 subscription_already_stopped_or_inactive`), where the API answered
+    `404 not_found` (a `*NotFoundError`). `Get` returns a cancelled subscription (`Status`
+    `cancelled`), so the actions now say it is cancelled already instead of saying it doesn't
+    exist. Another space's subscription (another organization's, or the other mode's) is still a
+    `*NotFoundError`, whatever its status. **Migration:** code that treated a `*NotFoundError`
+    from `Cancel` as "already cancelled" checks for a `*ConflictError` with `Code ==
+    "subscription_already_stopped_or_inactive"` (or reads the subscription first); a 404 now only
+    means it isn't yours or doesn't exist. This is the API's behavior, whatever the SDK version.
+-   **Docs: deleting a webhook endpoint deletes its delivery history.** `Webhooks.Endpoints.Delete`
+    removes its deliveries from the event log, successful ones included: `Webhooks.Events.Get` no
+    longer lists them. `EndpointDelivery.Pending` and the README said a deleted endpoint's
+    deliveries stayed listed as not delivered. To keep an endpoint's history, disable it
+    (`Update` with `Enabled: new(false)`) rather than delete it.
+
 ## [3.1.0] - 2026-10-29
 
 Subscriptions tell when access ends (`AccessUntil`), and the event log which deliveries are still

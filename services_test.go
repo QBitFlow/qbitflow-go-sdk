@@ -939,10 +939,37 @@ func TestServiceErrorsTyped(t *testing.T) {
 		t.Errorf("TestBill on a live subscription: %v", err)
 	}
 
+	// A cancelled subscription: cancel and test-bill answer 409, not 404 (another space's is 404).
+	ts5 := newTestServer(t, staticReply(409, `{"error":"subscription already stopped or inactive",`+
+		`"code":"subscription_already_stopped_or_inactive","requestId":"r-5"}`))
+	c5, _ := newTestClient(t, ts5)
+	cancelled := map[string]func() error{
+		"Cancel": func() error { _, err := c5.Subscriptions.Cancel(ctx, subID, nil); return err },
+		"Cancel (Immediate false)": func() error {
+			_, err := c5.Subscriptions.Cancel(ctx, subID, &CancelSubscriptionParams{Immediate: new(false)})
+			return err
+		},
+		"TestBill": func() error { _, err := c5.Subscriptions.TestBill(ctx, subID); return err },
+	}
+	for name, call := range cancelled {
+		err := call()
+		var sce *ConflictError
+		if !errors.As(err, &sce) || sce.StatusCode != 409 || sce.Code != "subscription_already_stopped_or_inactive" || sce.RequestID != "r-5" {
+			t.Errorf("%s on a cancelled subscription: %v", name, err)
+		}
+		if errors.As(err, new(*NotFoundError)) {
+			t.Errorf("%s on a cancelled subscription is a *NotFoundError", name)
+		}
+	}
+
+	// Another space's subscription (or none) is still a 404.
 	ts3 := newTestServer(t, staticReply(404, `{"error":"not found","code":"not_found"}`))
 	c3, _ := newTestClient(t, ts3)
 	if _, err := c3.Subscriptions.Cancel(ctx, subID, nil); !errors.As(err, new(*NotFoundError)) {
 		t.Errorf("Cancel: %v", err)
+	}
+	if _, err := c3.Subscriptions.TestBill(ctx, subID); !errors.As(err, new(*NotFoundError)) {
+		t.Errorf("TestBill: %v", err)
 	}
 	if err := c3.Products.Delete(ctx, uuidA); !errors.As(err, new(*NotFoundError)) {
 		t.Errorf("Delete: %v", err)

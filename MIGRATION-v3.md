@@ -412,7 +412,7 @@ may be `nil` when all its fields are optional.
 | `Subscriptions.GetSubscription(uuid)` | `Subscriptions.Get(uuid, *ReadParams)` | returns cancelled subscriptions too |
 | `Subscriptions.GetSubscriptionByReference(ref)` | `Subscriptions.GetByReference(ref)` | no match is a `*NotFoundError` |
 | `Subscriptions.GetPaymentHistory(uuid)` | `Subscriptions.ListBills(uuid, *BillListParams)`, `Subscriptions.IterateBills` | paginated; `SubscriptionHistory` → `Bill` |
-| `Subscriptions.ForceCancel(uuid)` | `Subscriptions.Cancel(uuid, *CancelSubscriptionParams)` | immediate by default; `Immediate: new(false)` cancels at the end of the paid period; returns `*SubscriptionCancellation{Subscription, Pending}`; never retried |
+| `Subscriptions.ForceCancel(uuid)` | `Subscriptions.Cancel(uuid, *CancelSubscriptionParams)` | immediate by default; `Immediate: new(false)` cancels at the end of the paid period; returns `*SubscriptionCancellation{Subscription, Pending}`; never retried; one cancelled already is a `*ConflictError` (`409 subscription_already_stopped_or_inactive`), a 404 only another space's |
 | `Subscriptions.ExecuteTestBillingCycle(uuid)` | `Subscriptions.TestBill(uuid)` | test mode only; returns a `*TestBill` (`BillUUID`, `Stage`, `Outcome`, …); `409 payment_not_due` before `NextBillingAt`, `400 test_mode_only` on a live subscription |
 | none | `Subscriptions.List`, `Subscriptions.Iterate`, `Subscriptions.Update` (metadata), `Subscriptions.GetBill` | new |
 | `PayAsYouGo.*` (`GetSession`, `GetSubscription`, `GetSubscriptionByReference`, `GetPaymentHistory`, `ForceCancel`, `ExecuteTestBillingCycle`) | removed | API v2 has no pay-as-you-go subscriptions |

@@ -111,10 +111,10 @@ func (s *SubscriptionsService) GetBill(ctx context.Context, billUUID string, par
 // confirming, the status is not updated yet, and subscription.statusChanged tells the end (the
 // cancellation goes on whatever happens).
 //
-// Errors: 404 for a cancelled or another space's subscription; 409
-// subscription_already_stopped_or_inactive (Immediate false on a stopped one); 400
-// validation_failed on immediate (Immediate false on a trial, which has no paid period to
-// finish); 409 tx_already_sent while a cancellation runs.
+// Errors: a *ConflictError 409 subscription_already_stopped_or_inactive for a cancelled one
+// (nothing left to cancel), and for a stopped one with Immediate false; a *NotFoundError 404 only
+// for another space's subscription (or none); 400 validation_failed on immediate (Immediate false
+// on a trial, which has no paid period to finish); 409 tx_already_sent while a cancellation runs.
 func (s *SubscriptionsService) Cancel(ctx context.Context, uuid string, params *CancelSubscriptionParams, opts ...RequestOption) (*SubscriptionCancellation, error) {
 	if err := checkPathTxID("uuid", uuid); err != nil {
 		return nil, err
@@ -134,7 +134,9 @@ func (s *SubscriptionsService) Cancel(ctx context.Context, uuid string, params *
 // TestBill bills a test subscription now (POST /subscriptions/:uuid/test-bill) and returns where
 // the test bill stands once its attempt settled (done, waiting after a failure, or still running
 // after 2 minutes). Its events are a live bill's. Test mode only: a live subscription is a
-// *BadRequestError (400 test_mode_only); a bill not due yet is a 409 payment_not_due. Not
+// *BadRequestError (400 test_mode_only); a bill not due yet is a *ConflictError 409
+// payment_not_due, a cancelled subscription a *ConflictError 409
+// subscription_already_stopped_or_inactive (nothing left to bill); another space's is a 404. Not
 // retried.
 func (s *SubscriptionsService) TestBill(ctx context.Context, uuid string, opts ...RequestOption) (*TestBill, error) {
 	if err := checkPathTxID("uuid", uuid); err != nil {

@@ -58,7 +58,8 @@ type EventDetail struct {
 // retried after a failed attempt, WaitingFor when it is queued behind an earlier event of the
 // same publication, and neither when its delivery is about to start (the last two have no
 // Attempts yet). Once Pending is false nothing more happens on its own, and Delivered tells how
-// it ended (false: abandoned after its retries, or the endpoint was disabled or deleted).
+// it ended (false: abandoned after its retries, or the endpoint was disabled). A deleted
+// endpoint's deliveries are deleted with it and no longer listed; disable an endpoint to keep them.
 type EndpointDelivery struct {
 	// EndpointUUID is the endpoint.
 	EndpointUUID string `json:"endpointUuid"`
@@ -71,7 +72,8 @@ type EndpointDelivery struct {
 	Attempts []DeliveryAttempt `json:"attempts"`
 	// Pending is true while QBitFlow still attempts the event on its own. False once delivered,
 	// abandoned after its retries (3 days in live mode, 3 hours in test mode), or when the
-	// endpoint was disabled or deleted. When QBitFlow can't read a delivery's progress, Pending
+	// endpoint was disabled (a deleted endpoint's deliveries are deleted with it: no longer
+	// listed). When QBitFlow can't read a delivery's progress, Pending
 	// comes from the attempts: true while the retry schedule still attempts the event again (a
 	// delivery being retried never reads as abandoned), without NextAttemptAt; a delivery queued
 	// with no attempt yet isn't listed until its progress can be read: read the event again a

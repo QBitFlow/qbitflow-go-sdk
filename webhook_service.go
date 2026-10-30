@@ -98,7 +98,9 @@ func (s *WebhookEndpointsService) Update(ctx context.Context, uuid string, param
 }
 
 // Delete deletes a webhook endpoint (DELETE /webhooks/endpoints/:uuid, 204): it receives
-// nothing more. Not retried.
+// nothing more, pending retries included. Its delivery history is deleted with it: Events.Get
+// no longer lists its deliveries, successful ones included. To keep that history, disable the
+// endpoint instead (Update with Enabled false). Not retried.
 func (s *WebhookEndpointsService) Delete(ctx context.Context, uuid string, opts ...RequestOption) error {
 	if err := checkPathUUID("uuid", uuid); err != nil {
 		return err
